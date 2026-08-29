@@ -44,7 +44,9 @@ packages/credentials/   1Password and prompt sources, plus the verification ever
 packages/proton-api/    SRP login, HTTP client, response validation, read endpoints, session store
 packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
 packages/grouping/      Subject templates, grouping, and the triage ranking
+packages/demo/          A synthetic mailbox, so the interface can be built without an account
 apps/spike/             M0 read-only probe against a real account
+apps/web/               The dashboard. Currently runs on demo data only.
 ```
 
 The rule engine has three parts that must agree: the **compiler** (vendored, produces what Proton
@@ -59,7 +61,15 @@ pnpm install
 pnpm check-types        # builds vendor declarations, then tsc over everything
 pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
+pnpm dev                # the dashboard on demo data, http://localhost:5173
 ```
+
+The web app is wired to the real engine, not to mock screens: what it shows is genuinely what the
+matcher, the grouping and the conflict analysis produce from `@pms/demo`. A preview that looks wrong
+on screen is a bug in the logic, not in a fixture someone typed to look convincing. Its demo
+mailbox is deliberately awkward — a sender whose mail splits in two, a rule that never fires, one
+that is always overridden, folders shadowing Proton's own — because a tidy demo makes every screen
+look good and teaches nothing.
 
 `pnpm spike` must be run by the account owner. **Never ask for credentials and never accept a
 token** — not to test something, not to save a round trip.

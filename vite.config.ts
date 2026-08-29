@@ -31,6 +31,9 @@ const openpgpNodeEntry = join(
 );
 
 export default defineConfig({
+    // Lets .tsx compile anywhere in the workspace without the React plugin, which the web app's
+    // own config carries. Needed so the page render tests can run in the Node environment.
+    esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
     resolve: {
         alias: [{ find: /^openpgp\/lightweight$/, replacement: openpgpNodeEntry }],
     },
@@ -38,7 +41,7 @@ export default defineConfig({
         noExternal: protonSources,
     },
     test: {
-        include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
+        include: ['packages/*/test/**/*.test.{ts,tsx}', 'apps/*/test/**/*.test.{ts,tsx}'],
         environment: 'node',
         server: {
             deps: { inline: protonSources },
