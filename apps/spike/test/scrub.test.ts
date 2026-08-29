@@ -89,3 +89,49 @@ describe('fixture scrubbing', () => {
         expect(result.Whatever).toMatch(/^s:[0-9a-f]{8}$/);
     });
 });
+
+describe("keeping Proton's own machinery legible", () => {
+    /**
+     * Recording a filter is only useful if it can be compiled back and compared. Hashing Proton's
+     * generated strings made that impossible — the first real filter recorded came back unusable —
+     * so these are kept verbatim. Each pattern is narrow enough that nothing a person typed can
+     * pass through it.
+     */
+    it('keeps the sieve environment variable and its wildcard key', () => {
+        const result = scrub({
+            Name: 'vnd.proton.spam-threshold',
+            Keys: ['*'],
+            Value: { Value: '${1}', Type: 'VariableString' },
+        }) as Record<string, any>;
+
+        expect(result['Name']).toBe('vnd.proton.spam-threshold');
+        expect(result['Keys']).toEqual(['*']);
+        expect(result['Value'].Value).toBe('${1}');
+    });
+
+    it("keeps Proton's fixed preamble comment", () => {
+        const result = scrub({ Text: '# Generated: Do not run this script on spam messages' }) as {
+            Text: string;
+        };
+        expect(result.Text).toBe('# Generated: Do not run this script on spam messages');
+    });
+
+    it('keeps the generated rule comment, which differs per filter', () => {
+        const comment = '/**\r\n * @type and\r\n * @comparator contains\r\n */';
+        expect((scrub({ Text: comment }) as { Text: string }).Text).toBe(comment);
+    });
+
+    it('still hashes a comment a person wrote themselves', () => {
+        // The prefix is not the licence — the shape is. Anything carrying real content is scrubbed.
+        expect((scrub({ Text: '# Meine Notiz zu kevin@example.com' }) as { Text: string }).Text).toMatch(
+            /^s:/
+        );
+        expect(
+            (scrub({ Text: '/**\r\n * @type and\r\n * kevin@example.com\r\n */' }) as { Text: string }).Text
+        ).toMatch(/^s:/);
+    });
+
+    it('still hashes a filter name, even one that looks technical', () => {
+        expect((scrub({ Name: 'proton-rechnungen' }) as { Name: string }).Name).toMatch(/^s:/);
+    });
+});

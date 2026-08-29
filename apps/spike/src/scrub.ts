@@ -62,11 +62,61 @@ function looksStructural(value: string): boolean {
     return value.length <= 48 && !value.includes('@') && /^[A-Za-z][A-Za-z0-9._;:-]*$/.test(value);
 }
 
+/**
+ * Strings that are unmistakably Proton's own machinery rather than anything a person wrote.
+ *
+ * Needed because the user-content denylist is keyed on field *names*, and Proton reuses those names
+ * for its own generated content: the spam-threshold preamble stores `vnd.proton.spam-threshold`
+ * under `Name`, `${1}` under `Value`, `*` under `Keys`, and its generated comments under `Text`.
+ * Hashing those was over-zealous and cost real fidelity — a recorded filter could no longer be
+ * compiled back and compared, which is exactly what a fixture is for.
+ *
+ * Kept deliberately narrow. A value only survives if it looks like Proton internals *and* appears
+ * verbatim in the upstream fixtures, so nothing a user typed can slip through by resembling it.
+ */
+function looksLikeProtonInternal(value: string): boolean {
+    return (
+        // Proton's own namespace for sieve environment variables.
+        value.includes('vnd.proton') ||
+        // A bare sieve variable reference, nothing else.
+        /^\$\{\d+\}$/.test(value) ||
+        // Only wildcards, so there is nothing in it to leak.
+        /^[*?]+$/.test(value) ||
+        // Proton's fixed preamble comment. Letters, spaces and periods only, so nothing
+        // structured — no address, no number, no path — can hide behind the prefix.
+        /^# Generated: [A-Za-z. ]+$/.test(value) ||
+        isGeneratedRuleComment(value)
+    );
+}
+
+/**
+ * Proton's generated comment describing a rule's operator and comparators, e.g.
+ *
+ *     /** @type and @comparator contains *\/
+ *
+ * It varies per rule, so no vocabulary can list it, and it is the last thing standing between a
+ * recorded filter and a byte-exact recompile. Matched by strict shape rather than by prefix: only
+ * `@type` and `@comparator` lines with single bare words are allowed through, so a hand-written
+ * Sieve comment cannot smuggle content past this by starting with a slash and a star.
+ */
+function isGeneratedRuleComment(value: string): boolean {
+    const body = /^\/\*\*([\s\S]*)\*\/$/.exec(value)?.[1];
+    if (body === undefined) {
+        return false;
+    }
+    const lines = body
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\s*\*?\s*/, '').trim())
+        .filter((line) => line !== '');
+
+    return lines.length > 0 && lines.every((line) => /^@(type|comparator) [a-z!]+$/.test(line));
+}
+
 function buildVocabulary(): Set<string> {
     const vocabulary = new Set<string>();
     const harvest = (value: unknown): void => {
         if (typeof value === 'string') {
-            if (looksStructural(value)) {
+            if (!value.includes('@') && (looksStructural(value) || looksLikeProtonInternal(value))) {
                 vocabulary.add(value);
             }
             return;
@@ -105,6 +155,12 @@ export function scrub(value: unknown, parentKey?: string): unknown {
 
     if (typeof value === 'string') {
         if (value === '') {
+            return value;
+        }
+        // Provably structural: safe from the string alone, so no vocabulary lookup is needed.
+        // Necessary because Proton's generated rule comment encodes the rule's own operator and
+        // comparators and therefore differs per filter — no fixed list could ever contain it.
+        if (looksLikeProtonInternal(value)) {
             return value;
         }
         if (parentKey !== undefined && USER_CONTENT_KEYS.has(parentKey)) {

@@ -1,0 +1,73 @@
+import { readFileSync } from 'node:fs';
+
+import { ConditionType } from '@proton/sieve/filterModel';
+import { fromSieveTree } from '@proton/sieve/fromSieveTree';
+import { toSieveTree } from '@proton/sieve/toSieveTree';
+import { describe, expect, it } from 'vitest';
+
+import { REPO_FIXTURE } from './fixture-path.js';
+
+/**
+ * The first test against a real filter rather than a constructed one.
+ *
+ * `fixtures/recorded/filters.json` is a genuine `GET mail/v4/filters` response, captured by hand and
+ * run through the scrubber. Every address, folder name and filter name in it is a pseudonym; the
+ * structure is untouched, which is the part that matters here.
+ *
+ * It answers two questions that constructed fixtures could not, and the answers changed the plan:
+ *
+ *  1. **A filter can arrive with no `Simple` field.** This one did — it was authored as Sieve, so
+ *     Proton returns only `Sieve` and `Tree`. The plan had assumed such filters were opaque to us
+ *     and would have to be shown as "no preview possible". They are not: `Tree` is returned too,
+ *     and it parses.
+ *  2. **Recompiling reproduces Proton's own tree byte for byte.** That is the precondition for ever
+ *     writing such a filter back. Without it, editing a Sieve-authored rule would silently rewrite
+ *     parts of it — the spam preamble, the generated comments — and the only safe option would have
+ *     been read-only.
+ */
+
+const response = JSON.parse(readFileSync(REPO_FIXTURE('filters.json'), 'utf8')) as {
+    data: { Filters: Array<{ Tree: unknown; Version: 1 | 2; Simple?: unknown; Sieve?: string }> };
+};
+
+const filter = response.data.Filters[0];
+
+describe('a real Proton filter', () => {
+    it('arrives without a Simple field, but with a Tree', () => {
+        expect(filter).toBeDefined();
+        expect(filter?.Simple).toBeUndefined();
+        expect(filter?.Sieve).toBeTypeOf('string');
+        expect(Array.isArray(filter?.Tree)).toBe(true);
+    });
+
+    it('parses into the rule model despite having no Simple field', () => {
+        const simple = fromSieveTree(filter?.Tree);
+
+        expect(simple).not.toBeNull();
+        expect(simple.Conditions).toHaveLength(1);
+        expect(simple.Conditions[0]?.Type.value).toBe(ConditionType.SENDER);
+        expect(simple.Conditions[0]?.Values.length).toBeGreaterThan(0);
+        expect(simple.Actions.FileInto).toHaveLength(1);
+    });
+
+    it('recompiles to exactly the tree Proton stored', () => {
+        // The precondition for editing a Sieve-authored filter at all. If this ever fails, writing
+        // such a filter back would quietly change parts of it that nobody asked to change.
+        const recompiled = toSieveTree(fromSieveTree(filter?.Tree), filter?.Version ?? 2);
+        expect(recompiled).toEqual(filter?.Tree);
+    });
+
+    it('carries no address, anywhere', () => {
+        // The fixture is committed to a repository headed for GitHub. This is the check that keeps
+        // it honest as the scrubber changes.
+        const serialised = JSON.stringify(response);
+        expect(serialised).not.toMatch(/[A-Za-z0-9._%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+    });
+
+    it("keeps Proton's own generated strings readable, which is what makes it a useful fixture", () => {
+        const serialised = JSON.stringify(response);
+        expect(serialised).toContain('vnd.proton.spam-threshold');
+        expect(serialised).toContain('# Generated:');
+        expect(serialised).toContain('@comparator');
+    });
+});
