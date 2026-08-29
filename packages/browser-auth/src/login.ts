@@ -146,7 +146,12 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
         if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
             const field = await revealTotpField(page, headless, timeout);
             await fillSelector(page, field, await options.promptTotp(), 'Authentifizierungscode');
-            await click(page, 'submit');
+
+            // Best effort, deliberately. A six-digit field usually submits itself once it is full,
+            // and then there is no button left to press — which is not a failure, it is the form
+            // having already done the thing. Whether the login finished is decided below, by the
+            // session cookie, not by whether a click landed.
+            await clickIfPresent(page, SELECTORS.submit);
         } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0 && headless) {
             // A passkey needs something to touch, and a headless browser offers nothing.
             throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
@@ -465,9 +470,23 @@ async function fillSelector(page: Page, selector: string, value: string, name: s
 async function click(page: Page, name: SelectorName): Promise<void> {
     const selector = SELECTORS[name];
     try {
-        await page.click(selector);
+        // `.first()`: a page may hold several submit buttons, and a bare selector then refuses to
+        // choose rather than pressing the obvious one.
+        await page.locator(selector).first().click();
     } catch (cause) {
         throw uiChanged(name, selector, cause);
+    }
+}
+
+/** Press it if it is there. Returns whether it was. */
+async function clickIfPresent(page: Page, selector: string): Promise<boolean> {
+    try {
+        const control = page.locator(selector).first();
+        await control.click({ timeout: 3_000 });
+        return true;
+    } catch {
+        log.debug({ selector }, 'nothing to click; the form had moved on');
+        return false;
     }
 }
 

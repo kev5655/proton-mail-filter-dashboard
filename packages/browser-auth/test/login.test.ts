@@ -65,6 +65,8 @@ function fakeBrowser(
         hidden?: string[];
         /** Text of a control that reveals them when clicked. */
         revealedBy?: RegExp;
+        /** The submit button disappears once this many clicks have landed. */
+        submitVanishesAfter?: number;
     } = {}
 ): {
     launch: () => Promise<never>;
@@ -93,7 +95,22 @@ function fakeBrowser(
             }
             return {};
         },
-        locator: (_selector: string) => ({ all: async () => [] }),
+        locator: (selector: string) => ({
+            all: async () => [],
+            first: () => ({
+                click: async () => {
+                    const gone =
+                        selector === options.missing ||
+                        (options.submitVanishesAfter !== undefined &&
+                            page.clicked.length >= options.submitVanishesAfter);
+                    if (gone) {
+                        throw new Error('locator resolved to no element');
+                    }
+                    page.clicked.push(selector);
+                    emit();
+                },
+            }),
+        }),
         getByRole: (_role: string, query: { name: RegExp }) => ({
             first: () => ({
                 count: async () => (options.revealedBy?.source === query.name.source ? 1 : 0),
@@ -110,12 +127,6 @@ function fakeBrowser(
                 throw new Error('locator resolved to no element');
             }
             page.filled[selector] = value;
-        },
-        click: async (selector: string) => {
-            if (selector === options.missing) {
-                throw new Error('locator resolved to no element');
-            }
-            emit();
         },
     };
 
@@ -261,6 +272,16 @@ describe('signing in through a browser', () => {
         expect(error.context['tried']).toEqual([...TOTP_SELECTORS]);
         expect(error.context).toHaveProperty('inputs');
         expect(error.context).toHaveProperty('buttons');
+    });
+
+    it('does not fail when the code field submitted itself', async () => {
+        // A six-digit field usually submits on the sixth digit, so by the time the button is
+        // pressed there is no button. That is the form having worked, not a broken page.
+        const { launch } = fakeBrowser({ twoFactor: 1, submitVanishesAfter: 1 });
+
+        await expect(
+            loginWithBrowser({ ...baseOptions, headless: false, launch })
+        ).resolves.toBeDefined();
     });
 
     it('refuses a passkey without a window to confirm it in', async () => {
