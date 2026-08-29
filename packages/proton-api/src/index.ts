@@ -1,4 +1,4 @@
-export { buildAppVersion, buildUserAgent, APP_NAME, type ReleaseChannel } from './appVersion.js';
+export { buildAppVersion, buildUserAgent, APP_NAME, PRODUCT, type ReleaseChannel } from './appVersion.js';
 export { ProtonHttp, PROTON_API_BASE, type ProtonSession, type ProtonHttpOptions } from './http.js';
 export { login, type LoginCredentials, type LoginResult, type TwoFactorPrompt } from './auth.js';
 export {
