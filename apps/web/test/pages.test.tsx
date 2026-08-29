@@ -1,3 +1,4 @@
+import { FilterStatement } from '@proton/sieve/filterModel';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
@@ -5,6 +6,10 @@ import { App } from '../src/App.js';
 import { FoldersPage } from '../src/pages/FoldersPage.js';
 import { RulesPage } from '../src/pages/RulesPage.js';
 import { TriagePage } from '../src/pages/TriagePage.js';
+import { MailList } from '../src/components/MailList.js';
+import { RuleConditions } from '../src/components/RuleConditions.js';
+import { rules } from '../src/data.js';
+import { AppStateProvider } from '../src/state.js';
 
 /**
  * A smoke test for each screen.
@@ -15,8 +20,13 @@ import { TriagePage } from '../src/pages/TriagePage.js';
  * A crash in any of them would otherwise only show up as a blank screen in a browser.
  */
 
+/**
+ * Pages read shared state — which mails are selected, where the user is — so they are rendered
+ * inside the provider, exactly as the app mounts them. Rendering them bare would test a shape the
+ * application never uses.
+ */
 function render(element: React.JSX.Element): string {
-    return renderToStaticMarkup(element);
+    return renderToStaticMarkup(<AppStateProvider>{element}</AppStateProvider>);
 }
 
 function text(html: string): string {
@@ -48,8 +58,68 @@ describe('the rules page', () => {
         expect(text(html)).toContain('Zielordner doppelt');
     });
 
-    it('marks a Sieve-authored rule as such', () => {
-        expect(text(html)).toContain('Sieve');
+    it('distinguishes a script filter from a clickable Proton filter', () => {
+        // The distinction decides what the user can do with the rule: a Proton filter can be edited
+        // in their own interface, a script filter appears there only as code.
+        const body = text(html);
+        expect(body).toContain('Script-Filter');
+        expect(body).toContain('Proton-Filter');
+    });
+});
+
+describe('what a rule actually says', () => {
+    // The rule detail opens on a click, so its parts are rendered directly rather than through the
+    // page. What matters is the layout of a condition, not how it got on screen.
+    const conditions = render(<RuleConditions rule={(rules[0] as (typeof rules)[number]).rule} />);
+
+    it('renders a condition as field, comparison and values rather than one sentence', () => {
+        // A condition with several values reads as one thing in prose and as several things it can
+        // catch when laid out — which is what someone judging the rule needs to see.
+        expect(conditions).toContain('condition-field');
+        expect(conditions).toContain('value-chip');
+        expect(text(conditions)).toContain('Absender');
+    });
+
+    it('always states where the mail ends up', () => {
+        expect(text(conditions)).toContain('verschieben nach');
+    });
+
+    it('warns about a rule with no conditions, which catches everything', () => {
+        const empty = render(
+            <RuleConditions
+                rule={{
+                    Operator: { label: 'all', value: FilterStatement.ALL },
+                    Conditions: [],
+                    Actions: { FileInto: ['Archiv'], Mark: { Read: false, Starred: false } },
+                }}
+            />
+        );
+        expect(text(empty)).toContain('trifft jede Mail');
+    });
+});
+
+describe('every list of mail', () => {
+    const list = render(
+        <MailList
+            messages={[
+                {
+                    ID: 'x',
+                    Subject: 'Testbetreff',
+                    Sender: { Address: 'a@b.example' },
+                    Time: 1_780_000_000,
+                },
+            ]}
+            onOpen={() => undefined}
+        />
+    );
+
+    it('lets a mail be opened', () => {
+        expect(list).toContain('mail-open');
+    });
+
+    it('lets a mail be selected, so a rule can be built from a hand-picked set', () => {
+        expect(list).toContain('mail-check');
+        expect(list).toContain('type="checkbox"');
     });
 });
 
@@ -87,8 +157,10 @@ describe('the folders page', () => {
         expect(text(html)).toContain('Deleted Items');
     });
 
-    it('shows which rules point at a folder, so deleting one is an informed decision', () => {
-        expect(text(html)).toMatch(/\d+ Regel/);
+    it('names the rules that sort into a folder, so deleting one is an informed decision', () => {
+        const body = text(html);
+        expect(body).toContain('Regeln, die hierher sortieren');
+        expect(body).toContain('Bahn-Tickets');
     });
 });
 

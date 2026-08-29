@@ -45,6 +45,8 @@ packages/proton-api/    SRP login, HTTP client, response validation, read endpoi
 packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
 packages/grouping/      Subject templates, grouping, and the triage ranking
 packages/demo/          A synthetic mailbox, so the interface can be built without an account
+packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
+packages/mail-view/     Sanitising a mail body so it is safe to display
 apps/spike/             M0 read-only probe against a real account
 apps/web/               The dashboard. Currently runs on demo data only.
 ```
@@ -137,6 +139,20 @@ secret-bearing field name belongs in `SECRET_KEYS`.
 for the vendoring, so do not weaken them to make a refresh pass. If upstream changes behaviour, that
 is a finding to surface, not a test to adjust. `packages/rules/test/sieve-compiler.test.ts` also
 documents a real lossiness: version 1 filters cannot be read back as `starts`/`ends`.
+
+**Displaying mail.** Bodies are hostile input. `@pms/mail-view` sanitises, the viewer renders into
+an `iframe sandbox=""`, and that frame carries a CSP forbidding every outbound request — three
+layers, each written assuming the other two failed. Remote images stay off until the user turns them
+on for one message: a tracking pixel hands the sender the reader's IP and the time they opened it,
+which is exactly what a Proton account exists to withhold. Do not add a global "always load images"
+setting.
+
+**What the model may decide.** It names and explains. It does not decide what a rule matches. A
+proposal comes back as *criteria*, is validated against the fields Proton can actually filter on,
+compiled by our compiler, and run through the matcher before the user sees anything — so what is
+shown is the real list of affected mail, not the model's claim about it. A wrong folder name costs a
+rename; a wrongly trusted filter costs mail nobody finds again. Generated prose is always labelled
+and always sits below the derived structure, never instead of it.
 
 **Comments.** Say what a thing is and why it is not obvious. Do not narrate change history.
 

@@ -1,3 +1,5 @@
+import { toSieveTree } from '@proton/sieve/toSieveTree';
+
 import { DEMO_FOLDERS, DEMO_RULES, generateMailbox, INBOX, type DemoMessage, type DemoRule } from '@pms/demo';
 import { groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
 import {
@@ -121,4 +123,28 @@ export const shadowFolders = folders.filter((folder) => folder.shadowsSystemFold
 
 export function messageCountIn(folderName: string): number {
     return messages.filter((message) => destinationOf(message) === folderName).length;
+}
+
+/**
+ * The Sieve a rule compiles to.
+ *
+ * Generated from the rule rather than stored, so what is shown is provably the same rule the
+ * structural view above it renders. Storing a separate copy would let the two drift, and the whole
+ * point of showing both is that they agree.
+ */
+export function sieveTextFor(ruleId: string): string {
+    const entry = rules.find((candidate) => candidate.id === ruleId);
+    if (entry === undefined) {
+        return '';
+    }
+    return JSON.stringify(toSieveTree(entry.rule, 2), null, 2);
+}
+
+/** Rules whose destination is this folder, including one nested beneath another. */
+export function rulesTargeting(folderName: string): DemoRule[] {
+    return rules.filter((entry) =>
+        entry.rule.Actions.FileInto.some(
+            (target) => target === folderName || target.endsWith(`/${folderName}`)
+        )
+    );
 }

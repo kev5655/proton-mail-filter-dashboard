@@ -5,6 +5,7 @@ import { explainScore } from '@pms/grouping';
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
 import { inboxMessages, suggestions } from '../data.js';
+import { useAppState } from '../state.js';
 
 /**
  * The screen where inbox clutter turns into rules.
@@ -14,6 +15,7 @@ import { inboxMessages, suggestions } from '../data.js';
  * accepting only stages the change; the diff and the confirmation come after.
  */
 export function TriagePage(): React.JSX.Element {
+    const { setOpen, selectMany } = useAppState();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
 
@@ -101,7 +103,19 @@ export function TriagePage(): React.JSX.Element {
                             </button>
                         </div>
 
-                        {isOpen && <MailList messages={entry.group.samples} />}
+                        {isOpen && (
+                            <>
+                                <MailList messages={entry.group.samples} onOpen={setOpen} />
+                                <button
+                                    type="button"
+                                    className="button button-quiet"
+                                    onClick={() => selectMany(entry.group.samples)}
+                                    style={{ marginTop: 8 }}
+                                >
+                                    Alle auswählen und eigene Regel bauen
+                                </button>
+                            </>
+                        )}
                     </div>
                 );
             })}

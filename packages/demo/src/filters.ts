@@ -46,9 +46,20 @@ export interface DemoRule extends OrderedRule {
 
 export const DEMO_RULES: DemoRule[] = [
     {
+        // First, so the specific rules below override it. A catch-all placed last would make every
+        // other rule ineffective at once, which is true but teaches nothing: the point is to show
+        // one rule quietly doing nothing, not a wall of red.
+        id: 'r-catchall',
+        name: 'Alles Übrige ins Archiv',
+        priority: 1,
+        enabled: true,
+        authoredAs: 'tree',
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['@'], 'Archiv'),
+    },
+    {
         id: 'r-bahn',
         name: 'Bahn-Tickets',
-        priority: 1,
+        priority: 2,
         enabled: true,
         authoredAs: 'tree',
         rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['billing@bahn.example'], 'Kosten Bestellung/Bahn'),
@@ -56,7 +67,7 @@ export const DEMO_RULES: DemoRule[] = [
     {
         id: 'r-lohn',
         name: 'Lohnabrechnungen',
-        priority: 2,
+        priority: 3,
         enabled: true,
         authoredAs: 'sieve',
         rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['lohn@arbeitgeber.example'], 'Lohn'),
@@ -64,25 +75,29 @@ export const DEMO_RULES: DemoRule[] = [
     {
         id: 'r-alt',
         name: 'Alter Arbeitgeber',
-        priority: 3,
+        priority: 4,
         enabled: true,
         authoredAs: 'tree',
         rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['@ehemaliger-arbeitgeber.example'], 'Archiv'),
     },
     {
-        id: 'r-junk',
-        name: 'Werbung wegsortieren',
-        priority: 4,
-        enabled: true,
-        authoredAs: 'tree',
-        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['newsletter@versandhaus.example'], 'Junk'),
-    },
-    {
-        id: 'r-catchall',
-        name: 'Alles Übrige ins Archiv',
+        // The instructive one. It looks correct, it matches plenty, and it never decides anything:
+        // "Werbung wegsortieren" below targets the same sender and runs later, so the newsletters
+        // the user believes are in Newsletter are actually in Junk. Nothing in Proton's own filter
+        // list would reveal this.
+        id: 'r-newsletter',
+        name: 'Newsletter sammeln',
         priority: 5,
         enabled: true,
         authoredAs: 'tree',
-        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['@'], 'Archiv'),
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['newsletter@versandhaus.example'], 'Newsletter'),
+    },
+    {
+        id: 'r-junk',
+        name: 'Werbung wegsortieren',
+        priority: 6,
+        enabled: true,
+        authoredAs: 'tree',
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['newsletter@versandhaus.example'], 'Junk'),
     },
 ];

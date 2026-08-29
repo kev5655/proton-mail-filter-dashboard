@@ -32,7 +32,9 @@ export {
     explain,
     extendRule,
     literalFragment,
+    ruleFromCriteria,
     ruleFromGroup,
+    type ProposedCondition,
     type RuleSuggestion,
     type SuggestionInput,
 } from './suggest.js';

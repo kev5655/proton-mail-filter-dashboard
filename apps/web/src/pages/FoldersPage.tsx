@@ -1,6 +1,7 @@
 import type { DemoFolder } from '@pms/demo';
 
-import { folders, messageCountIn, rules, shadowFolders } from '../data.js';
+import { folders, messageCountIn, rulesTargeting, shadowFolders } from '../data.js';
+import { useAppState } from '../state.js';
 
 /**
  * The folder tree, with the two facts that make deleting one safe to decide: how much mail lands
@@ -8,6 +9,7 @@ import { folders, messageCountIn, rules, shadowFolders } from '../data.js';
  * pointing at nothing, and Proton will not warn about it.
  */
 export function FoldersPage(): React.JSX.Element {
+    const { nav } = useAppState();
     const roots = folders.filter((folder) => folder.ParentID === null);
     const childrenOf = (id: string): DemoFolder[] => folders.filter((folder) => folder.ParentID === id);
 
@@ -33,7 +35,12 @@ export function FoldersPage(): React.JSX.Element {
             <div className="card">
                 <ul className="folder-tree">
                     {roots.map((folder) => (
-                        <FolderNode key={folder.ID} folder={folder} childrenOf={childrenOf} />
+                        <FolderNode
+                            key={folder.ID}
+                            folder={folder}
+                            childrenOf={childrenOf}
+                            highlight={nav.focusFolder}
+                        />
                     ))}
                 </ul>
             </div>
@@ -44,28 +51,25 @@ export function FoldersPage(): React.JSX.Element {
 function FolderNode({
     folder,
     childrenOf,
+    highlight,
 }: {
     folder: DemoFolder;
     childrenOf: (id: string) => DemoFolder[];
+    highlight: string | undefined;
 }): React.JSX.Element {
+    const { goTo } = useAppState();
     const children = childrenOf(folder.ID);
     const count = messageCountIn(folder.Name);
-    const referencing = rules.filter((entry) =>
-        entry.rule.Actions.FileInto.some((target) => target === folder.Name || target.endsWith(`/${folder.Name}`))
-    );
+    const referencing = rulesTargeting(folder.Name);
+    const isHighlighted = highlight === folder.Name || highlight?.endsWith(`/${folder.Name}`) === true;
 
     return (
         <li>
-            <div className="folder-row">
+            <div className={isHighlighted ? 'folder-row highlighted' : 'folder-row'}>
                 <span className="folder-name">{folder.Name}</span>
 
                 {folder.shadowsSystemFolder !== undefined && (
                     <span className="badge badge-warning">doppelt „{folder.shadowsSystemFolder}"</span>
-                )}
-                {referencing.length > 0 && (
-                    <span className="badge badge-accent">
-                        {referencing.length} {referencing.length === 1 ? 'Regel' : 'Regeln'}
-                    </span>
                 )}
                 {count > 0 && <span className="nav-count">{count} Mails</span>}
 
@@ -77,10 +81,36 @@ function FolderNode({
                 </button>
             </div>
 
+            {/*
+             * The rules pointing here, named and clickable. A folder is only safe to delete or
+             * rename once you can see what depends on it — Proton will not tell you, and a rule left
+             * pointing at a folder that no longer exists fails silently.
+             */}
+            {referencing.length > 0 && (
+                <div className="folder-rules">
+                    <span className="faint">Regeln, die hierher sortieren:</span>
+                    {referencing.map((entry) => (
+                        <button
+                            type="button"
+                            key={entry.id}
+                            className="value-chip value-chip-link"
+                            onClick={() => goTo({ page: 'rules', focusRuleId: entry.id })}
+                        >
+                            {entry.name}
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {children.length > 0 && (
                 <ul>
                     {children.map((child) => (
-                        <FolderNode key={child.ID} folder={child} childrenOf={childrenOf} />
+                        <FolderNode
+                            key={child.ID}
+                            folder={child}
+                            childrenOf={childrenOf}
+                            highlight={highlight}
+                        />
                     ))}
                 </ul>
             )}

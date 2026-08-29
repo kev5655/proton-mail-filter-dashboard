@@ -12,7 +12,10 @@
   "dependencies": {
     "@pms/demo": "workspace:*",
     "@pms/grouping": "workspace:*",
+    "@pms/llm": "workspace:*",
+    "@pms/mail-view": "workspace:*",
     "@pms/rules": "workspace:*",
+    "@proton/sieve": "workspace:*",
     "react": "^19.2.0"
   },
   "devDependencies": {

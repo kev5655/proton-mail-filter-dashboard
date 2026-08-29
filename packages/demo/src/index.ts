@@ -1,3 +1,4 @@
+export { bodyFor, BODIES, type DemoBody } from './bodies.js';
 export {
     generateMailbox,
     ARCHIVE,

@@ -1,17 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { analysisFor, matchedBy, rules, shadowFolders } from '../data.js';
+import { createDemoProvider, type SieveExplanation } from '@pms/llm';
+
 import { MailList } from '../components/MailList.js';
+import { RuleConditions } from '../components/RuleConditions.js';
+import { analysisFor, matchedBy, rules, shadowFolders, sieveTextFor } from '../data.js';
+import { useAppState } from '../state.js';
 
 /**
- * Every filter in execution order, and for each one the two things Proton's own list will not tell
- * you: which messages it catches, and whether it decides anything at all.
+ * Every filter in execution order, and for each one the three things Proton's own list withholds:
+ * what the rule actually says, which messages it catches, and whether it decides anything at all.
  *
- * Order is shown as a number rather than left implicit, because with filters it is the order that
- * determines the outcome — a rule can be perfectly written and still never matter.
+ * Order is a number rather than an implication, because with filters the order *is* the outcome.
  */
 export function RulesPage(): React.JSX.Element {
-    const [openId, setOpenId] = useState<string | undefined>(undefined);
+    const { nav, goTo, setOpen } = useAppState();
+    const [openId, setOpenId] = useState<string | undefined>(nav.focusRuleId);
+
+    // Arriving from a folder should land on the rule that folder pointed at, opened.
+    useEffect(() => {
+        if (nav.focusRuleId !== undefined) {
+            setOpenId(nav.focusRuleId);
+        }
+    }, [nav.focusRuleId]);
 
     const shadowNames = new Set(shadowFolders.map((folder) => folder.Name));
 
@@ -20,8 +31,8 @@ export function RulesPage(): React.JSX.Element {
             <header className="page-head">
                 <h1>Regeln</h1>
                 <p>
-                    In der Reihenfolge, in der Proton sie ausführt. Eine Regel anklicken zeigt, welche
-                    Mails sie trifft — lokal berechnet, weil Proton das nicht verrät.
+                    In der Reihenfolge, in der Proton sie ausführt. Eine Regel anklicken zeigt, was sie
+                    prüft und welche Mails sie trifft — lokal berechnet, weil Proton das nicht verrät.
                 </p>
             </header>
 
@@ -43,9 +54,7 @@ export function RulesPage(): React.JSX.Element {
                             <span className="stack">
                                 <span className="row">
                                     <strong>{entry.name}</strong>
-                                    {entry.authoredAs === 'sieve' && (
-                                        <span className="badge badge-neutral">Sieve</span>
-                                    )}
+                                    <FilterKind kind={entry.authoredAs} />
                                     {shadowNames.has(target) && (
                                         <span className="badge badge-warning">Zielordner doppelt</span>
                                     )}
@@ -76,29 +85,120 @@ export function RulesPage(): React.JSX.Element {
                                 {shadowNames.has(target) && (
                                     <p className="notice notice-warning">
                                         „{target}" doppelt einen Proton-Systemordner. Mail, die hier
-                                        landet, liegt nicht dort, wo Proton sie erwartet — und wird
-                                        leicht übersehen.
+                                        landet, liegt nicht dort, wo Proton sie erwartet.
                                     </p>
                                 )}
 
-                                {entry.authoredAs === 'sieve' && (
-                                    <p className="notice notice-info">
-                                        Als Sieve geschrieben. In Protons Oberfläche nur als Code
-                                        sichtbar — hier lesbar, weil Proton den Regelbaum mitliefert.
-                                    </p>
-                                )}
+                                <h3>Was die Regel prüft</h3>
+                                <RuleConditions
+                                    rule={entry.rule}
+                                    onFolderClick={(folder) => goTo({ page: 'folders', focusFolder: folder })}
+                                />
 
-                                <h3 style={{ marginTop: 14 }}>Getroffene Mails</h3>
+                                {entry.authoredAs === 'sieve' && <SieveDetail ruleId={entry.id} />}
+
+                                <h3 style={{ marginTop: 16 }}>Getroffene Mails</h3>
                                 <p className="faint">
                                     Lokal berechnet und bis zur Verifikation gegen das echte Verhalten
                                     eine Schätzung.
                                 </p>
-                                <MailList messages={matchedBy(entry.id)} />
+                                <MailList messages={matchedBy(entry.id)} onOpen={setOpen} />
                             </div>
                         )}
                     </div>
                 );
             })}
+        </>
+    );
+}
+
+/**
+ * Which kind of filter this is, because it changes what the user can do with it.
+ *
+ * A Proton filter is the clickable kind and can be edited in their own interface. A script filter is
+ * Sieve and appears there only as code — everything readable about it here is derived from the rule
+ * tree Proton returns alongside it.
+ */
+function FilterKind({ kind }: { kind: 'tree' | 'sieve' }): React.JSX.Element {
+    return kind === 'sieve' ? (
+        <span className="badge badge-neutral" title="Als Sieve-Skript geschrieben">
+            Script-Filter
+        </span>
+    ) : (
+        <span className="badge badge-accent" title="In Protons Oberfläche editierbar">
+            Proton-Filter
+        </span>
+    );
+}
+
+const provider = createDemoProvider();
+
+/**
+ * The script itself, plus an explanation in prose.
+ *
+ * The structural rendering above is authoritative — it comes from Proton's own parser. This is a
+ * language model's reading of the same script, and it is labelled as such rather than blended in.
+ * The two are shown in that order deliberately: prose is easier to read and easier to be wrong
+ * about, and a plausible-sounding wrong summary of what moves someone's mail is worse than none.
+ */
+function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
+    const sieve = sieveTextFor(ruleId);
+    const [explanation, setExplanation] = useState<SieveExplanation | undefined>(undefined);
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        provider
+            .explainSieve(sieve)
+            .then((result) => {
+                if (!cancelled) {
+                    setExplanation(result);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setFailed(true);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [sieve]);
+
+    return (
+        <>
+            <h3 style={{ marginTop: 16 }}>Script-Filter</h3>
+            <p className="faint">
+                In Protons Oberfläche nur als Code sichtbar. Die Struktur oben ist aus dem Regelbaum
+                abgeleitet, den Proton mitliefert — sie ist massgeblich.
+            </p>
+            <code className="sieve-code">{sieve}</code>
+
+            {failed && (
+                <p className="notice notice-warning">
+                    Kein Sprachmodell erreichbar — ohne Erklärung. Die Struktur oben gilt trotzdem.
+                </p>
+            )}
+
+            {explanation !== undefined && (
+                <div className="generated">
+                    <div className="row">
+                        <strong>Erklärung</strong>
+                        <span className="badge badge-neutral">vom Modell erzeugt</span>
+                    </div>
+                    <p className="muted" style={{ margin: '4px 0 0' }}>
+                        {explanation.summary}
+                    </p>
+                    <ol>
+                        {explanation.steps.map((step) => (
+                            <li key={step}>{step}</li>
+                        ))}
+                    </ol>
+                    <p className="faint">
+                        Erzeugter Text, kann falsch sein. Im Zweifel gilt die abgeleitete Struktur.
+                    </p>
+                </div>
+            )}
         </>
     );
 }

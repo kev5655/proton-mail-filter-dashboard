@@ -187,3 +187,58 @@ const GERMAN_COMPARATORS: Partial<Record<ConditionComparator, string>> = {
     [ConditionComparator.DOES_NOT_END]: 'endet nicht mit',
     [ConditionComparator.DOES_NOT_MATCH]: 'passt nicht auf',
 };
+
+/**
+ * Build a rule from criteria a language model proposed.
+ *
+ * The model's output has already been validated for shape by `@pms/llm`; this maps it onto Proton's
+ * own enums, which is the point where an invented comparator would otherwise become a filter. The
+ * mapping is exhaustive and throws on anything unrecognised rather than defaulting, because a
+ * silent default here means a rule that matches something other than what was proposed.
+ */
+export interface ProposedCondition {
+    field: 'sender' | 'subject' | 'recipient' | 'attachments';
+    comparator: 'contains' | 'is' | 'starts' | 'ends' | 'matches';
+    values: string[];
+}
+
+const FIELD_MAP: Record<ProposedCondition['field'], ConditionType> = {
+    sender: ConditionType.SENDER,
+    subject: ConditionType.SUBJECT,
+    recipient: ConditionType.RECIPIENT,
+    attachments: ConditionType.ATTACHMENTS,
+};
+
+const COMPARATOR_MAP: Record<ProposedCondition['comparator'], ConditionComparator> = {
+    contains: ConditionComparator.CONTAINS,
+    is: ConditionComparator.IS,
+    starts: ConditionComparator.STARTS,
+    ends: ConditionComparator.ENDS,
+    matches: ConditionComparator.MATCHES,
+};
+
+export function ruleFromCriteria(
+    criteria: ProposedCondition[],
+    operator: 'all' | 'any',
+    folder: string
+): RuleSuggestion {
+    const conditions = criteria.map((entry) => {
+        const type = FIELD_MAP[entry.field];
+        const comparator = COMPARATOR_MAP[entry.comparator];
+        if (type === undefined || comparator === undefined) {
+            throw new Error(`Unbekannte Bedingung: ${entry.field} ${entry.comparator}`);
+        }
+        return condition(type, comparator, entry.values);
+    });
+
+    const rule: SimpleObject = {
+        Operator: {
+            label: operator,
+            value: operator === 'any' ? FilterStatement.ANY : FilterStatement.ALL,
+        },
+        Conditions: conditions,
+        Actions: { FileInto: [folder], Mark: { Read: false, Starred: false } },
+    };
+
+    return { rule, explanation: explain(rule, folder) };
+}
