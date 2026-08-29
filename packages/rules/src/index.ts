@@ -15,3 +15,14 @@ export {
     type FilterCondition,
     type SimpleObject,
 } from '@proton/sieve/filterModel';
+export {
+    globMatches,
+    protonEscapingIsBroken,
+    matchesCondition,
+    matchesRule,
+    resolveOutcome,
+    type MatchableMessage,
+    type MatchOutcome,
+    type OrderedRule,
+    type WildcardWarning,
+} from './matcher.js';

@@ -21,7 +21,11 @@
       "types": "./dist/types/src/interface.d.ts",
       "default": "./src/interface.ts"
     },
-    "./fixtures/*": "./fixtures/*.ts"
+    "./fixtures/*": "./fixtures/*.ts",
+    "./helpers": {
+      "types": "./dist/types/src/helpers.d.ts",
+      "default": "./src/helpers.ts"
+    }
   },
   "dependencies": {
     "@proton/utils": "workspace:*",

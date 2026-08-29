@@ -87,7 +87,15 @@ vite (`vite.config.ts` lists them under `ssr.noExternal`). `tsx` does *not* work
 `packages/proton-api/src/polyfill.ts` must be imported before any SRP code: Node 24 lacks
 `Uint8Array.fromBase64`, which the library assumes.
 
-**3. Tree filters cannot match arbitrary headers.** Proton's clickable filters support only
+**3. Proton's escaping for `starts`/`ends` is broken, and the matcher copies the bug.**
+`escapeCharacters` in the vendored compiler escapes wildcards first and backslashes second, so the
+backslash it adds to neutralise a `*` gets escaped in turn: `a*b` compiles to `a\\*b`, which Sieve
+reads as "a, literal backslash, anything, b". A Proton filter "begins with a*b" therefore matches
+almost nothing, silently — in Proton, not just here. `matchesRule` reproduces it on purpose, because
+its job is to predict Proton rather than to be right; `protonEscapingIsBroken` flags such values so
+the UI can warn before the rule is written.
+
+**4. Tree filters cannot match arbitrary headers.** Proton's clickable filters support only
 `subject`, `sender`, `recipient` and `attachments`. Grouping by `List-Id` therefore requires a Sieve
 filter, which is no longer editable in Proton's own UI. That trade-off belongs in front of the user
 per rule, not hidden in a default.
