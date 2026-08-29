@@ -2,7 +2,13 @@ import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { Browser, BrowserContext, Page, Response } from 'playwright';
 
-import { AUTH_PATH, PROTON_LOGIN_URL, SELECTORS, type SelectorName } from './selectors.js';
+import {
+    AUTH_PATH,
+    PROTON_LOGIN_URL,
+    SELECTORS,
+    TOTP_SWITCH_PATTERNS,
+    type SelectorName,
+} from './selectors.js';
 
 const log = getLogger('browser-auth');
 
@@ -137,6 +143,7 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
         const pending = payload.TwoFactor !== 0;
 
         if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
+            await revealTotpField(page, headless, timeout);
             await fill(page, 'totp', await options.promptTotp());
             await click(page, 'submit');
         } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0 && headless) {
@@ -328,6 +335,71 @@ function unexpectedAuthResponse(body: unknown, seen: AuthTrace): AppError {
 
 function matches(response: Response, path: string): boolean {
     return response.request().method() === 'POST' && new URL(response.url()).pathname === path;
+}
+
+/**
+ * Get Proton's second-factor screen onto the authenticator-code option.
+ *
+ * It opens on the passkey, with the code field not rendered at all, so reaching straight for the
+ * field finds nothing — which is exactly what happened, and it read as "Proton changed their page".
+ *
+ * Three steps, weakest assumption last. If the field is already there, nothing to do. Otherwise
+ * click whatever is labelled like a switch to the code method — a guess, and a cheap one, because a
+ * wrong click costs nothing here. Finally just wait: with a visible window the person is right
+ * there, and one click from them beats a selector that has to keep being right.
+ */
+async function revealTotpField(page: Page, headless: boolean, timeoutMs: number): Promise<void> {
+    if (await appears(page, 1_500)) {
+        return;
+    }
+
+    for (const pattern of TOTP_SWITCH_PATTERNS) {
+        try {
+            const control = page.getByRole('button', { name: pattern }).first();
+            if ((await control.count()) > 0) {
+                await control.click({ timeout: 2_000 });
+                if (await appears(page, 2_000)) {
+                    return;
+                }
+            }
+        } catch {
+            // A guess that did not land. The wait below is the part that is meant to work.
+        }
+    }
+
+    if (headless) {
+        throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
+            message: 'Protons 2FA-Seite zeigt den Passkey, und das Code-Feld liess sich nicht öffnen.',
+            hint:
+                'Unsichtbar kann das niemand umschalten. Mit PMS_BROWSER_HEADLESS=false starten — ' +
+                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen.',
+            context: { selector: SELECTORS.totp },
+        });
+    }
+
+    console.log(
+        '\n  Proton fragt nach dem Passkey. Bitte im Fenster auf den Authentifizierungscode\n' +
+            '  umschalten — den Code trägt der Spike dann selbst ein.\n'
+    );
+    try {
+        await page.waitForSelector(SELECTORS.totp, { state: 'visible', timeout: timeoutMs });
+    } catch (cause) {
+        throw new AppError('BROWSER_LOGIN_TIMEOUT', {
+            message: 'Es wurde nicht auf den Authentifizierungscode umgeschaltet.',
+            hint: `Gewartet wurde auf \`${SELECTORS.totp}\`. Heisst das Feld inzwischen anders, steht es in selectors.ts.`,
+            context: { selector: SELECTORS.totp, timeoutMs },
+            cause,
+        });
+    }
+}
+
+async function appears(page: Page, timeoutMs: number): Promise<boolean> {
+    try {
+        await page.waitForSelector(SELECTORS.totp, { state: 'visible', timeout: timeoutMs });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 async function fill(page: Page, name: SelectorName, value: string): Promise<void> {

@@ -22,6 +22,7 @@ const PASSWORD = 'correct-horse-battery-staple';
 interface FakePage {
     handlers: Array<(response: unknown) => void>;
     filled: Record<string, string>;
+    clicked: string[];
 }
 
 function authResponse(body: unknown, path = '/api/core/v4/auth'): unknown {
@@ -55,12 +56,21 @@ const COOKIE_JAR = [
  * decided Proton would say.
  */
 function fakeBrowser(
-    options: { missing?: string; body?: unknown; twoFactor?: number; cookies?: typeof COOKIE_JAR } = {}
+    options: {
+        missing?: string;
+        body?: unknown;
+        twoFactor?: number;
+        cookies?: typeof COOKIE_JAR;
+        /** Selectors the page does not render until something reveals them. */
+        hidden?: string[];
+        /** Text of a control that reveals them when clicked. */
+        revealedBy?: RegExp;
+    } = {}
 ): {
     launch: () => Promise<never>;
     page: FakePage;
 } {
-    const page: FakePage = { handlers: [], filled: {} };
+    const page: FakePage = { handlers: [], filled: {}, clicked: [] };
     const body =
         options.body ?? { ...SESSION_BODY, ...(options.twoFactor === undefined ? {} : { TwoFactor: options.twoFactor }) };
 
@@ -73,8 +83,25 @@ function fakeBrowser(
         }
     };
 
+    const hidden = new Set(options.hidden ?? []);
+
     const fakePage = {
         setDefaultTimeout: () => {},
+        waitForSelector: async (selector: string) => {
+            if (hidden.has(selector)) {
+                throw new Error('timeout waiting for selector');
+            }
+            return {};
+        },
+        getByRole: (_role: string, query: { name: RegExp }) => ({
+            first: () => ({
+                count: async () => (options.revealedBy?.source === query.name.source ? 1 : 0),
+                click: async () => {
+                    page.clicked.push(query.name.source);
+                    hidden.clear();
+                },
+            }),
+        }),
         on: (_event: string, handler: (response: unknown) => void) => page.handlers.push(handler),
         goto: async () => {},
         fill: async (selector: string, value: string) => {
@@ -180,6 +207,43 @@ describe('signing in through a browser', () => {
             launch: fakeBrowser({ twoFactor: 1 }).launch,
         });
         expect(promptTotp).toHaveBeenCalledTimes(1);
+    });
+
+    it('switches the second-factor screen to the code before reaching for the field', async () => {
+        // Proton opens on the passkey and does not render the code field at all, which is why
+        // filling it straight away found nothing and looked like a changed page.
+        const switcher = /authentifizierungscode|authentication code/i;
+        const { launch, page } = fakeBrowser({
+            twoFactor: 1,
+            hidden: [SELECTORS.totp],
+            revealedBy: switcher,
+        });
+
+        await loginWithBrowser({ ...baseOptions, headless: false, launch });
+
+        expect(page.clicked).toContain(switcher.source);
+        expect(page.filled[SELECTORS.totp]).toBe('123456');
+    });
+
+    it('waits for a person to switch it when no control matches', async () => {
+        // Every guess about Proton's markup so far has been wrong. With a visible window the
+        // fallback is a person, and that is allowed to be the plan rather than an error.
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [] });
+
+        await expect(
+            loginWithBrowser({ ...baseOptions, headless: false, launch })
+        ).resolves.toBeDefined();
+    });
+
+    it('says so when the code field cannot be reached without a window', async () => {
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [SELECTORS.totp] });
+
+        const error = await captureError(
+            loginWithBrowser({ ...baseOptions, headless: true, launch })
+        );
+
+        expect(error.code).toBe('BROWSER_LOGIN_2FA_UNSUPPORTED');
+        expect(error.hint).toMatch(/PMS_BROWSER_HEADLESS=false/);
     });
 
     it('refuses a passkey without a window to confirm it in', async () => {

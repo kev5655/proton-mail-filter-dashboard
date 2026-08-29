@@ -19,4 +19,19 @@ export const SELECTORS = {
     totp: 'input#twoFa',
 } as const;
 
+/**
+ * Wording that switches the second-factor screen from passkey to authenticator code.
+ *
+ * Proton offers a passkey first and keeps the code field hidden behind a link, so reaching for the
+ * field directly finds nothing. Matched by visible text rather than by a class or id: the words are
+ * what Proton is least likely to change silently, and getting this wrong is only a lost click —
+ * the run then waits for the field and the person switches it themselves.
+ */
+export const TOTP_SWITCH_PATTERNS = [
+    /authentifizierungscode|authentication code/i,
+    /authenticator/i,
+    /einmalcode|one-time code|verification code/i,
+    /andere methode|another method|different method/i,
+] as const;
+
 export type SelectorName = keyof typeof SELECTORS;
