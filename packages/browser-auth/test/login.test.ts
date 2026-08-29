@@ -34,19 +34,29 @@ function authResponse(body: unknown, path = '/api/core/v4/auth'): unknown {
     };
 }
 
+// What Proton actually returns to a browser: identity and outcome, no tokens.
 const SESSION_BODY = {
     UID: 'uid-1',
-    AccessToken: 'access-1',
-    RefreshToken: 'refresh-1',
     UserID: 'user-1',
+    Scope: 'full',
+    ServerProof: 'proof',
     TwoFactor: 0,
 };
+
+const COOKIE_JAR = [
+    { name: 'AUTH-uid-1', value: 'access-1', domain: 'account.proton.me' },
+    { name: 'REFRESH-uid-1', value: 'refresh-1', domain: 'account.proton.me' },
+    { name: 'Session-Id', value: 'session-1', domain: '.proton.me' },
+    { name: 'unrelated', value: 'x', domain: 'example.com' },
+];
 
 /**
  * A browser that does nothing but record what was asked of it, and answers with whatever the test
  * decided Proton would say.
  */
-function fakeBrowser(options: { missing?: string; body?: unknown; twoFactor?: number } = {}): {
+function fakeBrowser(
+    options: { missing?: string; body?: unknown; twoFactor?: number; cookies?: typeof COOKIE_JAR } = {}
+): {
     launch: () => Promise<never>;
     page: FakePage;
 } {
@@ -85,6 +95,7 @@ function fakeBrowser(options: { missing?: string; body?: unknown; twoFactor?: nu
         newContext: async () => ({
             pages: () => [],
             newPage: async () => fakePage,
+            cookies: async () => options.cookies ?? COOKIE_JAR,
             close: async () => {},
         }),
         close: async () => {},
@@ -113,17 +124,39 @@ async function captureError(promise: Promise<unknown>): Promise<AppError> {
 }
 
 describe('signing in through a browser', () => {
-    it('takes the session from Protons own answer', async () => {
+    it('takes the session out of the cookie jar, since the body has no tokens', async () => {
+        // Proton answers a browser in cookie mode. Expecting AccessToken in the body made a
+        // successful login look like a broken one for an evening.
         const { launch } = fakeBrowser();
 
         const result = await loginWithBrowser({ ...baseOptions, launch });
 
-        expect(result.session).toEqual({
-            uid: 'uid-1',
-            accessToken: 'access-1',
-            refreshToken: 'refresh-1',
-        });
+        expect(result.session.uid).toBe('uid-1');
+        expect(result.session.accessToken).toBe('access-1');
+        expect(result.session.refreshToken).toBe('refresh-1');
         expect(result.userId).toBe('user-1');
+    });
+
+    it('keeps the whole jar, not just the two cookies it recognises', async () => {
+        // Sending what the browser would send does not depend on those names staying right.
+        const { launch } = fakeBrowser();
+
+        const result = await loginWithBrowser({ ...baseOptions, launch });
+
+        expect(result.session.cookies).toContain('Session-Id=session-1');
+        expect(result.session.cookies).not.toContain('unrelated');
+    });
+
+    it('says which cookies exist when the one it needs does not', async () => {
+        const { launch } = fakeBrowser({
+            cookies: [{ name: 'Session-Id', value: 'session-1', domain: '.proton.me' }],
+        });
+
+        const error = await captureError(loginWithBrowser({ ...baseOptions, timeoutMs: 50, launch }));
+
+        expect(error.code).toBe('BROWSER_LOGIN_UI_CHANGED');
+        expect(error.context['cookieNames']).toEqual(['Session-Id']);
+        expect(JSON.stringify(error.toJSON())).not.toContain('session-1');
     });
 
     it('types the credentials into the page and returns nothing about them', async () => {
@@ -180,7 +213,7 @@ describe('signing in through a browser', () => {
 
         expect(error.code).toBe('BROWSER_LOGIN_UI_CHANGED');
         expect(error.context['fields']).toEqual(['Code', 'Token']);
-        expect(error.context['missing']).toContain('AccessToken');
+        expect(error.context['missing']).toContain('UID');
     });
 
     it('reports those field names without their values', async () => {

@@ -31,6 +31,8 @@ export interface BrowserSession {
     uid: string;
     accessToken: string;
     refreshToken: string;
+    /** What the browser would send, as a `Cookie` header value. */
+    cookies: string;
 }
 
 export interface BrowserLoginResult {
@@ -81,10 +83,15 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const TWO_FACTOR_TOTP = 1;
 const TWO_FACTOR_FIDO2 = 2;
 
+/**
+ * What `core/v4/auth` returns to a browser.
+ *
+ * Deliberately not the token-bearing shape. Proton's web login runs in cookie mode: the response
+ * carries the identity and the outcome, and the tokens arrive as `Set-Cookie` instead. Requiring
+ * `AccessToken` here was the mistake that made a successful login look like a broken one.
+ */
 interface AuthPayload {
     UID: string;
-    AccessToken: string;
-    RefreshToken: string;
     UserID: string;
     TwoFactor: number;
 }
@@ -96,8 +103,6 @@ function isAuthPayload(value: unknown): value is AuthPayload {
     const candidate = value as Record<string, unknown>;
     return (
         typeof candidate['UID'] === 'string' &&
-        typeof candidate['AccessToken'] === 'string' &&
-        typeof candidate['RefreshToken'] === 'string' &&
         typeof candidate['UserID'] === 'string' &&
         typeof candidate['TwoFactor'] === 'number'
     );
@@ -148,19 +153,56 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
             await withTimeout(twoFactorAccepted, timeout, 'Der Passkey wurde nicht bestätigt.');
         }
 
+        const session = await collectSession(context, payload.UID, timeout);
         log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in through a browser');
-        return {
-            session: {
-                uid: payload.UID,
-                accessToken: payload.AccessToken,
-                refreshToken: payload.RefreshToken,
-            },
-            userId: payload.UserID,
-        };
+        return { session, userId: payload.UserID };
     } finally {
         await context.close().catch(() => undefined);
         await browser?.close().catch(() => undefined);
     }
+}
+
+/**
+ * Take the session out of the browser's cookie jar once the login has settled.
+ *
+ * Proton names them `AUTH-<UID>` and `REFRESH-<UID>`. The whole jar is kept as well: it is exactly
+ * what the browser would send, and it does not depend on those names being right forever.
+ *
+ * The cookies are set on the response to `core/v4/auth`, but a `Set-Cookie` is applied slightly
+ * after the response arrives, so this waits rather than reading once and giving up.
+ */
+async function collectSession(context: BrowserContext, uid: string, timeoutMs: number): Promise<BrowserSession> {
+    const deadline = Date.now() + Math.min(timeoutMs, 15_000);
+    let names: string[] = [];
+
+    for (;;) {
+        const jar = (await context.cookies()).filter((cookie) => cookie.domain.endsWith('proton.me'));
+        names = jar.map((cookie) => cookie.name);
+
+        const access = jar.find((cookie) => cookie.name === `AUTH-${uid}`);
+        const refresh = jar.find((cookie) => cookie.name === `REFRESH-${uid}`);
+
+        if (access !== undefined) {
+            return {
+                uid,
+                accessToken: access.value,
+                refreshToken: refresh?.value ?? '',
+                cookies: jar.map((cookie) => `${cookie.name}=${cookie.value}`).join('; '),
+            };
+        }
+        if (Date.now() > deadline) {
+            break;
+        }
+        await new Promise((done) => setTimeout(done, 200));
+    }
+
+    throw new AppError('BROWSER_LOGIN_UI_CHANGED', {
+        message: `Die Anmeldung war erfolgreich, aber das Sitzungs-Cookie "AUTH-${uid}" fehlt.`,
+        hint:
+            `Vorhanden sind: ${names.join(', ') || '(keine)'}. Nur die Namen — die Werte sind die ` +
+            'Sitzung selbst. Proton hat die Cookies vermutlich umbenannt; anzupassen in collectSession.',
+        context: { uid, cookieNames: names },
+    });
 }
 
 interface Launched {
@@ -265,7 +307,7 @@ function traceAuthRequests(page: Page): AuthTrace {
 function unexpectedAuthResponse(body: unknown, seen: AuthTrace): AppError {
     const fields =
         body !== null && typeof body === 'object' ? Object.keys(body as Record<string, unknown>).sort() : [];
-    const expected = ['UID', 'AccessToken', 'RefreshToken', 'UserID', 'TwoFactor'];
+    const expected = ['UID', 'UserID', 'TwoFactor'];
     const missing = expected.filter((name) => !fields.includes(name));
 
     return new AppError('BROWSER_LOGIN_UI_CHANGED', {

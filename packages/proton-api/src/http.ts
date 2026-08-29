@@ -13,6 +13,16 @@ export interface ProtonSession {
     uid: string;
     accessToken: string;
     refreshToken: string;
+    /**
+     * The session cookies, as a `Cookie` header value, when the session came from a browser.
+     *
+     * Proton's web login answers in cookie mode: `core/v4/auth` returns the UID and the scope but
+     * no tokens, because the server sets them as cookies instead. A session captured from a browser
+     * therefore carries both — the access token read out of the `AUTH-<UID>` cookie, and the cookies
+     * themselves, which are what the browser would have sent. Sending both is what a browser
+     * effectively does and costs nothing.
+     */
+    cookies?: string | undefined;
 }
 
 export interface ProtonHttpOptions {
@@ -231,7 +241,12 @@ export class ProtonHttp {
         };
         if (!anonymous && this.#session !== undefined) {
             headers['x-pm-uid'] = this.#session.uid;
-            headers['Authorization'] = `Bearer ${this.#session.accessToken}`;
+            if (this.#session.accessToken !== '') {
+                headers['Authorization'] = `Bearer ${this.#session.accessToken}`;
+            }
+            if (this.#session.cookies !== undefined && this.#session.cookies !== '') {
+                headers['Cookie'] = this.#session.cookies;
+            }
         }
         return headers;
     }
