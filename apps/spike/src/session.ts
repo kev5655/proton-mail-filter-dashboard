@@ -58,10 +58,23 @@ export async function connect(): Promise<Connection> {
     const guard = new LoginGuard({ path: GUARD_FILE });
     const http = newHttp();
 
-    const passphrase = await terminal.askRequiredSecret(
-        'Passphrase für die gespeicherte Sitzung (nur lokal, frei wählbar): ',
-        'Passphrase'
-    );
+    const source = resolveSource(credentialConfig());
+    console.log(`Zugangsdaten aus: ${source.name}`);
+
+    // Taken from the vault when it has one, so the whole login is a single fingerprint and the key
+    // can be a long random string nobody has to remember. Falling back to a prompt keeps the tool
+    // usable without 1Password.
+    const fromVault = await source.getSessionPassphrase();
+    const passphrase =
+        fromVault ??
+        (await terminal.askRequiredSecret(
+            'Passphrase für die gespeicherte Sitzung (nur lokal, frei wählbar): ',
+            'Passphrase'
+        ));
+
+    if (fromVault !== undefined) {
+        console.log('Sitzungs-Passphrase aus 1Password übernommen.');
+    }
 
     const stored = await loadSession(SESSION_FILE, passphrase);
     if (stored !== undefined) {
@@ -75,9 +88,6 @@ export async function connect(): Promise<Connection> {
 
     // Only now, and only once.
     await guard.assertMayAttempt();
-
-    const source = resolveSource(credentialConfig());
-    console.log(`Zugangsdaten aus: ${source.name}`);
 
     // Both are fetched and verified before the first request. If either is empty or malformed this
     // throws here, and Proton never sees a login attempt it would have to count as a failure.

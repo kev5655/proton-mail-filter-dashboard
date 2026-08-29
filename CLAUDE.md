@@ -91,7 +91,9 @@ look good and teaches nothing.
 token** — not to test something, not to save a round trip.
 
 Credentials come from 1Password when `PMS_OP_VAULT` is set (see `.env.example`), otherwise from a
-terminal prompt. The 1Password path shells out to `op`, which makes the app ask for a fingerprint;
+terminal prompt. The session passphrase can live in the same item under `session-passphrase`, which
+reduces the whole login to one fingerprint; it is a separate value from the Proton password because
+it protects a different thing — the tokens on this machine, not the account. The 1Password path shells out to `op`, which makes the app ask for a fingerprint;
 the value goes straight into the SRP handshake and is never logged, stored, or included in an error.
 
 `pnpm spike --scrub <file.json>` runs a hand-captured API response through the same pseudonymiser

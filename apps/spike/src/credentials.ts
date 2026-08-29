@@ -51,6 +51,9 @@ export function promptSource(): CredentialSource {
         async getTotp() {
             return undefined; // Asked for only if Proton actually requires it.
         },
+        async getSessionPassphrase() {
+            return undefined; // Nothing to read from; the caller asks.
+        },
     };
 }
 

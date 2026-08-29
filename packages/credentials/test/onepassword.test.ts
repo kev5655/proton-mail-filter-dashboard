@@ -161,3 +161,31 @@ describe('not leaking the secret', () => {
         expect(JSON.stringify(error.toJSON())).not.toContain(secret);
     });
 });
+
+describe('the session passphrase', () => {
+    it('is read from its own field, not the account password', async () => {
+        // A different thing is being protected: the tokens on this machine, not the account.
+        // Reusing the Proton password would make one value unlock both.
+        const run = vi.fn(async (args: string[]) =>
+            args[1]?.endsWith('/session-passphrase') === true ? 'lange-zufaellige-passphrase' : 'anderes'
+        );
+
+        expect(await sourceWith(run).getSessionPassphrase()).toBe('lange-zufaellige-passphrase');
+        expect(run).toHaveBeenCalledWith(['read', `op://${VAULT}/${ITEM}/session-passphrase`]);
+    });
+
+    it('returns undefined when the item has no such field, so the caller can ask', async () => {
+        // A missing field is a normal state, not a failure — the user simply has not created one.
+        expect(await sourceWith(opFails('no such field')).getSessionPassphrase()).toBeUndefined();
+        expect(await sourceWith(async () => '   ').getSessionPassphrase()).toBeUndefined();
+    });
+
+    it('still reports a locked vault rather than silently falling back to a prompt', async () => {
+        // Falling back here would be the wrong kindness: the user would type a passphrase that
+        // does not match the one the session was encrypted with, and see a decryption failure.
+        const error = await captureError(
+            sourceWith(opFails('error: you are not currently signed in')).getSessionPassphrase()
+        );
+        expect(error.code).toBe('CREDENTIALS_LOCKED');
+    });
+});

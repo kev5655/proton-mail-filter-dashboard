@@ -4,7 +4,13 @@ import { promisify } from 'node:util';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 
-import { requirePassword, requireTotp, requireUsername, type CredentialOrigin } from './verify.js';
+import {
+    requirePassword,
+    requirePresent,
+    requireTotp,
+    requireUsername,
+    type CredentialOrigin,
+} from './verify.js';
 
 const log = getLogger('credentials-1password');
 
@@ -29,12 +35,21 @@ export interface OnePasswordConfig {
     /** Field labels to try, in order. Different item templates name them differently. */
     usernameFields?: string[];
     passwordFields?: string[];
+    /**
+     * Field holding the passphrase that encrypts the stored Proton session.
+     *
+     * Separate from the Proton password on purpose: it protects a different thing — the tokens on
+     * this machine, not the account — and reusing the account password would mean one value
+     * unlocking both. Optional; without it the user is asked to type one.
+     */
+    sessionPassphraseField?: string;
     /** Injected in tests. */
     run?: (args: string[]) => Promise<string>;
 }
 
 const DEFAULT_USERNAME_FIELDS = ['username', 'email'];
 const DEFAULT_PASSWORD_FIELDS = ['password'];
+const DEFAULT_SESSION_FIELD = 'session-passphrase';
 
 export interface CredentialSource {
     readonly name: string;
@@ -42,6 +57,14 @@ export interface CredentialSource {
     getPassword(): Promise<string>;
     /** Undefined when this source has no TOTP for the item; the caller then prompts. */
     getTotp(): Promise<string | undefined>;
+    /**
+     * The passphrase for the local session store, if the source holds one.
+     *
+     * Undefined means "ask the user". Reading it from the vault turns the whole login into a single
+     * fingerprint, and the value can be a long random string nobody has to remember — which is a
+     * better key than anything typed twice a day.
+     */
+    getSessionPassphrase(): Promise<string | undefined>;
 }
 
 export function createOnePasswordSource(config: OnePasswordConfig): CredentialSource {
@@ -86,6 +109,16 @@ export function createOnePasswordSource(config: OnePasswordConfig): CredentialSo
                 throw missingField(config, fields, 'Passwort');
             }
             return requirePassword(value, origin('Passwort'));
+        },
+
+        async getSessionPassphrase(): Promise<string | undefined> {
+            const field = config.sessionPassphraseField ?? DEFAULT_SESSION_FIELD;
+            const value = await readField([field], 'Sitzungs-Passphrase');
+            if (value === undefined || value.trim() === '') {
+                // Absent is a normal state, not a failure: the item simply has no such field yet.
+                return undefined;
+            }
+            return requirePresent(value, origin('Sitzungs-Passphrase'));
         },
 
         async getTotp(): Promise<string | undefined> {
