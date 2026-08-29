@@ -170,6 +170,12 @@ and always sits below the derived structure, never instead of it.
 
 **Comments.** Say what a thing is and why it is not obvious. Do not narrate change history.
 
+**Processes.** Only kill a PID you recorded when you started it. A command line does not say whose
+process it is: `vite-node ... src/main.ts` is the spike whether the assistant launched it or the
+user is sitting at its password prompt, and one was killed that way. When a dev server needs
+restarting after a new workspace package is linked, say so and let the user do it, or note the PID
+at launch and kill only that.
+
 **Git.** Check `git status` before `git add -A` — three empty files once made it into a commit
 that way, created by stray shell redirection and swept up without anyone looking. Author identity is
 pinned per-repo (`git config --local`) to keep a private address out of
