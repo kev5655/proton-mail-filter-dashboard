@@ -90,7 +90,8 @@ function fakeProton(overrides: { sessionFails?: boolean } = {}): typeof fetch {
 }
 
 function http(fetchImpl: typeof fetch): InstanceType<typeof ProtonHttp> {
-    return new ProtonHttp({ version: '0.0.0', fetchImpl, maxAttempts: 1 });
+    // Pacing is real behaviour and tested separately; here it would only add seconds.
+    return new ProtonHttp({ version: '0.0.0', fetchImpl, maxAttempts: 1, minIntervalMs: 0, jitterMs: 0 });
 }
 
 const credentials = { username: 'someone@proton.me', password: 'correct-horse' };

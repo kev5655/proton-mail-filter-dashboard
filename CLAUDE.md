@@ -38,11 +38,25 @@ is under a temporary Proton lockout (see below).
 account", to every login from this project. It was never an account lock: the same account signed in
 through a browser at the same moment. Proton was rejecting the *shape* of our handshake.
 
-The handshake has three steps, not two. `POST auth/v4/sessions` opens an unauthenticated session
-first, and `auth/info` and `auth` then run inside it, carrying its `x-pm-uid`. We sent both
-anonymously, which is what credential stuffing looks like from the outside — whatever the
-credentials turn out to be. `packages/proton-api/test/login-handshake.test.ts` pins the sequence, so
-it can be checked without spending an attempt.
+Two things were missing, and only the second was decisive.
+
+The handshake has three steps, not two: `POST auth/v4/sessions` opens an unauthenticated session
+first, and `auth/info` and `auth` run inside it carrying its `x-pm-uid`. That is now done, and
+Proton accepts it — but it was not the cause. `packages/proton-api/test/login-handshake.test.ts`
+pins the sequence, so it can be checked without spending an attempt.
+
+The cause is the **`Payload`** on `core/v4/auth`: an anti-abuse challenge of device and behaviour
+telemetry that Proton's own script collects in the page. Without it, 2028, whatever the credentials
+are. It has no specification, a fabricated one is a worse signal than none, and forging an anti-abuse
+control is not something this project does — so **the login runs in a real browser**
+(`@pms/browser-auth`), where Proton's script produces a genuine challenge and nothing is imitated.
+It is also the only way a passkey works at all: WebAuthn needs an authenticator, which no Node HTTP
+client has. The browser exists for the login and closes straight afterwards; everything else is the
+ordinary API client. `write-isolation.test.ts` checks that it is only ever pointed at the login page,
+because a browser driven to a mailbox could move mail with every HTTP-level guard intact.
+
+`packages/proton-api/src/auth.ts` keeps the pure-API SRP login. It is correct and currently refused;
+it stays because the browser is a cost, not a preference.
 
 Two of our own bugs made it worse before that was understood: the spike re-authenticated on every
 run, and one run sent an empty password because of a prompt bug.
@@ -67,6 +81,7 @@ Consequences that are now load-bearing:
 vendor/proton/          Proton's own code, GPL-3.0, pinned to a commit — see vendor/proton/README.md
 packages/core/          Error taxonomy and logging
 packages/credentials/   1Password and prompt sources, plus the verification every one passes
+packages/browser-auth/  Signing in through a real browser, because the login carries a challenge
 packages/proton-api/    SRP login, HTTP client, response validation, read endpoints, session store
 packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
 packages/grouping/      Subject templates, grouping, and the triage ranking
@@ -154,6 +169,11 @@ filter, which is no longer editable in Proton's own UI. That trade-off belongs i
 per rule, not hidden in a default.
 
 ## Conventions
+
+**Pace.** `ProtonHttp` leaves a gap between requests — `minIntervalMs`, ~900 ms plus jitter — and
+queues them so a burst becomes a sequence. Proton runs this service for its users and gets nothing
+from us for it, and nothing this tool asks is urgent by the second. Only tests may set it to 0. The
+jitter is not decoration: a request exactly every 900 ms is a machine signature.
 
 **Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
 `ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the

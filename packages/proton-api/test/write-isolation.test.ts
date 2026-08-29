@@ -18,6 +18,10 @@ import { describe, expect, it } from 'vitest';
  *  - **Nobody imports `write/messages.ts` except the undo service.** Moving mail is the single
  *    documented exception to the core rule; an exception that anything may reach is not an
  *    exception, it is the new behaviour.
+ *  - **The browser goes to the login page and nowhere else.** A browser is a second way to reach
+ *    Proton, and one that no amount of HTTP-level checking can see: a page can be driven to the
+ *    mailbox and told to click things. The rule is about Proton, not about `fetch`, so the check
+ *    has to cover both.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +82,26 @@ describe('only src/write may change anything at Proton', () => {
 
         // The login handshake is the one exception: authenticating is a POST and cannot be avoided.
         expect(offenders.filter((path) => !path.endsWith(join('src', 'auth.ts')))).toEqual([]);
+    });
+
+    it('drives the browser to the login page and nowhere else', async () => {
+        // Clicking through a real mailbox would move mail while leaving every HTTP-level guard
+        // above untouched, which is exactly the kind of hole a written rule does not close.
+        const allowed = new Set(['https://account.proton.me/login']);
+        const found = new Set<string>();
+
+        for (const file of await allSources()) {
+            if (!relative(REPO, file).includes(join('browser-auth', 'src'))) {
+                continue;
+            }
+            const source = await readFile(file, 'utf8');
+            for (const match of source.matchAll(/https:\/\/[a-z0-9.-]*proton\.me[^'"`\s]*/g)) {
+                found.add(match[0]);
+            }
+        }
+
+        expect(found.size).toBeGreaterThan(0);
+        expect([...found].filter((url) => !allowed.has(url))).toEqual([]);
     });
 
     it('lets nothing but the undo service reach the message-moving module', async () => {

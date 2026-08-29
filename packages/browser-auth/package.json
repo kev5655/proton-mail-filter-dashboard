@@ -1,0 +1,14 @@
+{
+  "name": "@pms/browser-auth",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pms/core": "workspace:*",
+    "playwright": "^1.62.1"
+  }
+}

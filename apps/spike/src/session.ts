@@ -1,10 +1,10 @@
 import { join } from 'node:path';
 
+import { loginWithBrowser } from '@pms/browser-auth';
 import { isAppError } from '@pms/core/errors';
 import {
     getFolders,
     loadSession,
-    login,
     LoginGuard,
     ProtonHttp,
     refreshSession,
@@ -27,6 +27,10 @@ import { terminal } from './prompt.js';
  *
  * So: stored session first, refresh second, and a fresh login only as a last resort — behind a
  * guard that refuses to try again too soon after a failure.
+ *
+ * The login itself runs in a real browser. Proton's login carries an anti-abuse challenge that only
+ * their own page can produce, and an HTTP client without it is refused with code 2028 whatever the
+ * credentials are. See `@pms/browser-auth` for why imitating that challenge is not the answer.
  */
 
 const SESSION_FILE = join(DATA_DIR, 'session.enc.json');
@@ -46,7 +50,13 @@ const VERSION = '0.1.0';
 
 function newHttp(): ProtonHttp {
     const appVersion = process.env['PROTON_APP_VERSION'];
-    return new ProtonHttp({ version: VERSION, ...(appVersion === undefined ? {} : { appVersion }) });
+    // Deliberately slower than the network allows. See ProtonHttp's minIntervalMs.
+    const minInterval = Number(process.env['PMS_MIN_REQUEST_INTERVAL_MS'] ?? NaN);
+    return new ProtonHttp({
+        version: VERSION,
+        ...(appVersion === undefined ? {} : { appVersion }),
+        ...(Number.isFinite(minInterval) ? { minIntervalMs: minInterval } : {}),
+    });
 }
 
 /** Cheap authenticated call used to find out whether a token still works. */
@@ -105,16 +115,28 @@ export async function connect(): Promise<Connection> {
     const username = await source.getUsername();
     const password = await source.getPassword();
 
+    const headless = process.env['PMS_BROWSER_HEADLESS'] !== 'false';
+    console.log(
+        headless
+            ? 'Anmeldung über einen Browser (unsichtbar). PMS_BROWSER_HEADLESS=false zeigt das Fenster.'
+            : 'Anmeldung über einen Browser — bitte das Fenster beachten.'
+    );
+
     let session: ProtonSession;
     let userId: string;
     try {
-        const result = await login(http, { username, password }, async () => {
-            const stored = await source.getTotp();
-            if (stored !== undefined) {
-                console.log('  2FA-Code aus 1Password übernommen.');
-                return stored;
-            }
-            return terminal.askRequiredSecret('2FA-Code: ', '2FA-Code');
+        const result = await loginWithBrowser({
+            username,
+            password,
+            headless,
+            promptTotp: async () => {
+                const stored = await source.getTotp();
+                if (stored !== undefined) {
+                    console.log('  2FA-Code aus 1Password übernommen.');
+                    return stored;
+                }
+                return terminal.askRequiredSecret('2FA-Code: ', '2FA-Code');
+            },
         });
         session = result.session;
         userId = result.userId;
@@ -122,6 +144,8 @@ export async function connect(): Promise<Connection> {
         await guard.recordFailure(error);
         throw error;
     }
+
+    http.setSession(session);
 
     await guard.recordSuccess();
     await persist(session, userId, passphrase);

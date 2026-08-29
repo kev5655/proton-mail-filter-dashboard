@@ -1,0 +1,271 @@
+import { AppError } from '@pms/core/errors';
+import { getLogger } from '@pms/core/logger';
+import type { Browser, BrowserContext, Page, Response } from 'playwright';
+
+import { AUTH_2FA_PATH, AUTH_PATH, PROTON_LOGIN_URL, SELECTORS, type SelectorName } from './selectors.js';
+
+const log = getLogger('browser-auth');
+
+/**
+ * Sign in to Proton through a real browser.
+ *
+ * Proton's login carries an anti-abuse challenge — a `Payload` of device and behaviour telemetry
+ * collected by their own script in the page. An HTTP client cannot produce one, and Proton answers
+ * a login without it with code 2028, "unusual activity targeting your account", even when the
+ * credentials are correct and the same account signs in through a browser at that moment.
+ *
+ * The answer is not to imitate that payload. There is no specification for it, a wrong one is a
+ * worse signal than none, and forging an anti-abuse control is the thing this project does not do.
+ * So the login happens in a browser that really is one: Proton's page runs Proton's script, the
+ * challenge is genuine, and nothing here has to pretend. It also makes a passkey possible at all —
+ * WebAuthn needs an authenticator, which no Node HTTP client has.
+ *
+ * The browser exists for the login and nothing else. Everything afterwards is the ordinary API
+ * client, carrying the session captured here.
+ *
+ * The password is typed into the page and never leaves this function: not logged, not returned, not
+ * attached to an error. Only the resulting tokens come back.
+ */
+
+export interface BrowserSession {
+    uid: string;
+    accessToken: string;
+    refreshToken: string;
+}
+
+export interface BrowserLoginResult {
+    session: BrowserSession;
+    userId: string;
+}
+
+export interface BrowserLoginOptions {
+    username: string;
+    password: string;
+    /** Asked for only when Proton requests a code, so no one is prompted needlessly. */
+    promptTotp: () => Promise<string>;
+    /**
+     * Run without a visible window. A passkey needs a visible one — a headless browser has no
+     * authenticator to touch — so a FIDO2-only account must set this to false.
+     */
+    headless?: boolean;
+    timeoutMs?: number;
+    loginUrl?: string;
+    /** Injected in tests, so the flow can be exercised without launching anything. */
+    launch?: () => Promise<Browser>;
+}
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+/** Bitfield on Proton's auth response. */
+const TWO_FACTOR_TOTP = 1;
+const TWO_FACTOR_FIDO2 = 2;
+
+interface AuthPayload {
+    UID: string;
+    AccessToken: string;
+    RefreshToken: string;
+    UserID: string;
+    TwoFactor: number;
+}
+
+function isAuthPayload(value: unknown): value is AuthPayload {
+    if (value === null || typeof value !== 'object') {
+        return false;
+    }
+    const candidate = value as Record<string, unknown>;
+    return (
+        typeof candidate['UID'] === 'string' &&
+        typeof candidate['AccessToken'] === 'string' &&
+        typeof candidate['RefreshToken'] === 'string' &&
+        typeof candidate['UserID'] === 'string' &&
+        typeof candidate['TwoFactor'] === 'number'
+    );
+}
+
+export async function loginWithBrowser(options: BrowserLoginOptions): Promise<BrowserLoginResult> {
+    const headless = options.headless ?? true;
+    const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+    const browser = await launchBrowser(options.launch, headless);
+    let context: BrowserContext | undefined;
+    try {
+        // A throwaway profile: nothing about this login is written anywhere the next one can find.
+        context = await browser.newContext();
+        const page = await context.newPage();
+        page.setDefaultTimeout(timeout);
+
+        const auth = watchForAuthResponse(page);
+        const twoFactorAccepted = watchForTwoFactorResponse(page);
+
+        await page.goto(options.loginUrl ?? PROTON_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+
+        await fill(page, 'username', options.username);
+        await fill(page, 'password', options.password);
+        await click(page, 'submit');
+
+        const payload = await withTimeout(
+            auth,
+            timeout,
+            'Proton hat auf die Anmeldung nicht mit einer Sitzung geantwortet.'
+        );
+
+        if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
+            await fill(page, 'totp', await options.promptTotp());
+            await click(page, 'submit');
+            await withTimeout(twoFactorAccepted, timeout, 'Proton hat den 2FA-Code nicht bestätigt.');
+        } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0 && headless) {
+            // A passkey needs something to touch, and a headless browser offers nothing.
+            throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
+                message: 'Dieses Konto verlangt einen Passkey, und der Browser läuft unsichtbar.',
+                hint:
+                    'Mit sichtbarem Fenster starten, dann lässt sich der Passkey bestätigen — oder ' +
+                    'in Proton zusätzlich TOTP einrichten.',
+                context: { twoFactor: payload.TwoFactor },
+            });
+        } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0) {
+            log.info('waiting for the passkey to be confirmed in the browser window');
+            await withTimeout(twoFactorAccepted, timeout, 'Der Passkey wurde nicht bestätigt.');
+        }
+
+        log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in through a browser');
+        return {
+            session: {
+                uid: payload.UID,
+                accessToken: payload.AccessToken,
+                refreshToken: payload.RefreshToken,
+            },
+            userId: payload.UserID,
+        };
+    } finally {
+        await context?.close().catch(() => undefined);
+        await browser.close().catch(() => undefined);
+    }
+}
+
+async function launchBrowser(
+    launch: (() => Promise<Browser>) | undefined,
+    headless: boolean
+): Promise<Browser> {
+    if (launch !== undefined) {
+        return launch();
+    }
+    try {
+        const { chromium } = await import('playwright');
+        return await chromium.launch({ headless });
+    } catch (cause) {
+        throw new AppError('BROWSER_NOT_INSTALLED', {
+            message: 'Der Browser für die Anmeldung liess sich nicht starten.',
+            hint: 'Einmalig `pnpm exec playwright install chromium` ausführen.',
+            context: { headless },
+            cause,
+        });
+    }
+}
+
+/**
+ * Take the session straight from Proton's answer, rather than digging it out of the page afterwards.
+ *
+ * The response to `core/v4/auth` is where the tokens exist in plain form; a moment later they are
+ * cookies with their own rules. Reading them here means the handover does not depend on any of the
+ * app's internals.
+ */
+function watchForAuthResponse(page: Page): Promise<AuthPayload> {
+    return new Promise<AuthPayload>((resolve, reject) => {
+        page.on('response', (response: Response) => {
+            if (!matches(response, AUTH_PATH) || !response.ok()) {
+                return;
+            }
+            response
+                .json()
+                .then((body: unknown) => {
+                    if (isAuthPayload(body)) {
+                        resolve(body);
+                        return;
+                    }
+                    reject(
+                        new AppError('BROWSER_LOGIN_UI_CHANGED', {
+                            message: 'Protons Anmeldeantwort hat nicht die erwarteten Felder.',
+                            hint: 'Die Felder UID, AccessToken, RefreshToken, UserID und TwoFactor fehlen oder heissen anders.',
+                            context: { endpoint: AUTH_PATH },
+                        })
+                    );
+                })
+                .catch(reject);
+        });
+    });
+}
+
+function watchForTwoFactorResponse(page: Page): Promise<void> {
+    return new Promise<void>((resolve) => {
+        page.on('response', (response: Response) => {
+            if (matches(response, AUTH_2FA_PATH) && response.ok()) {
+                resolve();
+            }
+        });
+    });
+}
+
+function matches(response: Response, path: string): boolean {
+    return response.request().method() === 'POST' && new URL(response.url()).pathname === path;
+}
+
+async function fill(page: Page, name: SelectorName, value: string): Promise<void> {
+    const selector = SELECTORS[name];
+    try {
+        await page.fill(selector, value);
+    } catch (cause) {
+        throw uiChanged(name, selector, cause);
+    }
+}
+
+async function click(page: Page, name: SelectorName): Promise<void> {
+    const selector = SELECTORS[name];
+    try {
+        await page.click(selector);
+    } catch (cause) {
+        throw uiChanged(name, selector, cause);
+    }
+}
+
+/**
+ * A missing element is a changed login page, and saying so is the whole point.
+ *
+ * Without this the failure is a Playwright timeout mentioning a CSS selector, which reads like a
+ * network problem. Naming the field and the file to edit turns it into a five-minute fix.
+ */
+function uiChanged(name: SelectorName, selector: string, cause: unknown): AppError {
+    return new AppError('BROWSER_LOGIN_UI_CHANGED', {
+        message: `Auf Protons Anmeldeseite ist das Feld "${name}" nicht mehr zu finden.`,
+        hint: `Erwartet wurde \`${selector}\`. Proton hat die Seite geändert — anzupassen in packages/browser-auth/src/selectors.ts.`,
+        context: { field: name, selector },
+        cause,
+    });
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                    () =>
+                        reject(
+                            new AppError('BROWSER_LOGIN_TIMEOUT', {
+                                message,
+                                hint:
+                                    'Mit sichtbarem Fenster starten zeigt, woran es hängt — meist eine ' +
+                                    'Rückfrage von Proton, die unsichtbar niemand beantwortet.',
+                                context: { timeoutMs: ms },
+                            })
+                        ),
+                    ms
+                );
+            }),
+        ]);
+    } finally {
+        if (timer !== undefined) {
+            clearTimeout(timer);
+        }
+    }
+}

@@ -36,6 +36,12 @@ export const ERROR_CODES = [
     'VAULT_LOCKED',
     'VAULT_KEY_REJECTED',
 
+    // Signing in through a real browser
+    'BROWSER_NOT_INSTALLED',
+    'BROWSER_LOGIN_UI_CHANGED',
+    'BROWSER_LOGIN_TIMEOUT',
+    'BROWSER_LOGIN_2FA_UNSUPPORTED',
+
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',
     'CREDENTIALS_LOCKED',

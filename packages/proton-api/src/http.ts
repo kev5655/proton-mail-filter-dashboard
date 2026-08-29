@@ -22,10 +22,33 @@ export interface ProtonHttpOptions {
     baseUrl?: string;
     /** Overall attempts per request, including the first. Only 429 and 5xx are retried. */
     maxAttempts?: number;
+    /**
+     * Smallest gap between two requests, in milliseconds.
+     *
+     * Not a rate *limit* — Proton enforces those itself — but a self-imposed pace. The tool reads a
+     * mailbox to answer questions nobody is waiting on by the second, so there is no reason for it
+     * to cost Proton more than a person clicking through their own interface would. Set to 0 in
+     * tests, never in anything that talks to the real API.
+     */
+    minIntervalMs?: number;
+    /**
+     * Random extra delay on top, in milliseconds.
+     *
+     * A request exactly every 900 ms is a metronome, and a metronome is a machine signature. The
+     * jitter costs nothing and keeps the traffic from having a shape.
+     */
+    jitterMs?: number;
     /** Injected in tests. */
     fetchImpl?: typeof fetch;
     sleep?: (ms: number) => Promise<void>;
+    /** Injected in tests, so pacing can be asserted without waiting for a clock. */
+    now?: () => number;
+    random?: () => number;
 }
+
+/** Roughly the pace of someone working through their own mailbox. */
+export const DEFAULT_MIN_INTERVAL_MS = 900;
+export const DEFAULT_JITTER_MS = 600;
 
 interface RequestOptions {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -73,7 +96,14 @@ export class ProtonHttp {
     readonly #maxAttempts: number;
     readonly #fetch: typeof fetch;
     readonly #sleep: (ms: number) => Promise<void>;
+    readonly #now: () => number;
+    readonly #random: () => number;
+    readonly #minIntervalMs: number;
+    readonly #jitterMs: number;
     #session: ProtonSession | undefined;
+    /** Requests queue behind one another so a burst becomes a sequence. */
+    #pacing: Promise<unknown> = Promise.resolve();
+    #lastRequestAt = 0;
 
     constructor(options: ProtonHttpOptions) {
         this.#baseUrl = options.baseUrl ?? PROTON_API_BASE;
@@ -82,6 +112,30 @@ export class ProtonHttp {
         this.#maxAttempts = options.maxAttempts ?? 3;
         this.#fetch = options.fetchImpl ?? globalThis.fetch;
         this.#sleep = options.sleep ?? defaultSleep;
+        this.#now = options.now ?? Date.now;
+        this.#random = options.random ?? Math.random;
+        this.#minIntervalMs = options.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
+        this.#jitterMs = options.jitterMs ?? DEFAULT_JITTER_MS;
+    }
+
+    /**
+     * Wait until it is this request's turn, and until enough time has passed since the last one.
+     *
+     * Chained rather than counted, so ten calls started at once leave one at a time instead of all
+     * ten waiting the same interval and then going together — which would produce exactly the burst
+     * this is meant to avoid.
+     */
+    async #pace(): Promise<void> {
+        const turn = this.#pacing.then(async () => {
+            const gap = this.#minIntervalMs + Math.floor(this.#random() * this.#jitterMs);
+            const waitMs = gap - (this.#now() - this.#lastRequestAt);
+            if (waitMs > 0) {
+                await this.#sleep(waitMs);
+            }
+            this.#lastRequestAt = this.#now();
+        });
+        this.#pacing = turn.catch(() => undefined);
+        await turn;
     }
 
     setSession(session: ProtonSession | undefined): void {
@@ -115,6 +169,8 @@ export class ProtonHttp {
         let lastError: unknown;
 
         for (let attempt = 1; attempt <= this.#maxAttempts; attempt++) {
+            await this.#pace();
+
             let response: Response;
             try {
                 response = await this.#fetch(url, {
