@@ -1,11 +1,9 @@
-// Side-effect import, and it must come first — see polyfill.ts.
-import './polyfill.js';
-
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import { getSrp } from '@protontech/crypto/srp';
 import { z } from 'zod';
 
+import { initCrypto } from './crypto.js';
 import type { ProtonHttp, ProtonSession } from './http.js';
 import {
     authResponseSchema,
@@ -46,6 +44,9 @@ export async function login(
     credentials: LoginCredentials,
     promptTwoFactor: TwoFactorPrompt
 ): Promise<LoginResult> {
+    // getSrp verifies the PGP signature on Proton's modulus, so the crypto endpoint must exist.
+    initCrypto();
+
     const info = await http.request(
         {
             method: 'POST',

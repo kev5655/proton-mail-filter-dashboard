@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { getSrp } from '@protontech/crypto/srp';
+
+import { initCrypto, releaseCrypto } from '../src/crypto.js';
 import '../src/polyfill.js';
 
 /**
@@ -26,5 +29,35 @@ describe('@protontech/crypto/srp boundary', () => {
         // deep inside the library with a message that points nowhere near the real cause.
         expect(typeof (Uint8Array as unknown as { fromBase64?: unknown }).fromBase64).toBe('function');
         expect(typeof new Uint8Array(1).toBase64).toBe('function');
+    });
+
+    it('initCrypto makes the proxy usable, so SRP fails on the input rather than on setup', async () => {
+        // Before this was wired up, the first real login died with "CryptoProxy: endpoint not
+        // initialized" from four frames inside the library. After initCrypto, a bad modulus must
+        // fail as a bad modulus — that difference is the whole point.
+        initCrypto();
+        try {
+            await expect(
+                getSrp(
+                    {
+                        Version: 4,
+                        Modulus: 'not a signed pgp message',
+                        ServerEphemeral: '',
+                        Username: 'someone@example.com',
+                        Salt: '',
+                    },
+                    { username: 'someone@example.com', password: 'irrelevant' }
+                )
+            ).rejects.toThrow(/^(?!.*endpoint not initialized).*$/s);
+        } finally {
+            await releaseCrypto();
+        }
+    });
+
+    it('is idempotent, so a second login does not re-register the endpoint', () => {
+        expect(() => {
+            initCrypto();
+            initCrypto();
+        }).not.toThrow();
     });
 });

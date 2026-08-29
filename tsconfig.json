@@ -10,6 +10,12 @@
       ],
       "@protontech/crypto/polyfill": [
         "./packages/proton-api/types/protontech-crypto-polyfill.d.ts"
+      ],
+      "@protontech/crypto": [
+        "./packages/proton-api/types/protontech-crypto.d.ts"
+      ],
+      "@protontech/crypto/proxy/endpoint/api.ts": [
+        "./packages/proton-api/types/protontech-crypto.d.ts"
       ]
     }
   },

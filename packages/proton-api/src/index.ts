@@ -1,5 +1,6 @@
 export { buildUserAgent, resolveAppVersion, DEFAULT_APP_VERSION, type ReleaseChannel } from './appVersion.js';
 export { ProtonHttp, PROTON_API_BASE, type ProtonSession, type ProtonHttpOptions } from './http.js';
+export { initCrypto, releaseCrypto } from './crypto.js';
 export { login, type LoginCredentials, type LoginResult, type TwoFactorPrompt } from './auth.js';
 export {
     getFilters,
