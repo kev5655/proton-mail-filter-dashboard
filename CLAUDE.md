@@ -40,10 +40,17 @@ Consequences that are now load-bearing:
 ```
 vendor/proton/          Proton's own code, GPL-3.0, pinned to a commit — see vendor/proton/README.md
 packages/core/          Error taxonomy and logging
-packages/proton-api/    SRP login, HTTP client, response validation, read endpoints
-packages/rules/         Rule model and the Sieve/tree compiler (re-exported from vendor)
+packages/credentials/   1Password and prompt sources, plus the verification every one passes
+packages/proton-api/    SRP login, HTTP client, response validation, read endpoints, session store
+packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
+packages/grouping/      Subject templates, grouping, and the triage ranking
 apps/spike/             M0 read-only probe against a real account
 ```
+
+The rule engine has three parts that must agree: the **compiler** (vendored, produces what Proton
+runs), the **matcher** (predicts what that will catch), and the **analysis** on top of the matcher.
+`matcher-agrees-with-compiler.test.ts` is what keeps the first two aligned — treat a failure there
+as a real finding, not a test to adjust.
 
 ## Working here
 

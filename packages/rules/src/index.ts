@@ -26,3 +26,13 @@ export {
     type OrderedRule,
     type WildcardWarning,
 } from './matcher.js';
+export { analyseRules, type RuleAnalysis, type RuleVerdict } from './conflicts.js';
+export {
+    canExtend,
+    explain,
+    extendRule,
+    literalFragment,
+    ruleFromGroup,
+    type RuleSuggestion,
+    type SuggestionInput,
+} from './suggest.js';
