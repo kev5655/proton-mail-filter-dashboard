@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 import { isAppError } from '@pms/core/errors';
 import { configureLogging, getLogger } from '@pms/core/logger';
@@ -42,6 +42,33 @@ interface Recorded {
 }
 
 /**
+ * Scrub a JSON file that was captured by hand and write it out as a fixture.
+ *
+ * The spike normally records fixtures itself, but that needs a working login. While the account is
+ * locked — or for anything the spike does not fetch — a response can be copied out of the browser's
+ * network tab and passed through here instead. The point is that the raw file never has to leave
+ * the machine or be shown to anyone: only the scrubbed result is meant to be shared or committed.
+ */
+async function scrubFile(inputPath: string): Promise<void> {
+    const raw = await readFile(inputPath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+
+    const name = basename(inputPath).replace(/\.json$/i, '');
+    const target = join(FIXTURE_DIR, `${name}.json`);
+
+    await mkdir(FIXTURE_DIR, { recursive: true });
+    await writeFile(
+        target,
+        `${JSON.stringify({ _endpoint: `hand-captured: ${name}`, _note: SCRUB_NOTE, data: scrub(parsed) }, null, 2)}\n`,
+        'utf8'
+    );
+
+    console.log(`\n✓ Pseudonymisiert geschrieben nach ${target}`);
+    console.log('  Bitte durchsehen, bevor du sie committest oder weitergibst.');
+    console.log('  Die Originaldatei bleibt unverändert — lösch sie, wenn du sie nicht mehr brauchst.\n');
+}
+
+/**
  * Print the field labels of the configured 1Password item — labels only, never values.
  *
  * When the item is not laid out the way the code expects, the useful question is "what are the
@@ -70,6 +97,18 @@ async function main(): Promise<void> {
 
     if (process.argv.includes('--describe-1password')) {
         await describeCredentialItem();
+        return;
+    }
+
+    const scrubIndex = process.argv.indexOf('--scrub');
+    if (scrubIndex >= 0) {
+        const inputPath = process.argv[scrubIndex + 1];
+        if (inputPath === undefined) {
+            console.error('Bitte eine Datei angeben: pnpm spike --scrub <datei.json>');
+            process.exitCode = 1;
+            return;
+        }
+        await scrubFile(inputPath);
         return;
     }
 

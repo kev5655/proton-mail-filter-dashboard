@@ -68,6 +68,11 @@ Credentials come from 1Password when `PMS_OP_VAULT` is set (see `.env.example`),
 terminal prompt. The 1Password path shells out to `op`, which makes the app ask for a fingerprint;
 the value goes straight into the SRP handshake and is never logged, stored, or included in an error.
 
+`pnpm spike --scrub <file.json>` runs a hand-captured API response through the same pseudonymiser
+the spike uses and writes it to `fixtures/recorded/`. Use it when a response is needed as a fixture
+but the spike cannot fetch it: the raw file stays on the machine, only the scrubbed result is shared
+or committed.
+
 `pnpm spike --describe-1password` prints the item's **field labels only**. Use it when the item is
 not laid out as expected — the answer to "what is the field called" must never require revealing a
 value.
