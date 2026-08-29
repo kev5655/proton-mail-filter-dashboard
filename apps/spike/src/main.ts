@@ -10,12 +10,12 @@ import {
     getLabels,
     getMessageCounts,
     getMessages,
-    login,
-    ProtonHttp,
 } from '@pms/proton-api';
 
+import { FIXTURE_DIR } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
+import { connect } from './session.js';
 
 /**
  * M0 read-only spike.
@@ -29,8 +29,7 @@ import { scrub, SCRUB_NOTE } from './scrub.js';
  * cannot modify the account: nothing in `@pms/proton-api` can write yet.
  */
 
-const VERSION = '0.1.0';
-const FIXTURE_DIR = join(process.cwd(), 'fixtures', 'recorded');
+
 
 const log = getLogger('spike');
 
@@ -45,16 +44,9 @@ async function main(): Promise<void> {
 
     console.log('\nProton Mail Sorter — M0 Spike (nur lesend)\n');
     console.log('Es werden ausschliesslich Daten gelesen. Am Konto wird nichts verändert.');
-    console.log('Passwort und 2FA-Code werden nirgends gespeichert.\n');
+    console.log('Proton-Passwort und 2FA-Code werden nirgends gespeichert.\n');
 
-    const username = await terminal.askRequired('Proton-Benutzername (E-Mail): ', 'Benutzername');
-    const password = await terminal.askRequiredSecret('Passwort (Eingabe unsichtbar): ', 'Passwort');
-
-    const appVersion = process.env['PROTON_APP_VERSION'];
-    const http = new ProtonHttp({ version: VERSION, ...(appVersion === undefined ? {} : { appVersion }) });
-
-    await login(http, { username, password }, async () => terminal.askRequiredSecret('2FA-Code: ', '2FA-Code'));
-    console.log('\n✓ Angemeldet.\n');
+    const { http } = await connect();
 
     const recorded: Recorded[] = [];
 

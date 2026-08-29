@@ -194,3 +194,44 @@ async function completeTwoFactor(http: ProtonHttp, twoFactor: number, prompt: Tw
         });
     }
 }
+
+/**
+ * Exchange the refresh token for a new access token.
+ *
+ * This is the whole reason a stored session is worth having: a session that can be refreshed does
+ * not need a login, and a login is what Proton's abuse detection reacts to. Proton rotates the
+ * refresh token on every use, so the caller must persist the result.
+ */
+export async function refreshSession(http: ProtonHttp, session: ProtonSession): Promise<ProtonSession> {
+    http.setSession(session);
+    const response = await http.request(
+        {
+            method: 'POST',
+            path: 'auth/refresh',
+            body: {
+                ResponseType: 'token',
+                GrantType: 'refresh_token',
+                RefreshToken: session.refreshToken,
+                RedirectURI: 'https://protonmail.com',
+            },
+        },
+        refreshResponseSchema
+    );
+
+    const refreshed: ProtonSession = {
+        uid: response.UID ?? session.uid,
+        accessToken: response.AccessToken,
+        refreshToken: response.RefreshToken,
+    };
+    http.setSession(refreshed);
+    log.info({ uid: '[redacted]' }, 'session refreshed');
+    return refreshed;
+}
+
+const refreshResponseSchema = z.object({
+    Code: z.number(),
+    AccessToken: z.string(),
+    RefreshToken: z.string(),
+    UID: z.string().optional(),
+    ExpiresIn: z.number().optional(),
+});

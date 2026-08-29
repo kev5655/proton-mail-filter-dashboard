@@ -17,8 +17,23 @@ a full JSON backup of all filters and folders.
 
 ## Status
 
-M0 is done: repository, vendored Proton compiler, read-only API client, and the login spike.
-Nothing writes to Proton yet. See `.claude/plans/` or the milestones in the project plan for M1+.
+M0 is mostly done: repository, vendored Proton compiler, read-only API client, login spike, session
+persistence. Nothing writes to Proton yet. The spike has not yet completed a run — the test account
+is under a temporary Proton lockout (see below).
+
+**Read this before touching the login.** Proton locked the account with code 2028, "unusual activity
+targeting your account", after a handful of failed logins from this project. The cause was ours: the
+spike re-authenticated on every run, and one run sent an empty password because of a prompt bug. A
+program that logs in on every start is indistinguishable from credential stuffing.
+
+Consequences that are now load-bearing:
+
+- **Never log in when a stored session would do.** `apps/spike/src/session.ts` is the order to
+  follow: stored session, then refresh, then login. Proton rotates the refresh token on each use, so
+  a refreshed session must be written back.
+- **`LoginGuard` refuses attempts during a cooldown**, six hours after a lockout. Do not weaken it
+  or work around it in a retry loop. Retrying into an active lock is what extends the lock.
+- **Never retry a failed login automatically.** One attempt, then stop.
 
 ## Layout
 
