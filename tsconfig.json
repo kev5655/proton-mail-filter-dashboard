@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@protontech/crypto/srp": [
+        "./packages/proton-api/types/protontech-crypto-srp.d.ts"
+      ],
+      "@protontech/crypto/polyfill": [
+        "./packages/proton-api/types/protontech-crypto-polyfill.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/types/**/*.d.ts",
+    "apps/*/src/**/*.ts"
+  ],
+  "exclude": [
+    "**/dist",
+    "**/node_modules"
+  ]
+}

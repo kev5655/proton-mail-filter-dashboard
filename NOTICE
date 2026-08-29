@@ -1,0 +1,41 @@
+proton-mail-sorter
+Copyright (C) 2026 the proton-mail-sorter contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 3, as published by the Free
+Software Foundation. See the LICENSE file for the full text.
+
+--------------------------------------------------------------------------------
+Third-party code included in this repository
+--------------------------------------------------------------------------------
+
+vendor/proton/
+    Derived from Proton Technologies AG's open-source web client.
+
+    Upstream:  https://github.com/ProtonMail/WebClients
+    Commit:    67e20e4f558c6a990444759bc6ebd10f47cab445
+    License:   GPL-3.0
+
+    Vendored packages:
+      - packages/sieve            -> vendor/proton/sieve
+        Conversion between Proton's structured filter model ("tree") and Sieve.
+      - selected type definitions -> vendor/proton/types
+
+    See vendor/proton/README.md for what was changed and how to refresh it.
+
+--------------------------------------------------------------------------------
+Runtime dependencies of note
+--------------------------------------------------------------------------------
+
+@protontech/crypto (GPL-3.0)
+    Proton's cryptography library. Used for the SRP authentication handshake.
+    https://www.npmjs.com/package/@protontech/crypto
+
+Because this project links against GPL-3.0 licensed code from Proton, the
+project as a whole is distributed under the GPL-3.0.
+
+--------------------------------------------------------------------------------
+
+This project is not affiliated with, endorsed by, or supported by Proton
+Technologies AG. It uses Proton's internal web API, which carries no stability
+guarantee and may change or break at any time.

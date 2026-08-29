@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# Runtime data — never commit
+data/
+*.db
+*.db-*
+logs/
+*.log
+backups/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Generated type declarations for the vendored Proton code (built by pnpm build:vendor).
+vendor/proton/sieve/dist/

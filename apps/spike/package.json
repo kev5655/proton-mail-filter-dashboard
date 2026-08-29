@@ -1,0 +1,15 @@
+{
+  "name": "@pms/spike",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "scripts": {
+    "start": "vite-node --config ../../vite.config.ts src/main.ts"
+  },
+  "dependencies": {
+    "@pms/core": "workspace:*",
+    "@pms/proton-api": "workspace:*",
+    "@proton/sieve": "workspace:*"
+  }
+}

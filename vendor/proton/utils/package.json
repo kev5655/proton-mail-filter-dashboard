@@ -1,0 +1,11 @@
+{
+  "name": "@proton/utils",
+  "version": "0.0.0-vendored",
+  "private": true,
+  "license": "GPL-3.0",
+  "description": "Vendored helpers from ProtonMail/WebClients packages/utils, only what @proton/sieve needs.",
+  "exports": {
+    "./isTruthy": "./isTruthy.ts"
+  },
+  "type": "module"
+}

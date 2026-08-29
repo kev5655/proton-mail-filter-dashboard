@@ -1,0 +1,26 @@
+{
+  "name": "proton-mail-sorter",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "packageManager": "pnpm@10.34.3",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "spike": "pnpm --filter @pms/spike start",
+    "build:vendor": "pnpm --filter @proton/sieve build",
+    "check-types": "pnpm build:vendor && tsc",
+    "test": "pnpm build:vendor && vitest run",
+    "test:watch": "vitest",
+    "vendor:update": "./scripts/vendor-update.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "7.0.2",
+    "vite": "^6.4.3",
+    "vite-node": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

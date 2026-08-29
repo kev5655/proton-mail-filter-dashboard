@@ -1,0 +1,135 @@
+/**
+ * Error taxonomy.
+ *
+ * Every failure this project can produce carries a stable machine code, a German message for the
+ * user, a hint at what to do about it, and structured context. The code is shown in the UI and
+ * written to the logs, so any report can be grepped straight back to the throw site.
+ */
+
+export const ERROR_CODES = [
+    // Authentication against Proton
+    'PROTON_AUTH_FAILED',
+    'PROTON_AUTH_2FA_REQUIRED',
+    'PROTON_AUTH_2FA_INVALID',
+    'PROTON_SESSION_EXPIRED',
+
+    // Transport and API behaviour
+    'PROTON_NETWORK_UNREACHABLE',
+    'PROTON_RATE_LIMITED',
+    'PROTON_API_ERROR',
+
+    // The contract with Proton broke — the loud failure we deliberately want
+    'PROTON_SCHEMA_MISMATCH',
+
+    // Rule compilation and simulation
+    'RULE_COMPILE_UNSUPPORTED_CONDITION',
+    'RULE_COMPILE_FAILED',
+    'RULE_SIEVE_REJECTED',
+
+    // Verifying that Proton actually did what a rule promised
+    'VERIFY_PARTIAL_MOVE',
+    'VERIFY_RULE_NOT_FIRING',
+
+    // Local storage and the tool's own login
+    'VAULT_LOCKED',
+    'VAULT_KEY_REJECTED',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Free-form structured detail attached to an error. Must never contain secrets. */
+export type ErrorContext = Record<string, unknown>;
+
+export interface AppErrorOptions {
+    /** What the user sees. German, plain, no stack-trace vocabulary. */
+    message: string;
+    /** What they can do about it. Omit when there is genuinely nothing to suggest. */
+    hint?: string;
+    /** Structured detail for the logs. */
+    context?: ErrorContext;
+    cause?: unknown;
+}
+
+export class AppError extends Error {
+    readonly code: ErrorCode;
+    readonly hint: string | undefined;
+    readonly context: ErrorContext;
+
+    constructor(code: ErrorCode, options: AppErrorOptions) {
+        super(options.message, options.cause === undefined ? undefined : { cause: options.cause });
+        this.name = 'AppError';
+        this.code = code;
+        this.hint = options.hint;
+        this.context = options.context ?? {};
+    }
+
+    /** Shape sent to the UI and written to the log. */
+    toJSON(): { code: ErrorCode; message: string; hint?: string; context: ErrorContext } {
+        return {
+            code: this.code,
+            message: this.message,
+            ...(this.hint === undefined ? {} : { hint: this.hint }),
+            context: this.context,
+        };
+    }
+}
+
+export function isAppError(value: unknown): value is AppError {
+    return value instanceof AppError;
+}
+
+/**
+ * Proton's response no longer matches what we expect.
+ *
+ * This is the error the whole fail-fast design exists for: rather than letting an `undefined` travel
+ * three layers inward and surface as nonsense, we stop here and name the endpoint and the exact
+ * field that changed.
+ */
+export class ProtonSchemaError extends AppError {
+    constructor(params: {
+        endpoint: string;
+        issues: Array<{ path: string; expected: string; received: string }>;
+        cause?: unknown;
+    }) {
+        const first = params.issues[0];
+        const field = first ? ` (Feld \`${first.path}\`)` : '';
+        super('PROTON_SCHEMA_MISMATCH', {
+            message: `Proton hat das Antwortformat von \`${params.endpoint}\` geändert${field}.`,
+            hint:
+                'Das Tool ist bis zu einem Fix nicht sicher benutzbar. Bitte den Vorfall exportieren ' +
+                '(Verlauf → Bericht exportieren) — daraus lässt sich der Adapter anpassen.',
+            context: { endpoint: params.endpoint, issues: params.issues },
+            ...(params.cause === undefined ? {} : { cause: params.cause }),
+        });
+        this.name = 'ProtonSchemaError';
+    }
+}
+
+/** Proton answered, but with an error of its own. */
+export class ProtonApiError extends AppError {
+    readonly httpStatus: number;
+    readonly protonCode: number | undefined;
+
+    constructor(params: {
+        endpoint: string;
+        httpStatus: number;
+        protonCode?: number;
+        protonMessage?: string;
+        cause?: unknown;
+    }) {
+        const detail = params.protonMessage ? `: ${params.protonMessage}` : '';
+        super('PROTON_API_ERROR', {
+            message: `Proton hat \`${params.endpoint}\` mit HTTP ${params.httpStatus} abgelehnt${detail}`,
+            context: {
+                endpoint: params.endpoint,
+                httpStatus: params.httpStatus,
+                protonCode: params.protonCode,
+                protonMessage: params.protonMessage,
+            },
+            ...(params.cause === undefined ? {} : { cause: params.cause }),
+        });
+        this.name = 'ProtonApiError';
+        this.httpStatus = params.httpStatus;
+        this.protonCode = params.protonCode;
+    }
+}

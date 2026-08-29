@@ -1,0 +1,14 @@
+{
+  "name": "@pms/core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    "./errors": "./src/errors.ts",
+    "./logger": "./src/logger.ts"
+  },
+  "dependencies": {
+    "pino": "^10.3.1"
+  }
+}

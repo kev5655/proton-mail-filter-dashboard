@@ -1,0 +1,87 @@
+# proton-mail-sorter
+
+A local dashboard for managing Proton Mail's server-side filters and folders.
+
+## The one rule
+
+**This tool never moves mail.** Proton's own filters do the sorting; we only manage the rules that
+tell Proton what to do. The single exception is **undo**, which may move back exactly the message
+IDs a rule moved, recorded in the undo journal — never a message the journal does not name.
+
+The rule is enforced structurally, not by discipline: only `packages/proton-api/src/write/` may
+issue non-GET requests, and the message-moving calls inside it are reachable only from the undo
+service. If you are about to add a write path anywhere else, that is the signal to stop.
+
+Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
+a full JSON backup of all filters and folders.
+
+## Status
+
+M0 is done: repository, vendored Proton compiler, read-only API client, and the login spike.
+Nothing writes to Proton yet. See `.claude/plans/` or the milestones in the project plan for M1+.
+
+## Layout
+
+```
+vendor/proton/          Proton's own code, GPL-3.0, pinned to a commit — see vendor/proton/README.md
+packages/core/          Error taxonomy and logging
+packages/proton-api/    SRP login, HTTP client, response validation, read endpoints
+packages/rules/         Rule model and the Sieve/tree compiler (re-exported from vendor)
+apps/spike/             M0 read-only probe against a real account
+```
+
+## Working here
+
+```sh
+pnpm install
+pnpm check-types        # builds vendor declarations, then tsc over everything
+pnpm test               # vitest
+pnpm spike              # the M0 probe — asks for credentials, reads only
+```
+
+`pnpm spike` must be run by the account owner. It prompts for the password and TOTP in the terminal;
+neither is stored, logged, or written to a fixture. Do not ask for credentials or accept a token.
+
+## Three things that will bite you
+
+**1. Proton's API is internal.** It has no stability guarantee. That is accepted — the requirement
+is not that we never break, but that a break is *obvious*. Three layers do that:
+
+- `vendor/proton/` is pinned to a commit, so an upstream type change becomes a compile error here.
+- Every response is validated by a zod schema in `packages/proton-api/src/schemas.ts`. A mismatch
+  raises `PROTON_SCHEMA_MISMATCH` naming the endpoint and the exact JSON path.
+- `packages/proton-api/types/*.d.ts` hand-declares `@protontech/crypto`, which ships raw TypeScript
+  that will not compile under our settings. A hand-written declaration is a promise the compiler
+  cannot check, so `test/crypto-boundary.test.ts` checks it at runtime instead. Keep the two in step.
+
+**2. Some dependencies ship TypeScript, not JavaScript.** `@protontech/crypto` and the vendored
+Proton packages are raw `.ts`. Node cannot load them, so anything that runs them goes through
+vite (`vite.config.ts` lists them under `ssr.noExternal`). `tsx` does *not* work for this. Also,
+`packages/proton-api/src/polyfill.ts` must be imported before any SRP code: Node 24 lacks
+`Uint8Array.fromBase64`, which the library assumes.
+
+**3. Tree filters cannot match arbitrary headers.** Proton's clickable filters support only
+`subject`, `sender`, `recipient` and `attachments`. Grouping by `List-Id` therefore requires a Sieve
+filter, which is no longer editable in Proton's own UI. That trade-off belongs in front of the user
+per rule, not hidden in a default.
+
+## Conventions
+
+**Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
+`ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the
+UI so a report can be grepped back to the throw site. Never put mail content or secrets in context —
+`validate.ts` describes values (`string(length 25)`) rather than quoting them, for that reason.
+
+**Logging.** `getLogger('module')` from `@pms/core/logger`. Secrets are redacted by key name at
+serialisation time; `packages/core/test/logger-redaction.test.ts` is the proof, and any new
+secret-bearing field name belongs in `SECRET_KEYS`.
+
+**Tests.** The rule compiler is tested against Proton's own fixtures — those tests are the tripwire
+for the vendoring, so do not weaken them to make a refresh pass. If upstream changes behaviour, that
+is a finding to surface, not a test to adjust. `packages/rules/test/sieve-compiler.test.ts` also
+documents a real lossiness: version 1 filters cannot be read back as `starts`/`ends`.
+
+**Comments.** Say what a thing is and why it is not obvious. Do not narrate change history.
+
+**Git.** Author identity is pinned per-repo (`git config --local`) to keep a private address out of
+a public history. Work on feature branches; never commit to `main` and never push without asking.

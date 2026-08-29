@@ -1,0 +1,10 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+  - 'vendor/proton/sieve'
+  - 'vendor/proton/utils'
+
+# esbuild ships a platform binary that its install script unpacks; tsx needs it.
+# Nothing else in this tree is allowed to run install scripts.
+onlyBuiltDependencies:
+  - esbuild

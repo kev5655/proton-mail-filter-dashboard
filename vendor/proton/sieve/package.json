@@ -1,0 +1,37 @@
+{
+  "name": "@proton/sieve",
+  "version": "0.0.0-vendored",
+  "private": true,
+  "license": "GPL-3.0",
+  "description": "Vendored from ProtonMail/WebClients packages/sieve. Do not edit src/ or fixtures/.",
+  "exports": {
+    "./filterModel": {
+      "types": "./dist/types/src/filterModel.d.ts",
+      "default": "./src/filterModel.ts"
+    },
+    "./fromSieveTree": {
+      "types": "./dist/types/src/fromSieve/fromSieveTree.d.ts",
+      "default": "./src/fromSieve/fromSieveTree.ts"
+    },
+    "./toSieveTree": {
+      "types": "./dist/types/src/toSieve/toSieveTree.d.ts",
+      "default": "./src/toSieve/toSieveTree.ts"
+    },
+    "./types": {
+      "types": "./dist/types/src/interface.d.ts",
+      "default": "./src/interface.ts"
+    },
+    "./fixtures/*": "./fixtures/*.ts"
+  },
+  "dependencies": {
+    "@proton/utils": "workspace:*",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.20"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}
