@@ -1,7 +1,8 @@
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { loginWithBrowser } from '@pms/browser-auth';
-import { isAppError } from '@pms/core/errors';
+import { AppError, isAppError } from '@pms/core/errors';
 import {
     getFolders,
     loadSession,
@@ -115,12 +116,9 @@ export async function connect(): Promise<Connection> {
     const username = await source.getUsername();
     const password = await source.getPassword();
 
-    const headless = process.env['PMS_BROWSER_HEADLESS'] !== 'false';
-    console.log(
-        headless
-            ? 'Anmeldung über einen Browser (unsichtbar). PMS_BROWSER_HEADLESS=false zeigt das Fenster.'
-            : 'Anmeldung über einen Browser — bitte das Fenster beachten.'
-    );
+    const browser = browserOptions();
+    console.log(`Anmeldung über ${describeBrowser(browser)}`);
+    warnAboutLiveProfile(browser.profileDir);
 
     let session: ProtonSession;
     let userId: string;
@@ -128,7 +126,7 @@ export async function connect(): Promise<Connection> {
         const result = await loginWithBrowser({
             username,
             password,
-            headless,
+            ...browser,
             promptTotp: async () => {
                 const stored = await source.getTotp();
                 if (stored !== undefined) {
@@ -151,6 +149,68 @@ export async function connect(): Promise<Connection> {
     await persist(session, userId, passphrase);
     console.log('✓ Angemeldet. Die Sitzung ist gespeichert — der nächste Lauf braucht keinen Login.\n');
     return { http, freshLogin: true };
+}
+
+interface BrowserChoice {
+    headless: boolean;
+    channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
+    profileDir?: string | undefined;
+}
+
+const CHANNELS = new Set(['chrome', 'msedge', 'chromium']);
+
+/**
+ * Which browser signs in, and whether it remembers having done so.
+ *
+ * All three are off by default. A downloaded Chromium with a throwaway profile is the choice that
+ * touches least on this machine; the others trade some of that away for a browser Proton is more
+ * likely to recognise, which is the whole difficulty here.
+ */
+function browserOptions(): BrowserChoice {
+    const channel = process.env['PMS_BROWSER_CHANNEL'];
+    const profile = process.env['PMS_BROWSER_PROFILE'];
+
+    if (channel !== undefined && !CHANNELS.has(channel)) {
+        throw new AppError('BROWSER_NOT_INSTALLED', {
+            message: `PMS_BROWSER_CHANNEL="${channel}" ist keiner der bekannten Browser.`,
+            hint: `Möglich sind: ${[...CHANNELS].join(', ')}. Ohne die Variable wird das mitgelieferte Chromium verwendet.`,
+            context: { channel },
+        });
+    }
+
+    return {
+        headless: process.env['PMS_BROWSER_HEADLESS'] !== 'false',
+        ...(channel === undefined ? {} : { channel: channel as BrowserChoice['channel'] }),
+        ...(profile === undefined || profile === ''
+            ? {}
+            : { profileDir: resolve(profile.replace(/^~(?=\/|$)/, homedir())) }),
+    };
+}
+
+/** Profiles a browser you actually use. Driving one of these is not the same as borrowing it. */
+const LIVE_PROFILES = ['.config/google-chrome', '.config/chromium', '.config/microsoft-edge'];
+
+function warnAboutLiveProfile(profileDir: string | undefined): void {
+    if (profileDir === undefined) {
+        return;
+    }
+    if (LIVE_PROFILES.some((known) => profileDir.startsWith(join(homedir(), known)))) {
+        console.log(
+            '\n  Achtung: das ist dein echtes Browser-Profil. Chrome muss dafür geschlossen sein,\n' +
+                '  und der automatisierte Start kann Einstellungen darin verändern. Ein eigenes\n' +
+                '  Verzeichnis (z. B. data/browser-profile) ist die sicherere Wahl.\n'
+        );
+    }
+}
+
+function describeBrowser(choice: BrowserChoice): string {
+    const which = choice.channel === undefined ? 'das mitgelieferte Chromium' : `den installierten ${choice.channel}`;
+    const window = choice.headless ? 'unsichtbar' : 'mit sichtbarem Fenster';
+    const profile =
+        choice.profileDir === undefined
+            ? 'Profil wird nach der Anmeldung verworfen'
+            : `Profil bleibt in ${choice.profileDir}`;
+    return `${which}, ${window}. ${profile}.`;
 }
 
 async function reuse(http: ProtonHttp, stored: StoredSession, passphrase: string): Promise<boolean> {

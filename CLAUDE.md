@@ -51,7 +51,10 @@ are. It has no specification, a fabricated one is a worse signal than none, and 
 control is not something this project does — so **the login runs in a real browser**
 (`@pms/browser-auth`), where Proton's script produces a genuine challenge and nothing is imitated.
 It is also the only way a passkey works at all: WebAuthn needs an authenticator, which no Node HTTP
-client has. The browser exists for the login and closes straight afterwards; everything else is the
+client has — and for a passkey that means `PMS_BROWSER_CHANNEL=chrome` and a visible window, since
+the credential lives in the real browser's store, not in Playwright's Chromium. `PMS_BROWSER_PROFILE`
+keeps that profile between runs so Proton recognises the device; it is opt-in because those cookies
+sit in Chrome's store rather than in our encrypted session file. The browser exists for the login and closes straight afterwards; everything else is the
 ordinary API client. `write-isolation.test.ts` checks that it is only ever pointed at the login page,
 because a browser driven to a mailbox could move mail with every HTTP-level guard intact.
 

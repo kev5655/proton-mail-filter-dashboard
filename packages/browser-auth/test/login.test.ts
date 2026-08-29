@@ -82,6 +82,7 @@ function fakeBrowser(options: { missing?: string; body?: unknown; twoFactor?: nu
 
     const browser = {
         newContext: async () => ({
+            pages: () => [],
             newPage: async () => fakePage,
             close: async () => {},
         }),

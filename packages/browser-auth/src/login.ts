@@ -48,6 +48,27 @@ export interface BrowserLoginOptions {
      * authenticator to touch — so a FIDO2-only account must set this to false.
      */
     headless?: boolean;
+    /**
+     * Use a browser already installed on this machine instead of the one Playwright downloaded.
+     *
+     * `chrome` is the real Google Chrome. It matters for a passkey: the credential lives in the
+     * browser's own store or is reached over hybrid transport, and Playwright's bundled Chromium is
+     * a different browser with a different store. It is also, simply, an ordinary browser doing an
+     * ordinary thing, which is the whole idea.
+     */
+    channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
+    /**
+     * Keep the browser profile in this directory instead of throwing it away.
+     *
+     * Worth knowing before switching it on. In favour: Proton recognises a device it has seen
+     * before and asks fewer questions, which is the entire problem here. Against: the profile holds
+     * cookies in Chrome's own store, which this project does not encrypt the way it encrypts the
+     * session file — so it is opt-in, and it belongs somewhere git-ignored.
+     *
+     * Do not point this at a profile Chrome is currently using. Playwright needs the profile to
+     * itself and will refuse.
+     */
+    profileDir?: string | undefined;
     timeoutMs?: number;
     loginUrl?: string;
     /** Injected in tests, so the flow can be exercised without launching anything. */
@@ -86,12 +107,10 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
     const headless = options.headless ?? true;
     const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-    const browser = await launchBrowser(options.launch, headless);
-    let context: BrowserContext | undefined;
+    const launched = await launchBrowser(options, headless);
+    const { browser, context } = launched;
     try {
-        // A throwaway profile: nothing about this login is written anywhere the next one can find.
-        context = await browser.newContext();
-        const page = await context.newPage();
+        const page = context.pages()[0] ?? (await context.newPage());
         page.setDefaultTimeout(timeout);
 
         const auth = watchForAuthResponse(page);
@@ -137,26 +156,51 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
             userId: payload.UserID,
         };
     } finally {
-        await context?.close().catch(() => undefined);
-        await browser.close().catch(() => undefined);
+        await context.close().catch(() => undefined);
+        await browser?.close().catch(() => undefined);
     }
 }
 
-async function launchBrowser(
-    launch: (() => Promise<Browser>) | undefined,
-    headless: boolean
-): Promise<Browser> {
-    if (launch !== undefined) {
-        return launch();
+interface Launched {
+    /** Undefined for a persistent profile: there the context owns the browser. */
+    browser: Browser | undefined;
+    context: BrowserContext;
+}
+
+async function launchBrowser(options: BrowserLoginOptions, headless: boolean): Promise<Launched> {
+    if (options.launch !== undefined) {
+        const browser = await options.launch();
+        return { browser, context: await browser.newContext() };
     }
+
+    const channel = options.channel;
     try {
         const { chromium } = await import('playwright');
-        return await chromium.launch({ headless });
+
+        if (options.profileDir !== undefined) {
+            // A persistent profile *is* the context; there is no separate browser to close.
+            const context = await chromium.launchPersistentContext(options.profileDir, {
+                headless,
+                ...(channel === undefined ? {} : { channel }),
+            });
+            return { browser: undefined, context };
+        }
+
+        // Otherwise a throwaway profile: nothing is written anywhere the next login can find.
+        const browser = await chromium.launch({ headless, ...(channel === undefined ? {} : { channel }) });
+        return { browser, context: await browser.newContext() };
     } catch (cause) {
         throw new AppError('BROWSER_NOT_INSTALLED', {
-            message: 'Der Browser für die Anmeldung liess sich nicht starten.',
-            hint: 'Einmalig `pnpm exec playwright install chromium` ausführen.',
-            context: { headless },
+            message:
+                channel === undefined
+                    ? 'Der Browser für die Anmeldung liess sich nicht starten.'
+                    : `Der installierte Browser "${channel}" liess sich nicht starten.`,
+            hint:
+                channel === undefined
+                    ? 'Einmalig `pnpm exec playwright install chromium` ausführen.'
+                    : 'Ist er installiert? Und läuft er gerade mit demselben Profil — Playwright ' +
+                      'braucht das Profil für sich allein.',
+            context: { headless, channel, profileDir: options.profileDir },
             cause,
         });
     }
