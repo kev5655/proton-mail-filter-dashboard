@@ -8,6 +8,7 @@ import type { ProtonHttp, ProtonSession } from './http.js';
 import {
     authResponseSchema,
     infoResponseSchema,
+    sessionResponseSchema,
     TWO_FACTOR_FIDO2,
     TWO_FACTOR_TOTP,
     type AuthResponse,
@@ -24,6 +25,13 @@ const log = getLogger('proton-auth');
  * impostor endpoint, so a mismatch aborts hard.
  *
  * The cryptography itself is Proton's own `@protontech/crypto`, not a reimplementation.
+ *
+ * The handshake has three steps, not two. Before `auth/info` comes `auth/v4/sessions`, which opens
+ * an *unauthenticated* session — tokens with no user behind them — and the two SRP calls then run
+ * inside it, carrying its `x-pm-uid`. Proton's own client has always done this; we did not, and
+ * that is what earned code 2028. A credential submission arriving with no session context is
+ * shaped exactly like credential stuffing, whatever the credentials turn out to be. The account was
+ * never locked: the same account signed in through a browser at the same moment this was refused.
  */
 
 export interface LoginCredentials {
@@ -47,12 +55,13 @@ export async function login(
     // getSrp verifies the PGP signature on Proton's modulus, so the crypto endpoint must exist.
     initCrypto();
 
+    await openUnauthSession(http);
+
     const info = await http.request(
         {
             method: 'POST',
             path: 'core/v4/auth/info',
             body: { Username: credentials.username, Intent: 'Proton' },
-            anonymous: true,
         },
         infoResponseSchema
     );
@@ -81,7 +90,6 @@ export async function login(
                     SRPSession: info.SRPSession,
                     PersistentCookies: 0,
                 },
-                anonymous: true,
             },
             authResponseSchema
         );
@@ -114,6 +122,53 @@ export async function login(
         'logged in to proton'
     );
     return { session, userId: auth.UserID, scope: auth.Scope };
+}
+
+/**
+ * Open the unauthenticated session that the SRP handshake runs inside.
+ *
+ * This is the only call of the whole login that is genuinely anonymous. Everything after it carries
+ * the UID returned here, which is what makes the login look like one client having one conversation
+ * instead of a bare pair of credentials arriving out of nowhere.
+ *
+ * Proton's web client attaches a `Payload` here — a device challenge collected in the browser. It
+ * is optional in the API and we deliberately send none: fabricating browser telemetry would be
+ * pretending to be a browser, which is the one thing this client does not do.
+ *
+ * A failure here aborts. Falling back to the old anonymous shape would restore exactly the request
+ * pattern Proton flagged, and would spend a login attempt to do it.
+ */
+async function openUnauthSession(http: ProtonHttp): Promise<void> {
+    let response;
+    try {
+        response = await http.request(
+            {
+                method: 'POST',
+                path: 'auth/v4/sessions',
+                body: {},
+                anonymous: true,
+                // Required of clients that are not covered by Proton's minimum-version list.
+                headers: { 'x-enforce-unauthsession': 'true' },
+            },
+            sessionResponseSchema
+        );
+    } catch (cause) {
+        throw new AppError('PROTON_AUTH_FAILED', {
+            message: 'Proton hat keine Sitzung für die Anmeldung eröffnet.',
+            hint:
+                'Die Anmeldung wurde abgebrochen, bevor Zugangsdaten gesendet wurden — es zählt ' +
+                'also kein Fehlversuch. Ohne diese Sitzung wertet Proton den Login als verdächtig.',
+            context: { step: 'auth/v4/sessions' },
+            cause,
+        });
+    }
+
+    http.setSession({
+        uid: response.UID,
+        accessToken: response.AccessToken,
+        refreshToken: response.RefreshToken,
+    });
+    log.debug('unauthenticated session opened for the login handshake');
 }
 
 /**

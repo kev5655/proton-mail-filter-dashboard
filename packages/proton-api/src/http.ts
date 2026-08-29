@@ -32,8 +32,10 @@ interface RequestOptions {
     path: string;
     query?: Record<string, string | number | undefined>;
     body?: unknown;
-    /** Send without the session headers. Only the pre-login auth calls do this. */
+    /** Send without the session headers. Only the very first call of the login does this. */
     anonymous?: boolean;
+    /** Extra headers for this one request. Merged last, so it can override the defaults. */
+    headers?: Record<string, string>;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -117,7 +119,7 @@ export class ProtonHttp {
             try {
                 response = await this.#fetch(url, {
                     method: options.method,
-                    headers: this.#headers(options.anonymous === true),
+                    headers: { ...this.#headers(options.anonymous === true), ...options.headers },
                     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
                 });
             } catch (cause) {

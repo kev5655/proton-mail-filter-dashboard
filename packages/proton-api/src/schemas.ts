@@ -24,6 +24,19 @@ export const infoResponseSchema = envelope.extend({
 });
 export type InfoResponse = z.output<typeof infoResponseSchema>;
 
+/**
+ * `POST auth/v4/sessions` — the unauthenticated session the login handshake runs inside.
+ *
+ * Same token shape as a real session, but with no user attached: it exists so Proton can see the
+ * whole login as one client's conversation rather than a bare credential submission.
+ */
+export const sessionResponseSchema = envelope.extend({
+    AccessToken: z.string(),
+    RefreshToken: z.string(),
+    UID: z.string(),
+});
+export type SessionResponse = z.output<typeof sessionResponseSchema>;
+
 export const authResponseSchema = envelope.extend({
     AccessToken: z.string(),
     RefreshToken: z.string(),

@@ -34,10 +34,18 @@ M0 is mostly done: repository, vendored Proton compiler, read-only API client, l
 persistence. Nothing writes to Proton yet. The spike has not yet completed a run — the test account
 is under a temporary Proton lockout (see below).
 
-**Read this before touching the login.** Proton locked the account with code 2028, "unusual activity
-targeting your account", after a handful of failed logins from this project. The cause was ours: the
-spike re-authenticated on every run, and one run sent an empty password because of a prompt bug. A
-program that logs in on every start is indistinguishable from credential stuffing.
+**Read this before touching the login.** Proton answered code 2028, "unusual activity targeting your
+account", to every login from this project. It was never an account lock: the same account signed in
+through a browser at the same moment. Proton was rejecting the *shape* of our handshake.
+
+The handshake has three steps, not two. `POST auth/v4/sessions` opens an unauthenticated session
+first, and `auth/info` and `auth` then run inside it, carrying its `x-pm-uid`. We sent both
+anonymously, which is what credential stuffing looks like from the outside — whatever the
+credentials turn out to be. `packages/proton-api/test/login-handshake.test.ts` pins the sequence, so
+it can be checked without spending an attempt.
+
+Two of our own bugs made it worse before that was understood: the spike re-authenticated on every
+run, and one run sent an empty password because of a prompt bug.
 
 Consequences that are now load-bearing:
 
@@ -45,11 +53,12 @@ Consequences that are now load-bearing:
   follow: stored session, then refresh, then login. Proton rotates the refresh token on each use, so
   a refreshed session must be written back.
 - **`LoginGuard` refuses attempts during an escalating cooldown**, and after a 2028 it refuses
-  indefinitely. The lock does not expire on a timer here, because it does not expire on one at
-  Proton either: their remedy is a regular sign-in at mail.proton.me. A clock would only schedule
-  the next blind attempt, and retrying into an active lock is what extends it. The owner confirms
-  they got in with `pnpm spike --sperre-geklaert`; the ordinary cooldown keeps running afterwards,
-  so it is still one attempt at a time. Do not weaken either, and do not wrap them in a retry loop.
+  indefinitely — released only by `pnpm spike --sperre-geklaert`, which the owner runs once they
+  have signed in at mail.proton.me and seen the account is reachable. No timer, deliberately: a
+  clock would schedule the next blind attempt. Do not weaken it or wrap it in a retry loop.
+- **Diagnose a rejected login offline.** The last one was a missing request, findable in
+  `vendor/proton/` and in the WebClients source, and every live attempt spent guessing at it cost
+  the account owner something.
 - **Never retry a failed login automatically.** One attempt, then stop.
 
 ## Layout
