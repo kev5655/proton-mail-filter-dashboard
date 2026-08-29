@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import { isAppError } from '@pms/core/errors';
 import { configureLogging, getLogger } from '@pms/core/logger';
@@ -50,10 +50,24 @@ interface Recorded {
  * the machine or be shown to anyone: only the scrubbed result is meant to be shared or committed.
  */
 async function scrubFile(inputPath: string): Promise<void> {
-    const raw = await readFile(inputPath, 'utf8');
+    // `pnpm --filter` runs in the package directory, so a relative path typed at the repository
+    // root would be resolved against apps/spike and simply not found. pnpm records where the user
+    // actually was in INIT_CWD; that is the only sensible base for a path they typed.
+    const base = process.env['INIT_CWD'] ?? process.cwd();
+    const resolved = resolve(base, inputPath);
+
+    let raw: string;
+    try {
+        raw = await readFile(resolved, 'utf8');
+    } catch {
+        throw new Error(
+            `Datei nicht gefunden: ${resolved}\n` +
+                '  Pfad relativ zum Verzeichnis angeben, in dem du den Befehl aufrufst, oder absolut.'
+        );
+    }
     const parsed: unknown = JSON.parse(raw);
 
-    const name = basename(inputPath).replace(/\.json$/i, '');
+    const name = basename(resolved).replace(/\.json$/i, '');
     const target = join(FIXTURE_DIR, `${name}.json`);
 
     await mkdir(FIXTURE_DIR, { recursive: true });

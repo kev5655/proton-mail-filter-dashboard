@@ -12,6 +12,10 @@ logs/
 *.log
 backups/
 
+# Unscrubbed API captures. Only the output of `pnpm spike --scrub` belongs in the repo.
+*-raw.json
+*.raw.json
+
 # Secrets / local config
 .env
 .env.*

@@ -130,5 +130,7 @@ documents a real lossiness: version 1 filters cannot be read back as `starts`/`e
 
 **Comments.** Say what a thing is and why it is not obvious. Do not narrate change history.
 
-**Git.** Author identity is pinned per-repo (`git config --local`) to keep a private address out of
+**Git.** Check `git status` before `git add -A` — three empty files once made it into a commit
+that way, created by stray shell redirection and swept up without anyone looking. Author identity is
+pinned per-repo (`git config --local`) to keep a private address out of
 a public history. Work on feature branches; never commit to `main` and never push without asking.
