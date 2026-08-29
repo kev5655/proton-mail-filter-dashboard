@@ -92,11 +92,11 @@ async function describeCredentialItem(): Promise<void> {
     const config = credentialConfig();
     if (config.vault === undefined || config.vault === '') {
         console.log('PMS_OP_VAULT ist nicht gesetzt — es gibt nichts zu beschreiben.');
-        console.log('Beispiel: PMS_OP_VAULT="Kevin Private" PMS_OP_ITEM="Proton" pnpm spike --describe-1password\n');
+        console.log('Beispiel: PMS_OP_VAULT="Private" PMS_OP_ITEM="Proton" pnpm spike --describe-1password\n');
         return;
     }
 
-    const labels = await describeItem({ vault: config.vault, item: config.item });
+    const labels = await describeItem({ vault: config.vault, item: config.item, account: config.account });
     console.log(`\nFelder in "${config.item}" (Tresor "${config.vault}") — nur Namen, keine Werte:\n`);
     for (const label of labels) {
         console.log(`  ${label}`);

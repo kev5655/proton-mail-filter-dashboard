@@ -28,10 +28,18 @@ const log = getLogger('credentials-1password');
 const execFileAsync = promisify(execFile);
 
 export interface OnePasswordConfig {
-    /** Vault name, e.g. "Kevin Private". */
+    /** Vault name, e.g. "Private". */
     vault: string;
     /** Item title, e.g. "Proton". */
     item: string;
+    /**
+     * Which signed-in `op` account to use, e.g. "my.1password.eu".
+     *
+     * `op` picks a default account when several are signed in, and that default need not be the one
+     * holding the vault above — it silently reports "isn't an item in this vault" instead of naming
+     * the mismatch. Set this whenever more than one account is registered.
+     */
+    account?: string | undefined;
     /** Field labels to try, in order. Different item templates name them differently. */
     usernameFields?: string[];
     passwordFields?: string[];
@@ -67,16 +75,20 @@ export interface CredentialSource {
     getSessionPassphrase(): Promise<string | undefined>;
 }
 
+function accountArgs(config: Pick<OnePasswordConfig, 'account'>): string[] {
+    return config.account === undefined ? [] : ['--account', config.account];
+}
+
 export function createOnePasswordSource(config: OnePasswordConfig): CredentialSource {
     const run = config.run ?? runOp;
-    const name = `1Password (${config.vault}/${config.item})`;
+    const name = `1Password (${config.vault}/${config.item}${config.account === undefined ? '' : ` @${config.account}`})`;
     const origin = (label: string): CredentialOrigin => ({ source: name, label });
 
     const readField = async (fields: string[], label: string): Promise<string | undefined> => {
         for (const field of fields) {
             const reference = `op://${config.vault}/${config.item}/${field}`;
             try {
-                const value = await run(['read', reference]);
+                const value = await run(['read', reference, ...accountArgs(config)]);
                 log.debug({ field, length: value.trim().length }, 'read field from 1password');
                 return value;
             } catch (error) {
@@ -124,7 +136,15 @@ export function createOnePasswordSource(config: OnePasswordConfig): CredentialSo
         async getTotp(): Promise<string | undefined> {
             let value: string;
             try {
-                value = await run(['item', 'get', config.item, '--vault', config.vault, '--otp']);
+                value = await run([
+                    'item',
+                    'get',
+                    config.item,
+                    '--vault',
+                    config.vault,
+                    '--otp',
+                    ...accountArgs(config),
+                ]);
             } catch (error) {
                 if (isFieldMissing(error)) {
                     // No one-time password stored on the item. The caller falls back to a prompt.
@@ -151,7 +171,16 @@ export async function describeItem(config: OnePasswordConfig): Promise<string[]>
     const run = config.run ?? runOp;
     let json: string;
     try {
-        json = await run(['item', 'get', config.item, '--vault', config.vault, '--format', 'json']);
+        json = await run([
+            'item',
+            'get',
+            config.item,
+            '--vault',
+            config.vault,
+            '--format',
+            'json',
+            ...accountArgs(config),
+        ]);
     } catch (error) {
         throw translate(error, config, 'Eintrag');
     }
@@ -227,13 +256,13 @@ function missingField(config: OnePasswordConfig, fields: string[], label: string
         hint:
             `Gesucht wurde nach: ${fields.join(', ')}. Welche Felder der Eintrag wirklich hat, zeigt ` +
             '`pnpm spike --describe-1password` — das gibt nur die Feldnamen aus, keine Werte.',
-        context: { vault: config.vault, item: config.item, triedFields: fields },
+        context: { vault: config.vault, item: config.item, account: config.account, triedFields: fields },
     });
 }
 
 function translate(error: unknown, config: OnePasswordConfig, label: string): AppError {
     const stderr = stderrOf(error);
-    const context = { vault: config.vault, item: config.item, label };
+    const context = { vault: config.vault, item: config.item, account: config.account, label };
 
     switch (classify(error)) {
         case 'tool-missing':

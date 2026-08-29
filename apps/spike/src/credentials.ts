@@ -14,6 +14,7 @@ import { terminal } from './prompt.js';
 export interface CredentialConfig {
     vault: string | undefined;
     item: string;
+    account: string | undefined;
 }
 
 /**
@@ -24,6 +25,7 @@ export function credentialConfig(): CredentialConfig {
     return {
         vault: process.env['PMS_OP_VAULT'],
         item: process.env['PMS_OP_ITEM'] ?? 'Proton',
+        account: process.env['PMS_OP_ACCOUNT'],
     };
 }
 
@@ -61,5 +63,5 @@ export function resolveSource(config: CredentialConfig): CredentialSource {
     if (config.vault === undefined || config.vault === '') {
         return promptSource();
     }
-    return createOnePasswordSource({ vault: config.vault, item: config.item });
+    return createOnePasswordSource({ vault: config.vault, item: config.item, account: config.account });
 }

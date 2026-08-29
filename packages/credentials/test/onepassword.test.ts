@@ -64,6 +64,20 @@ describe('reading credentials', () => {
     it('strips the trailing newline the CLI adds', async () => {
         expect(await sourceWith(async () => 'kevin@proton.me\n').getUsername()).toBe('kevin@proton.me');
     });
+
+    it('passes --account when several op accounts are signed in', async () => {
+        const run = vi.fn(async () => 'kevin@proton.me');
+        const source = createOnePasswordSource({ vault: VAULT, item: ITEM, account: 'my.1password.eu', run });
+
+        await source.getUsername();
+
+        expect(run).toHaveBeenCalledWith([
+            'read',
+            `op://${VAULT}/${ITEM}/username`,
+            '--account',
+            'my.1password.eu',
+        ]);
+    });
 });
 
 describe('refusing to pass on a non-credential', () => {
