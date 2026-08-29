@@ -47,6 +47,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@pms/changes':
+        specifier: workspace:*
+        version: link:../../packages/changes
       '@pms/demo':
         specifier: workspace:*
         version: link:../../packages/demo
@@ -81,6 +84,18 @@ importers:
       react-dom:
         specifier: ^19.2.0
         version: 19.2.8(react@19.2.8)
+
+  packages/changes:
+    dependencies:
+      '@pms/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pms/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@proton/sieve':
+        specifier: workspace:*
+        version: link:../../vendor/proton/sieve
 
   packages/core:
     dependencies:

@@ -11,7 +11,7 @@ import type { ListableMessage } from './components/MailList.js';
  * when you look somewhere else would make the manual path useless exactly when it is needed.
  */
 
-export type Page = 'rules' | 'triage' | 'folders';
+export type Page = 'rules' | 'triage' | 'folders' | 'changes' | 'history' | 'log';
 
 export interface Navigation {
     page: Page;

@@ -15,6 +15,19 @@ service. If you are about to add a write path anywhere else, that is the signal 
 Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
 a full JSON backup of all filters and folders.
 
+## Every change takes the same route
+
+**stage → diff → confirm → apply → verify → journal.** No step is skipped, including for changes the
+tool itself proposed: a dialog that appears for a hand-written rule and not for a suggested one
+teaches people to click through it.
+
+The diff shows consequences, not intentions — which messages move, from where, and which *other*
+rule was quietly handling them until now. Verification looks afterwards, because a write returning
+success means Proton accepted the filter, not that any mail moved; a partial result is raised, never
+rounded up. Undo removes the rule *and* moves back exactly the messages that change moved, from the
+journal's per-message snapshot — never everything currently in a folder, which would swallow mail
+filed there by hand.
+
 ## Status
 
 M0 is mostly done: repository, vendored Proton compiler, read-only API client, login spike, session
@@ -47,6 +60,7 @@ packages/grouping/      Subject templates, grouping, and the triage ranking
 packages/demo/          A synthetic mailbox, so the interface can be built without an account
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
+packages/changes/       Diff, undo journal and post-write verification
 apps/spike/             M0 read-only probe against a real account
 apps/web/               The dashboard. Currently runs on demo data only.
 ```

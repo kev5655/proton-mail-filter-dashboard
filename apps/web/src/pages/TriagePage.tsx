@@ -1,11 +1,14 @@
 import { useState } from 'react';
 
+import type { DemoRule } from '@pms/demo';
 import { explainScore } from '@pms/grouping';
 
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
 import { inboxMessages, suggestions } from '../data.js';
+import { log } from '../log.js';
 import { useAppState } from '../state.js';
+import { useStore } from '../store.js';
 
 /**
  * The screen where inbox clutter turns into rules.
@@ -16,6 +19,7 @@ import { useAppState } from '../state.js';
  */
 export function TriagePage(): React.JSX.Element {
     const { setOpen, selectMany } = useAppState();
+    const { stage, rules } = useStore();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
 
@@ -76,9 +80,38 @@ export function TriagePage(): React.JSX.Element {
                             <button
                                 type="button"
                                 className="button"
-                                onClick={() =>
-                                    setDecisions((current) => ({ ...current, [entry.group.key]: 'accepted' }))
-                                }
+                                onClick={() => {
+                                    log('info', 'suggestion.stage', {
+                                        group: entry.group.kind,
+                                        size: entry.group.size,
+                                    });
+                                    // Built as a named value rather than inline: a rule literal
+                                    // passed straight into the change would be checked against the
+                                    // narrower OrderedRule and lose `authoredAs`.
+                                    const created: DemoRule = {
+                                        id: `r-${entry.group.key}`,
+                                        name: entry.folder,
+                                        priority: rules.length + 1,
+                                        enabled: true,
+                                        rule: entry.rule,
+                                        // Suggested rules are always the clickable kind, so they
+                                        // stay editable in Proton's own interface.
+                                        authoredAs: 'tree',
+                                    };
+                                    // Suggested rules go through the same diff as hand-written
+                                    // ones. Skipping it for the tool's own proposals would be the
+                                    // fastest way to teach someone to click past it.
+                                    stage({
+                                        id: `create-${entry.group.key}`,
+                                        kind: 'create-rule',
+                                        summary: `Regel für „${entry.group.reason}" anlegen`,
+                                        after: created,
+                                    });
+                                    setDecisions((current) => ({
+                                        ...current,
+                                        [entry.group.key]: 'accepted',
+                                    }));
+                                }}
                             >
                                 Regel anlegen
                             </button>

@@ -1,3 +1,4 @@
+import type { SimpleObject } from '@proton/sieve/filterModel';
 import { toSieveTree } from '@proton/sieve/toSieveTree';
 
 import { DEMO_FOLDERS, DEMO_RULES, generateMailbox, INBOX, type DemoMessage, type DemoRule } from '@pms/demo';
@@ -56,6 +57,8 @@ export function destinationOf(message: DemoMessage): string | undefined {
 export interface Suggestion {
     group: ScoredGroup;
     folder: string;
+    /** The compiled rule, so accepting stages exactly what was previewed. */
+    rule: SimpleObject;
     explanation: string;
     /** Values Proton's escaping would mangle; empty for every suggestion we generate. */
     warnings: string[];
@@ -112,6 +115,7 @@ export const suggestions: Suggestion[] = groups.map((group) => {
     return {
         group,
         folder,
+        rule,
         explanation,
         warnings: protonEscapingIsBroken(rule).map((warning) => `„${warning.value}": ${warning.reason}`),
         covered,

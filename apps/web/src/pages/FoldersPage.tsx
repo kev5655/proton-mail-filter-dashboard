@@ -1,7 +1,11 @@
+import { useState } from 'react';
+
 import type { DemoFolder } from '@pms/demo';
 
-import { folders, messageCountIn, rulesTargeting, shadowFolders } from '../data.js';
+import { messageCountIn, rulesTargeting } from '../data.js';
+import { log } from '../log.js';
 import { useAppState } from '../state.js';
+import { useStore } from '../store.js';
 
 /**
  * The folder tree, with the two facts that make deleting one safe to decide: how much mail lands
@@ -10,6 +14,11 @@ import { useAppState } from '../state.js';
  */
 export function FoldersPage(): React.JSX.Element {
     const { nav } = useAppState();
+    const { folders, stage } = useStore();
+    const [newName, setNewName] = useState('');
+    const [newParent, setNewParent] = useState('');
+
+    const shadowFolders = folders.filter((folder) => folder.shadowsSystemFolder !== undefined);
     const roots = folders.filter((folder) => folder.ParentID === null);
     const childrenOf = (id: string): DemoFolder[] => folders.filter((folder) => folder.ParentID === id);
 
@@ -33,6 +42,47 @@ export function FoldersPage(): React.JSX.Element {
             )}
 
             <div className="card">
+                <div className="row" style={{ marginBottom: 12 }}>
+                    <input
+                        className="text-input"
+                        value={newName}
+                        placeholder="Neuer Ordner"
+                        onChange={(event) => setNewName(event.target.value)}
+                    />
+                    <select
+                        className="text-input"
+                        value={newParent}
+                        onChange={(event) => setNewParent(event.target.value)}
+                    >
+                        <option value="">auf oberster Ebene</option>
+                        {roots.map((folder) => (
+                            <option key={folder.ID} value={folder.ID}>
+                                unter „{folder.Name}"
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        type="button"
+                        className="button"
+                        disabled={newName.trim() === ''}
+                        onClick={() => {
+                            log('info', 'folder.stage-create', { nested: newParent !== '' });
+                            stage({
+                                id: `create-folder-${newName}`,
+                                kind: 'create-folder',
+                                summary: `Ordner „${newName.trim()}" anlegen`,
+                                folder: {
+                                    name: newName.trim(),
+                                    parent: newParent === '' ? undefined : newParent,
+                                },
+                            });
+                            setNewName('');
+                        }}
+                    >
+                        Anlegen
+                    </button>
+                </div>
+
                 <ul className="folder-tree">
                     {roots.map((folder) => (
                         <FolderNode
@@ -58,6 +108,7 @@ function FolderNode({
     highlight: string | undefined;
 }): React.JSX.Element {
     const { goTo } = useAppState();
+    const { stage } = useStore();
     const children = childrenOf(folder.ID);
     const count = messageCountIn(folder.Name);
     const referencing = rulesTargeting(folder.Name);
@@ -73,10 +124,47 @@ function FolderNode({
                 )}
                 {count > 0 && <span className="nav-count">{count} Mails</span>}
 
-                <button type="button" className="button button-quiet">
+                <button
+                    type="button"
+                    className="button button-quiet"
+                    onClick={() => {
+                        const next = window.prompt(`„${folder.Name}" umbenennen in:`, folder.Name);
+                        if (next === null || next.trim() === '' || next === folder.Name) {
+                            return;
+                        }
+                        log('info', 'folder.stage-rename', { rules: referencing.length });
+                        // Renaming rewrites every rule that points at the folder. Leaving them
+                        // behind would be silent breakage: the rule keeps running and files into a
+                        // folder that no longer exists.
+                        stage({
+                            id: `rename-${folder.ID}`,
+                            kind: 'rename-folder',
+                            summary: `Ordner „${folder.Name}" in „${next.trim()}" umbenennen`,
+                            folder: { name: folder.Name, newName: next.trim() },
+                        });
+                    }}
+                >
                     Umbenennen
                 </button>
-                <button type="button" className="button button-quiet">
+                <button
+                    type="button"
+                    className="button button-quiet"
+                    onClick={() => {
+                        log('warn', 'folder.stage-delete', {
+                            rules: referencing.length,
+                            mails: count,
+                        });
+                        stage({
+                            id: `delete-${folder.ID}`,
+                            kind: 'delete-folder',
+                            summary:
+                                referencing.length > 0
+                                    ? `Ordner „${folder.Name}" löschen — ${referencing.length} Regel(n) zeigen darauf`
+                                    : `Ordner „${folder.Name}" löschen`,
+                            folder: { name: folder.Name },
+                        });
+                    }}
+                >
                     Löschen
                 </button>
             </div>

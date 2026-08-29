@@ -1,30 +1,41 @@
 import { useState } from 'react';
 
+import { DiffDialog } from './components/DiffDialog.js';
 import { MailViewer } from './components/MailViewer.js';
 import { SelectionDialog } from './components/SelectionDialog.js';
+import { ChangesPage } from './pages/ChangesPage.js';
 import { FoldersPage } from './pages/FoldersPage.js';
+import { HistoryPage } from './pages/HistoryPage.js';
+import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
 import { TriagePage } from './pages/TriagePage.js';
-import { folders, groups, rules } from './data.js';
+import { groups } from './data.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
-
-const NAV: Array<{ id: Page; label: string; count: number }> = [
-    { id: 'triage', label: 'Vorschläge', count: groups.length },
-    { id: 'rules', label: 'Regeln', count: rules.length },
-    { id: 'folders', label: 'Ordner', count: folders.length },
-];
+import { StoreProvider, useStore } from './store.js';
 
 export function App(): React.JSX.Element {
     return (
         <AppStateProvider>
-            <Shell />
+            <StoreProvider>
+                <Shell />
+            </StoreProvider>
         </AppStateProvider>
     );
 }
 
 function Shell(): React.JSX.Element {
     const { nav, goTo, selected, clearSelection, open, setOpen } = useAppState();
+    const { rules, folders, drift, journal } = useStore();
     const [buildingRule, setBuildingRule] = useState(false);
+
+    const nav_: Array<{ id: Page; label: string; count: number }> = [
+        { id: 'triage', label: 'Vorschläge', count: groups.length },
+        { id: 'rules', label: 'Regeln', count: rules.length },
+        { id: 'folders', label: 'Ordner', count: folders.length },
+        { id: 'changes', label: 'Änderungen', count: drift.filter((item) => item.resolved === undefined).length },
+        { id: 'history', label: 'Verlauf', count: journal.length },
+        { id: 'log', label: 'Protokoll', count: 0 },
+    ];
 
     return (
         <div className="shell">
@@ -34,7 +45,7 @@ function Shell(): React.JSX.Element {
                     <span>Regeln und Ordner verwalten</span>
                 </div>
 
-                {NAV.map((entry) => (
+                {nav_.map((entry) => (
                     <button
                         key={entry.id}
                         type="button"
@@ -43,7 +54,7 @@ function Shell(): React.JSX.Element {
                         onClick={() => goTo({ page: entry.id })}
                     >
                         <span>{entry.label}</span>
-                        <span className="nav-count">{entry.count}</span>
+                        {entry.count > 0 && <span className="nav-count">{entry.count}</span>}
                     </button>
                 ))}
 
@@ -62,6 +73,9 @@ function Shell(): React.JSX.Element {
                 {nav.page === 'rules' && <RulesPage />}
                 {nav.page === 'triage' && <TriagePage />}
                 {nav.page === 'folders' && <FoldersPage />}
+                {nav.page === 'changes' && <ChangesPage />}
+                {nav.page === 'history' && <HistoryPage />}
+                {nav.page === 'log' && <LogPage />}
 
                 {/*
                  * The manual path. Grouping will not find every rule worth having — a set of mails
@@ -89,6 +103,11 @@ function Shell(): React.JSX.Element {
             </main>
 
             {open !== undefined && <MailViewer message={open} onClose={() => setOpen(undefined)} />}
+
+            {/* The last step of every change, without exception — including the ones the tool
+                itself proposed. A dialog that appears only for hand-written rules teaches people
+                to click through it. */}
+            <DiffDialog onOpenMail={setOpen as never} />
 
             {buildingRule && (
                 <SelectionDialog

@@ -4,8 +4,10 @@ import { createDemoProvider, type SieveExplanation } from '@pms/llm';
 
 import { MailList } from '../components/MailList.js';
 import { RuleConditions } from '../components/RuleConditions.js';
-import { analysisFor, matchedBy, rules, shadowFolders, sieveTextFor } from '../data.js';
+import { analysisFor, matchedBy, shadowFolders, sieveTextFor } from '../data.js';
+import { log } from '../log.js';
 import { useAppState } from '../state.js';
+import { useStore } from '../store.js';
 
 /**
  * Every filter in execution order, and for each one the three things Proton's own list withholds:
@@ -15,6 +17,7 @@ import { useAppState } from '../state.js';
  */
 export function RulesPage(): React.JSX.Element {
     const { nav, goTo, setOpen } = useAppState();
+    const { rules, stage } = useStore();
     const [openId, setOpenId] = useState<string | undefined>(nav.focusRuleId);
 
     // Arriving from a folder should land on the rule that folder pointed at, opened.
@@ -103,6 +106,39 @@ export function RulesPage(): React.JSX.Element {
                                     eine Schätzung.
                                 </p>
                                 <MailList messages={matchedBy(entry.id)} onOpen={setOpen} />
+
+                                <div className="row" style={{ marginTop: 16 }}>
+                                    <button
+                                        type="button"
+                                        className="button button-secondary"
+                                        onClick={() => {
+                                            log('info', 'rule.stage-disable', { ruleId: entry.id });
+                                            stage({
+                                                id: `disable-${entry.id}`,
+                                                kind: 'disable-rule',
+                                                summary: `Regel „${entry.name}" deaktivieren`,
+                                                before: entry,
+                                            });
+                                        }}
+                                    >
+                                        Deaktivieren
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="button button-quiet"
+                                        onClick={() => {
+                                            log('info', 'rule.stage-delete', { ruleId: entry.id });
+                                            stage({
+                                                id: `delete-${entry.id}`,
+                                                kind: 'delete-rule',
+                                                summary: `Regel „${entry.name}" löschen`,
+                                                before: entry,
+                                            });
+                                        }}
+                                    >
+                                        Löschen
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

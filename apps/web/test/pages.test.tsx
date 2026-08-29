@@ -10,6 +10,10 @@ import { MailList } from '../src/components/MailList.js';
 import { RuleConditions } from '../src/components/RuleConditions.js';
 import { rules } from '../src/data.js';
 import { AppStateProvider } from '../src/state.js';
+import { ChangesPage } from '../src/pages/ChangesPage.js';
+import { HistoryPage } from '../src/pages/HistoryPage.js';
+import { LogPage } from '../src/pages/LogPage.js';
+import { StoreProvider } from '../src/store.js';
 
 /**
  * A smoke test for each screen.
@@ -21,12 +25,16 @@ import { AppStateProvider } from '../src/state.js';
  */
 
 /**
- * Pages read shared state — which mails are selected, where the user is — so they are rendered
- * inside the provider, exactly as the app mounts them. Rendering them bare would test a shape the
- * application never uses.
+ * Pages read shared state — which mails are selected, where the user is, and the current rules and
+ * folders — so they are rendered inside both providers, exactly as the app mounts them. Rendering
+ * them bare would test a shape the application never uses.
  */
 function render(element: React.JSX.Element): string {
-    return renderToStaticMarkup(<AppStateProvider>{element}</AppStateProvider>);
+    return renderToStaticMarkup(
+        <AppStateProvider>
+            <StoreProvider>{element}</StoreProvider>
+        </AppStateProvider>
+    );
 }
 
 function text(html: string): string {
@@ -178,5 +186,42 @@ describe('the shell', () => {
         expect(body).toContain('Regeln');
         expect(body).toContain('Vorschläge');
         expect(body).toContain('Ordner');
+    });
+});
+
+describe('the history', () => {
+    const html = render(<HistoryPage />);
+
+    it('says what undo actually does, so it is not mistaken for a soft reset', () => {
+        expect(text(html)).toContain('inklusive der Mails, die sie verschoben hat');
+    });
+
+    it('mentions the backup that sits underneath the journal', () => {
+        expect(text(html)).toContain('Sicherung');
+    });
+});
+
+describe('changes made in Proton itself', () => {
+    const html = render(<ChangesPage />);
+
+    it('lists what appeared without the tool doing it', () => {
+        expect(text(html)).toContain('Zahnarzt');
+        expect(text(html)).toContain('Steuern 2026');
+    });
+
+    it('rejects by disabling, not deleting', () => {
+        // Someone wrote that rule on purpose. Losing it to a misclick in a review screen would be a
+        // poor trade for tidiness.
+        expect(text(html)).toContain('Ablehnen (deaktivieren)');
+        expect(text(html)).toContain('zweite, ausdrückliche Entscheidung');
+    });
+});
+
+describe('the log', () => {
+    const html = render(<LogPage />);
+
+    it('offers an export and says what it does not contain', () => {
+        expect(text(html)).toContain('Bericht kopieren');
+        expect(text(html)).toContain('keine Mailinhalte');
     });
 });
