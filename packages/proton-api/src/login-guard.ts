@@ -15,8 +15,11 @@ const log = getLogger('login-guard');
  * attack. The account owner pays for that with a temporary lockout.
  *
  * So failed logins are recorded on disk and the next attempt is refused until a cooldown passes.
- * The cooldown is deliberately long, and after a 2028 it is much longer, because retrying into an
- * active lock is what extends the lock.
+ *
+ * An account lock is treated differently from a rejected attempt: it does not expire on a timer at
+ * all. Proton's own remedy for a 2028 is a regular sign-in at mail.proton.me, not waiting — so a
+ * clock here would only invite the next blind attempt, which is what extends the lock. The block is
+ * lifted by the account owner confirming they got in, and by nothing else.
  *
  * This is a courtesy to Proton's abuse systems and a protection for the user's account. It is not a
  * security control and does not pretend to be one — deleting the file resets it.
@@ -25,8 +28,6 @@ const log = getLogger('login-guard');
 /** Escalating waits after consecutive failures, in seconds. The last value repeats. */
 const COOLDOWN_SECONDS = [60, 300, 900, 3600] as const;
 
-/** After an account lock, back off hard: retrying is what keeps it locked. */
-const LOCKOUT_COOLDOWN_SECONDS = 6 * 60 * 60;
 
 const LOCKOUT_CODES = new Set(['PROTON_AUTH_HUMAN_VERIFICATION_REQUIRED']);
 const PROTON_ACCOUNT_LOCKED = 2028;
@@ -38,6 +39,11 @@ export interface LoginAttemptState {
     /** Unix seconds before which no attempt may be made. */
     retryAfter: number;
     lastReason: string;
+    /**
+     * Set after an account lock. No amount of waiting clears it — only `clearLockout()`, called
+     * when the owner has signed in at mail.proton.me and seen the account is reachable.
+     */
+    lockedOut?: boolean;
 }
 
 export interface LoginGuardOptions {
@@ -73,6 +79,21 @@ export class LoginGuard {
             return;
         }
 
+        if (state.lockedOut === true) {
+            throw new AppError('PROTON_RATE_LIMITED', {
+                message: 'Proton hat das Konto gesperrt (Code 2028). Anmeldung ist blockiert.',
+                hint:
+                    'Warten hilft hier nicht — Proton löst das über einen regulären Login. Bitte ' +
+                    'einmal auf mail.proton.me anmelden. Wenn das klappt: `pnpm spike ' +
+                    '--sperre-geklaert`, danach ist wieder genau ein Versuch frei.',
+                context: {
+                    consecutiveFailures: state.consecutiveFailures,
+                    lastFailureAt: state.lastFailureAt,
+                    lastReason: state.lastReason,
+                },
+            });
+        }
+
         const waitSeconds = state.retryAfter - this.#now();
         if (waitSeconds <= 0) {
             return;
@@ -101,14 +122,38 @@ export class LoginGuard {
         });
     }
 
+    /**
+     * Lift an account lock, on the owner's word that Proton let them in again.
+     *
+     * Deliberately a separate, manual step rather than an expiring timer: the thing that clears a
+     * 2028 is a successful regular sign-in, so requiring evidence of one is the honest gate. The
+     * escalating cooldown is left in place — one attempt at a time, still.
+     */
+    async clearLockout(): Promise<LoginAttemptState | undefined> {
+        const state = await this.read();
+        if (state === undefined || state.lockedOut !== true) {
+            return undefined;
+        }
+        const cleared: LoginAttemptState = {
+            consecutiveFailures: 0,
+            lastFailureAt: state.lastFailureAt,
+            retryAfter: 0,
+            lastReason: `${state.lastReason} (vom Nutzer als geklärt markiert)`,
+        };
+        await this.#write(cleared);
+        log.info({ previousReason: state.lastReason }, 'lockout cleared by the account owner');
+        return state;
+    }
+
     async recordFailure(error: unknown): Promise<void> {
         const previous = await this.read();
         const failures = (previous?.consecutiveFailures ?? 0) + 1;
         const now = this.#now();
+        const lockedOut = isAccountLockout(error);
 
-        const cooldown = isAccountLockout(error)
-            ? LOCKOUT_COOLDOWN_SECONDS
-            : (COOLDOWN_SECONDS[Math.min(failures - 1, COOLDOWN_SECONDS.length - 1)] as number);
+        const cooldown = COOLDOWN_SECONDS[
+            Math.min(failures - 1, COOLDOWN_SECONDS.length - 1)
+        ] as number;
 
         const reason = isAppError(error) ? error.code : 'unbekannter Fehler';
         await this.#write({
@@ -116,8 +161,9 @@ export class LoginGuard {
             lastFailureAt: now,
             retryAfter: now + cooldown,
             lastReason: reason,
+            ...(lockedOut ? { lockedOut: true } : {}),
         });
-        log.warn({ failures, cooldown, reason }, 'login failed, cooling down');
+        log.warn({ failures, cooldown, reason, lockedOut }, 'login failed, cooling down');
     }
 
     async #write(state: LoginAttemptState): Promise<void> {

@@ -77,28 +77,69 @@ describe('login guard', () => {
         expect(second - clock).toBeGreaterThan(first - (clock - 61));
     });
 
-    it('backs off for hours after an account lockout, not minutes', async () => {
-        // The failure that actually happened. Retrying into an active lock is what extends it.
+    it('never lets an account lockout expire on its own', async () => {
+        // The failure that actually happened. A clock here would be a lie: waiting is not what
+        // clears a 2028 — the account owner signing in normally is.
         const g = guard();
         await g.recordFailure(lockout);
 
-        clock += 60 * 60; // an hour later
+        clock += 6 * 60 * 60;
         await expect(g.assertMayAttempt()).rejects.toThrow(/gesperrt/);
 
-        clock += 6 * 60 * 60;
+        clock += 365 * 24 * 60 * 60;
+        await expect(g.assertMayAttempt()).rejects.toThrow(/gesperrt/);
+    });
+
+    it('is released only by the owner saying the regular login worked', async () => {
+        const g = guard();
+        await g.recordFailure(lockout);
+
+        const cleared = await g.clearLockout();
+        expect(cleared?.lockedOut).toBe(true);
         await expect(g.assertMayAttempt()).resolves.toBeUndefined();
     });
 
-    it('says why, and says that retrying makes it worse', async () => {
+    it('reports nothing to clear when there was no lockout', async () => {
+        const g = guard();
+        expect(await g.clearLockout()).toBeUndefined();
+
+        await g.recordFailure(wrongPassword);
+        expect(await g.clearLockout()).toBeUndefined();
+    });
+
+    it('keeps the ordinary cooldown ticking after a release, so it is one attempt at a time', async () => {
+        // Releasing a lock must not turn into a way to skip the brake entirely.
+        const g = guard();
+        await g.recordFailure(lockout);
+        await g.clearLockout();
+
+        await g.recordFailure(wrongPassword);
+        await expect(g.assertMayAttempt()).rejects.toThrow(/gesperrt/);
+    });
+
+    it('names the command that releases it, and does not promise that waiting helps', async () => {
         const g = guard();
         await g.recordFailure(lockout);
 
         await g.assertMayAttempt().then(
             () => expect.unreachable('should be blocked'),
             (error: AppError) => {
+                expect(error.hint).toMatch(/--sperre-geklaert/);
+                expect(error.hint).toMatch(/Warten hilft hier nicht/);
+            }
+        );
+    });
+
+    it('says why, and says that retrying makes it worse', async () => {
+        const g = guard();
+        await g.recordFailure(wrongPassword);
+
+        await g.assertMayAttempt().then(
+            () => expect.unreachable('should be blocked'),
+            (error: AppError) => {
                 expect(error.hint).toMatch(/verlängert die Sperre/);
                 expect(error.hint).toMatch(/mail\.proton\.me/);
-                expect(error.hint).toContain('PROTON_AUTH_FAILED');
+                expect(error.hint).toContain('PROTON_AUTH_WRONG_PASSWORD');
             }
         );
     });

@@ -44,8 +44,12 @@ Consequences that are now load-bearing:
 - **Never log in when a stored session would do.** `apps/spike/src/session.ts` is the order to
   follow: stored session, then refresh, then login. Proton rotates the refresh token on each use, so
   a refreshed session must be written back.
-- **`LoginGuard` refuses attempts during a cooldown**, six hours after a lockout. Do not weaken it
-  or work around it in a retry loop. Retrying into an active lock is what extends the lock.
+- **`LoginGuard` refuses attempts during an escalating cooldown**, and after a 2028 it refuses
+  indefinitely. The lock does not expire on a timer here, because it does not expire on one at
+  Proton either: their remedy is a regular sign-in at mail.proton.me. A clock would only schedule
+  the next blind attempt, and retrying into an active lock is what extends it. The owner confirms
+  they got in with `pnpm spike --sperre-geklaert`; the ordinary cooldown keeps running afterwards,
+  so it is still one attempt at a time. Do not weaken either, and do not wrap them in a retry loop.
 - **Never retry a failed login automatically.** One attempt, then stop.
 
 ## Layout

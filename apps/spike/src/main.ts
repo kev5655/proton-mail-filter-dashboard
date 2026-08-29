@@ -16,7 +16,7 @@ import { credentialConfig } from './credentials.js';
 import { FIXTURE_DIR, loadEnvFile } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
-import { connect } from './session.js';
+import { clearLockout, connect } from './session.js';
 import { describeItem } from '@pms/credentials';
 
 /**
@@ -108,6 +108,17 @@ async function describeCredentialItem(): Promise<void> {
 async function main(): Promise<void> {
     loadEnvFile();
     configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+
+    if (process.argv.includes('--sperre-geklaert')) {
+        const cleared = await clearLockout();
+        if (cleared === undefined) {
+            console.log('\nKeine Kontosperre vermerkt — es gibt nichts freizugeben.\n');
+            return;
+        }
+        console.log(`\n✓ Sperre freigegeben (war: ${cleared.lastReason}).`);
+        console.log('Der nächste Lauf darf genau einen Anmeldeversuch machen.\n');
+        return;
+    }
 
     if (process.argv.includes('--describe-1password')) {
         await describeCredentialItem();

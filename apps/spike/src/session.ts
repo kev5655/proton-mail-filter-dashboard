@@ -9,6 +9,7 @@ import {
     ProtonHttp,
     refreshSession,
     saveSession,
+    type LoginAttemptState,
     type ProtonSession,
     type StoredSession,
 } from '@pms/proton-api';
@@ -30,6 +31,16 @@ import { terminal } from './prompt.js';
 
 const SESSION_FILE = join(DATA_DIR, 'session.enc.json');
 const GUARD_FILE = join(DATA_DIR, 'login-attempts.json');
+
+/**
+ * Mark an account lock as resolved, after the owner has signed in at mail.proton.me.
+ *
+ * Returns the state that was cleared, or undefined when there was no lock to clear — the caller
+ * says so rather than reporting a success that did nothing.
+ */
+export async function clearLockout(): Promise<LoginAttemptState | undefined> {
+    return new LoginGuard({ path: GUARD_FILE }).clearLockout();
+}
 
 const VERSION = '0.1.0';
 
