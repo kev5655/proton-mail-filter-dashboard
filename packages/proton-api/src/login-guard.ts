@@ -150,7 +150,27 @@ export class LoginGuard {
         return state;
     }
 
+    /**
+     * Codes that mean the failure was on this side of the wire.
+     *
+     * Proton rejected nothing in these cases — the browser could not be started, its page had
+     * changed, or we could not read an answer that may well have been a successful login. Counting
+     * them would spend the attempt budget on our own bugs and eventually refuse a login for a
+     * reason Proton never gave.
+     */
+    static readonly #OUR_FAULT = new Set([
+        'BROWSER_NOT_INSTALLED',
+        'BROWSER_LOGIN_UI_CHANGED',
+        'BROWSER_LOGIN_TIMEOUT',
+        'BROWSER_LOGIN_2FA_UNSUPPORTED',
+    ]);
+
     async recordFailure(error: unknown): Promise<void> {
+        if (isAppError(error) && LoginGuard.#OUR_FAULT.has(error.code)) {
+            log.debug({ reason: error.code }, 'not counted: proton rejected nothing');
+            return;
+        }
+
         const previous = await this.read();
         const failures = (previous?.consecutiveFailures ?? 0) + 1;
         const now = this.#now();

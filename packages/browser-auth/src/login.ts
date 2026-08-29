@@ -113,7 +113,8 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
         const page = context.pages()[0] ?? (await context.newPage());
         page.setDefaultTimeout(timeout);
 
-        const auth = watchForAuthResponse(page);
+        const seen = traceAuthRequests(page);
+        const auth = watchForAuthResponse(page, seen);
         const twoFactorAccepted = watchForTwoFactorResponse(page);
 
         await page.goto(options.loginUrl ?? PROTON_LOGIN_URL, { waitUntil: 'domcontentloaded' });
@@ -125,7 +126,8 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
         const payload = await withTimeout(
             auth,
             timeout,
-            'Proton hat auf die Anmeldung nicht mit einer Sitzung geantwortet.'
+            'Proton hat auf die Anmeldung nicht mit einer Sitzung geantwortet.',
+            seen
         );
 
         if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
@@ -213,7 +215,7 @@ async function launchBrowser(options: BrowserLoginOptions, headless: boolean): P
  * cookies with their own rules. Reading them here means the handover does not depend on any of the
  * app's internals.
  */
-function watchForAuthResponse(page: Page): Promise<AuthPayload> {
+function watchForAuthResponse(page: Page, seen: AuthTrace): Promise<AuthPayload> {
     return new Promise<AuthPayload>((resolve, reject) => {
         page.on('response', (response: Response) => {
             if (!matches(response, AUTH_PATH) || !response.ok()) {
@@ -226,16 +228,53 @@ function watchForAuthResponse(page: Page): Promise<AuthPayload> {
                         resolve(body);
                         return;
                     }
-                    reject(
-                        new AppError('BROWSER_LOGIN_UI_CHANGED', {
-                            message: 'Protons Anmeldeantwort hat nicht die erwarteten Felder.',
-                            hint: 'Die Felder UID, AccessToken, RefreshToken, UserID und TwoFactor fehlen oder heissen anders.',
-                            context: { endpoint: AUTH_PATH },
-                        })
-                    );
+                    reject(unexpectedAuthResponse(body, seen));
                 })
                 .catch(reject);
         });
+    });
+}
+
+/**
+ * Every auth-ish request the page made, by path and status only.
+ *
+ * Proton's production login can be ahead of the client source this project is pinned to, so "the
+ * response was not what we expected" is not necessarily about the response — it may be that the
+ * call we watched is no longer the one that matters. Recording the sequence turns the next run into
+ * an answer instead of another guess, and each run costs the account owner something.
+ */
+type AuthTrace = Array<{ path: string; status: number }>;
+
+function traceAuthRequests(page: Page): AuthTrace {
+    const seen: AuthTrace = [];
+    page.on('response', (response: Response) => {
+        const { pathname } = new URL(response.url());
+        if (response.request().method() === 'POST' && pathname.includes('/auth')) {
+            seen.push({ path: pathname, status: response.status() });
+        }
+    });
+    return seen;
+}
+
+/**
+ * Say what came back, by field name.
+ *
+ * Names only, never values — the same rule the rest of the project follows, and here it costs
+ * nothing: which fields exist is the entire diagnosis, and one of them is an access token.
+ */
+function unexpectedAuthResponse(body: unknown, seen: AuthTrace): AppError {
+    const fields =
+        body !== null && typeof body === 'object' ? Object.keys(body as Record<string, unknown>).sort() : [];
+    const expected = ['UID', 'AccessToken', 'RefreshToken', 'UserID', 'TwoFactor'];
+    const missing = expected.filter((name) => !fields.includes(name));
+
+    return new AppError('BROWSER_LOGIN_UI_CHANGED', {
+        message: `Protons Anmeldeantwort hat nicht die erwarteten Felder. Es fehlen: ${missing.join(', ')}.`,
+        hint:
+            `Zurückgekommen sind: ${fields.length === 0 ? '(kein Objekt)' : fields.join(', ')}. ` +
+            'Nur die Namen — Werte werden bewusst nicht ausgegeben. Damit lässt sich anpassen, ' +
+            'ohne einen weiteren Anmeldeversuch zu verbrauchen.',
+        context: { endpoint: AUTH_PATH, fields, missing, authRequests: seen },
     });
 }
 
@@ -286,7 +325,7 @@ function uiChanged(name: SelectorName, selector: string, cause: unknown): AppErr
     });
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string, seen?: AuthTrace): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     try {
         return await Promise.race([
@@ -300,7 +339,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
                                 hint:
                                     'Mit sichtbarem Fenster starten zeigt, woran es hängt — meist eine ' +
                                     'Rückfrage von Proton, die unsichtbar niemand beantwortet.',
-                                context: { timeoutMs: ms },
+                                context: { timeoutMs: ms, ...(seen === undefined ? {} : { authRequests: seen }) },
                             })
                         ),
                     ms

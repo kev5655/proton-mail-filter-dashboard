@@ -16,7 +16,7 @@ import {
 } from '@pms/proton-api';
 
 import { credentialConfig, resolveSource } from './credentials.js';
-import { DATA_DIR } from './paths.js';
+import { DATA_DIR, REPO_ROOT } from './paths.js';
 import { terminal } from './prompt.js';
 
 /**
@@ -183,7 +183,7 @@ function browserOptions(): BrowserChoice {
         ...(channel === undefined ? {} : { channel: channel as BrowserChoice['channel'] }),
         ...(profile === undefined || profile === ''
             ? {}
-            : { profileDir: resolve(profile.replace(/^~(?=\/|$)/, homedir())) }),
+            : { profileDir: resolve(REPO_ROOT, profile.replace(/^~(?=\/|$)/, homedir())) }),
     };
 }
 

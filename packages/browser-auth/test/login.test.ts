@@ -27,6 +27,7 @@ interface FakePage {
 function authResponse(body: unknown, path = '/api/core/v4/auth'): unknown {
     return {
         ok: () => true,
+        status: () => 200,
         url: () => `https://account.proton.me${path}`,
         request: () => ({ method: () => 'POST' }),
         json: async () => body,
@@ -169,12 +170,29 @@ describe('signing in through a browser', () => {
         expect(error.hint).toContain('selectors.ts');
     });
 
-    it('says the answer was wrong rather than guessing when the fields are unfamiliar', async () => {
+    it('names the fields that came back, so the next run is not another guess', async () => {
         const error = await captureError(
-            loginWithBrowser({ ...baseOptions, launch: fakeBrowser({ body: { Token: 'something-else' } }).launch })
+            loginWithBrowser({
+                ...baseOptions,
+                launch: fakeBrowser({ body: { Token: 'a-secret-value', Code: 1000 } }).launch,
+            })
         );
 
         expect(error.code).toBe('BROWSER_LOGIN_UI_CHANGED');
+        expect(error.context['fields']).toEqual(['Code', 'Token']);
+        expect(error.context['missing']).toContain('AccessToken');
+    });
+
+    it('reports those field names without their values', async () => {
+        // One of the fields we are hoping for is an access token; printing the object would print it.
+        const error = await captureError(
+            loginWithBrowser({
+                ...baseOptions,
+                launch: fakeBrowser({ body: { Token: 'a-secret-value', Code: 1000 } }).launch,
+            })
+        );
+
+        expect(JSON.stringify(error.toJSON())).not.toContain('a-secret-value');
     });
 
     it('keeps the password out of a failure', async () => {
