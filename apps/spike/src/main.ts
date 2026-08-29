@@ -50,7 +50,8 @@ async function main(): Promise<void> {
     const username = await ask('Proton-Benutzername (E-Mail): ');
     const password = await askSecret('Passwort (Eingabe unsichtbar): ');
 
-    const http = new ProtonHttp({ version: VERSION, channel: 'alpha' });
+    const appVersion = process.env['PROTON_APP_VERSION'];
+    const http = new ProtonHttp({ version: VERSION, ...(appVersion === undefined ? {} : { appVersion }) });
 
     await login(http, { username, password }, async () => askSecret('2FA-Code: '));
     console.log('\n✓ Angemeldet.\n');

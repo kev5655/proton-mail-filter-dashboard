@@ -2,7 +2,7 @@ import { AppError, ProtonApiError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { z } from 'zod';
 
-import { buildAppVersion, buildUserAgent, type ReleaseChannel } from './appVersion.js';
+import { buildUserAgent, resolveAppVersion } from './appVersion.js';
 import { parseResponse } from './validate.js';
 
 const log = getLogger('proton-api');
@@ -17,7 +17,8 @@ export interface ProtonSession {
 
 export interface ProtonHttpOptions {
     version: string;
-    channel: ReleaseChannel;
+    /** Overrides the `x-pm-appversion` header. Only for probing what Proton accepts. */
+    appVersion?: string;
     baseUrl?: string;
     /** Overall attempts per request, including the first. Only 429 and 5xx are retried. */
     maxAttempts?: number;
@@ -48,7 +49,7 @@ export class ProtonHttp {
 
     constructor(options: ProtonHttpOptions) {
         this.#baseUrl = options.baseUrl ?? PROTON_API_BASE;
-        this.#appVersion = buildAppVersion(options.version, options.channel);
+        this.#appVersion = resolveAppVersion(options.appVersion);
         this.#userAgent = buildUserAgent(options.version);
         this.#maxAttempts = options.maxAttempts ?? 3;
         this.#fetch = options.fetchImpl ?? globalThis.fetch;

@@ -1,40 +1,53 @@
 import { describe, expect, it } from 'vitest';
 
-import { APP_NAME, buildAppVersion, buildUserAgent, PRODUCT } from '../src/appVersion.js';
+import { buildUserAgent, DEFAULT_APP_VERSION, resolveAppVersion } from '../src/appVersion.js';
 
 /**
- * Regression cover for the first thing that went wrong against the real API.
+ * Regression cover for the first two things that went wrong against the real API, plus a guard
+ * against the tempting way out of them.
  *
- * The initial header was `external-mail-proton-mail-sorter@0.1.0-alpha`. Proton rejected the very
- * first request — `POST core/v4/auth/info`, HTTP 400, code 2064 "Invalid section name" — because
- * their gateway parses the header positionally and the dashes in the name segment shifted it.
- * Their SDK documentation allows lowercase letters and underscores there, nothing else.
+ * `external-mail-proton-mail-sorter@…` was rejected with code 2064 ("Invalid section name"),
+ * `external-mail-proton_mail_sorter@…` with code 5002 ("Invalid app version"). Neither message
+ * points at the header, so both are pinned here by their values rather than left to memory.
  *
- * These tests exist so that constraint cannot be quietly undone by a rename.
+ * The last test is the important one. The obvious fix for 5002 is to send `web-mail@5.x.x` and
+ * sail straight through. Proton forbids exactly that, so the code refuses it rather than leaving
+ * it one edit away.
  */
 
 describe('x-pm-appversion', () => {
-    it('matches the form Proton documents for third-party clients', () => {
-        expect(buildAppVersion('0.1.0', 'alpha')).toBe('external-mail-proton_mail_sorter@0.1.0-alpha');
-        expect(buildAppVersion('1.2.3', 'stable')).toMatch(
-            /^external-[a-z]+-[a-z_]+@\d+\.\d+\.\d+-(alpha|beta|stable)$/
-        );
+    it('defaults to the value third-party clients use', () => {
+        expect(resolveAppVersion()).toBe('Other');
+        expect(DEFAULT_APP_VERSION).toBe('Other');
     });
 
-    it('uses underscores in the app name, never dashes', () => {
-        expect(APP_NAME).toMatch(/^[a-z_]+$/);
-        expect(APP_NAME).not.toContain('-');
-        expect(PRODUCT).toMatch(/^[a-z]+$/);
+    it('falls back to the default for an empty override', () => {
+        expect(resolveAppVersion('')).toBe(DEFAULT_APP_VERSION);
+        expect(resolveAppVersion('   ')).toBe(DEFAULT_APP_VERSION);
     });
 
-    it('rejects a version Proton would not parse', () => {
-        expect(() => buildAppVersion('0.1', 'alpha')).toThrow(/major\.minor\.patch/);
-        expect(() => buildAppVersion('v0.1.0', 'alpha')).toThrow(/major\.minor\.patch/);
+    it('rejects the external-* form that Proton Mail answered with code 5002', () => {
+        expect(() => resolveAppVersion('external-mail-proton_mail_sorter@0.1.0-alpha')).toThrow(/5002/);
+        expect(() => resolveAppVersion('external-drive-myapp@1.2.3-stable')).toThrow(/5002/);
     });
 
-    it('identifies as itself rather than imitating a Proton client', () => {
-        const header = buildAppVersion('0.1.0', 'alpha');
-        expect(header.startsWith('external-')).toBe(true);
+    it.each([
+        'web-mail@5.0.99.0',
+        'linux-mail@3.2.0',
+        'android-mail@4.0.0',
+        'ios-mail@6.1.0',
+        'WEB-MAIL@5.0.0',
+    ])('refuses to impersonate a Proton client: %s', (value) => {
+        expect(() => resolveAppVersion(value)).toThrow(/forbids/);
+    });
+
+    it('allows an honest override, so a value Proton accepts can be tried without a code change', () => {
+        expect(resolveAppVersion('Other')).toBe('Other');
+        expect(resolveAppVersion('proton_mail_sorter@0.1.0')).toBe('proton_mail_sorter@0.1.0');
+    });
+
+    it('does not pretend to be a browser in the user agent either', () => {
         expect(buildUserAgent('0.1.0')).not.toMatch(/Mozilla|Chrome|Safari/);
+        expect(buildUserAgent('0.1.0')).toContain('proton-mail-sorter/0.1.0');
     });
 });
