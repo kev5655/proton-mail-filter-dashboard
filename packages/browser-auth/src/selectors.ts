@@ -16,8 +16,26 @@ export const SELECTORS = {
     username: 'input#username',
     password: 'input#password',
     submit: 'button[type="submit"]',
-    totp: 'input#twoFa',
 } as const;
+
+/**
+ * Ways to find the authenticator-code field, best first.
+ *
+ * Not one selector, because `input#twoFa` was a guess and it was wrong, and an id is the most
+ * fragile thing to depend on. `autocomplete="one-time-code"` is the standard attribute every
+ * password manager and browser looks for, so it is the likeliest to survive a redesign; the id and
+ * name forms are the shapes Proton has used; `inputmode="numeric"` is the last resort that
+ * describes what the field *is* rather than what it is called.
+ */
+export const TOTP_SELECTORS = [
+    'input[autocomplete="one-time-code"]',
+    'input#twoFa',
+    'input[name="twoFa"]',
+    'input[name*="totp" i]',
+    'input[id*="twofa" i]',
+    'input[id*="totp" i]',
+    'input[inputmode="numeric"]',
+] as const;
 
 /**
  * Wording that switches the second-factor screen from passkey to authenticator code.

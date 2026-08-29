@@ -2,7 +2,7 @@ import { isAppError, type AppError } from '@pms/core/errors';
 import { describe, expect, it, vi } from 'vitest';
 
 import { loginWithBrowser } from '../src/login.js';
-import { SELECTORS } from '../src/selectors.js';
+import { SELECTORS, TOTP_SELECTORS } from '../src/selectors.js';
 
 /**
  * The browser login, exercised without a browser.
@@ -93,6 +93,7 @@ function fakeBrowser(
             }
             return {};
         },
+        locator: (_selector: string) => ({ all: async () => [] }),
         getByRole: (_role: string, query: { name: RegExp }) => ({
             first: () => ({
                 count: async () => (options.revealedBy?.source === query.name.source ? 1 : 0),
@@ -215,14 +216,15 @@ describe('signing in through a browser', () => {
         const switcher = /authentifizierungscode|authentication code/i;
         const { launch, page } = fakeBrowser({
             twoFactor: 1,
-            hidden: [SELECTORS.totp],
+            hidden: [...TOTP_SELECTORS],
             revealedBy: switcher,
         });
 
         await loginWithBrowser({ ...baseOptions, headless: false, launch });
 
         expect(page.clicked).toContain(switcher.source);
-        expect(page.filled[SELECTORS.totp]).toBe('123456');
+        // Whichever candidate matched first — the point is that a code reached a code field.
+        expect(Object.values(page.filled)).toContain('123456');
     });
 
     it('waits for a person to switch it when no control matches', async () => {
@@ -236,7 +238,7 @@ describe('signing in through a browser', () => {
     });
 
     it('says so when the code field cannot be reached without a window', async () => {
-        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [SELECTORS.totp] });
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS] });
 
         const error = await captureError(
             loginWithBrowser({ ...baseOptions, headless: true, launch })
@@ -244,6 +246,21 @@ describe('signing in through a browser', () => {
 
         expect(error.code).toBe('BROWSER_LOGIN_2FA_UNSUPPORTED');
         expect(error.hint).toMatch(/PMS_BROWSER_HEADLESS=false/);
+    });
+
+    it('reports what the page offers when no candidate matches', async () => {
+        // Each round of this has cost a login attempt to learn one fact about Proton's markup.
+        // The failure has to carry the answer, or the next round costs another.
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS] });
+
+        const error = await captureError(
+            loginWithBrowser({ ...baseOptions, headless: false, timeoutMs: 50, launch })
+        );
+
+        expect(error.code).toBe('BROWSER_LOGIN_TIMEOUT');
+        expect(error.context['tried']).toEqual([...TOTP_SELECTORS]);
+        expect(error.context).toHaveProperty('inputs');
+        expect(error.context).toHaveProperty('buttons');
     });
 
     it('refuses a passkey without a window to confirm it in', async () => {

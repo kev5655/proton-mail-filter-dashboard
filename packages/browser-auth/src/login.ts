@@ -6,6 +6,7 @@ import {
     AUTH_PATH,
     PROTON_LOGIN_URL,
     SELECTORS,
+    TOTP_SELECTORS,
     TOTP_SWITCH_PATTERNS,
     type SelectorName,
 } from './selectors.js';
@@ -143,8 +144,8 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
         const pending = payload.TwoFactor !== 0;
 
         if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
-            await revealTotpField(page, headless, timeout);
-            await fill(page, 'totp', await options.promptTotp());
+            const field = await revealTotpField(page, headless, timeout);
+            await fillSelector(page, field, await options.promptTotp(), 'Authentifizierungscode');
             await click(page, 'submit');
         } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0 && headless) {
             // A passkey needs something to touch, and a headless browser offers nothing.
@@ -348,9 +349,10 @@ function matches(response: Response, path: string): boolean {
  * wrong click costs nothing here. Finally just wait: with a visible window the person is right
  * there, and one click from them beats a selector that has to keep being right.
  */
-async function revealTotpField(page: Page, headless: boolean, timeoutMs: number): Promise<void> {
-    if (await appears(page, 1_500)) {
-        return;
+async function revealTotpField(page: Page, headless: boolean, timeoutMs: number): Promise<string> {
+    const quick = await findTotpField(page, 1_500);
+    if (quick !== undefined) {
+        return quick;
     }
 
     for (const pattern of TOTP_SWITCH_PATTERNS) {
@@ -358,8 +360,9 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
             const control = page.getByRole('button', { name: pattern }).first();
             if ((await control.count()) > 0) {
                 await control.click({ timeout: 2_000 });
-                if (await appears(page, 2_000)) {
-                    return;
+                const revealed = await findTotpField(page, 2_000);
+                if (revealed !== undefined) {
+                    return revealed;
                 }
             }
         } catch {
@@ -373,7 +376,7 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
             hint:
                 'Unsichtbar kann das niemand umschalten. Mit PMS_BROWSER_HEADLESS=false starten — ' +
                 'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen.',
-            context: { selector: SELECTORS.totp },
+            context: { tried: [...TOTP_SELECTORS] },
         });
     }
 
@@ -381,29 +384,77 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
         '\n  Proton fragt nach dem Passkey. Bitte im Fenster auf den Authentifizierungscode\n' +
             '  umschalten — den Code trägt der Spike dann selbst ein.\n'
     );
-    try {
-        await page.waitForSelector(SELECTORS.totp, { state: 'visible', timeout: timeoutMs });
-    } catch (cause) {
-        throw new AppError('BROWSER_LOGIN_TIMEOUT', {
-            message: 'Es wurde nicht auf den Authentifizierungscode umgeschaltet.',
-            hint: `Gewartet wurde auf \`${SELECTORS.totp}\`. Heisst das Feld inzwischen anders, steht es in selectors.ts.`,
-            context: { selector: SELECTORS.totp, timeoutMs },
-            cause,
-        });
+
+    const afterHelp = await findTotpField(page, timeoutMs);
+    if (afterHelp !== undefined) {
+        return afterHelp;
     }
+
+    throw new AppError('BROWSER_LOGIN_TIMEOUT', {
+        message: 'Das Feld für den Authentifizierungscode wurde nicht gefunden.',
+        hint:
+            `Gesucht wurde nach: ${TOTP_SELECTORS.join(', ')}. Was die Seite tatsächlich anbietet, ` +
+            `steht im Kontext unter \`inputs\` und \`buttons\` — daraus lässt sich selectors.ts ` +
+            'anpassen, ohne noch einen Anmeldeversuch zu verbrauchen.',
+        context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
+    });
 }
 
-async function appears(page: Page, timeoutMs: number): Promise<boolean> {
+/** The first candidate that is actually on screen, or undefined. */
+async function findTotpField(page: Page, timeoutMs: number): Promise<string | undefined> {
+    const each = Math.max(250, Math.floor(timeoutMs / TOTP_SELECTORS.length));
+    for (const selector of TOTP_SELECTORS) {
+        try {
+            await page.waitForSelector(selector, { state: 'visible', timeout: each });
+            return selector;
+        } catch {
+            // Not this one.
+        }
+    }
+    return undefined;
+}
+
+/**
+ * What the page is offering, in the terms a selector is written in.
+ *
+ * Attributes and button labels only — never a field's value. Every round of this has cost a login
+ * attempt to learn one fact about Proton's markup; this turns the next failure into the answer
+ * instead of another round.
+ */
+async function describeForm(page: Page): Promise<{ inputs: string[]; buttons: string[] }> {
+    const attributes = ['type', 'id', 'name', 'autocomplete', 'inputmode', 'placeholder'];
     try {
-        await page.waitForSelector(SELECTORS.totp, { state: 'visible', timeout: timeoutMs });
-        return true;
+        const fields = await page.locator('input').all();
+        const inputs = await Promise.all(
+            fields.map(async (field) => {
+                const parts = await Promise.all(
+                    attributes.map(async (attribute) => {
+                        const value = await field.getAttribute(attribute);
+                        return value === null || value === '' ? undefined : `${attribute}=${value}`;
+                    })
+                );
+                const visible = (await field.isVisible()) ? 'visible' : 'hidden';
+                return [...parts.filter((part) => part !== undefined), visible].join(' ');
+            })
+        );
+
+        const controls = await page.locator('button, a[role="button"]').all();
+        const buttons = (await Promise.all(controls.map(async (control) => (await control.innerText()).trim())))
+            .filter((text) => text !== '')
+            .slice(0, 20);
+
+        return { inputs, buttons };
     } catch {
-        return false;
+        // Diagnostics must never become the reason a run fails.
+        return { inputs: [], buttons: [] };
     }
 }
 
 async function fill(page: Page, name: SelectorName, value: string): Promise<void> {
-    const selector = SELECTORS[name];
+    await fillSelector(page, SELECTORS[name], value, name);
+}
+
+async function fillSelector(page: Page, selector: string, value: string, name: string): Promise<void> {
     try {
         await page.fill(selector, value);
     } catch (cause) {
@@ -426,7 +477,7 @@ async function click(page: Page, name: SelectorName): Promise<void> {
  * Without this the failure is a Playwright timeout mentioning a CSS selector, which reads like a
  * network problem. Naming the field and the file to edit turns it into a five-minute fix.
  */
-function uiChanged(name: SelectorName, selector: string, cause: unknown): AppError {
+function uiChanged(name: string, selector: string, cause: unknown): AppError {
     return new AppError('BROWSER_LOGIN_UI_CHANGED', {
         message: `Auf Protons Anmeldeseite ist das Feld "${name}" nicht mehr zu finden.`,
         hint: `Erwartet wurde \`${selector}\`. Proton hat die Seite geändert — anzupassen in packages/browser-auth/src/selectors.ts.`,
