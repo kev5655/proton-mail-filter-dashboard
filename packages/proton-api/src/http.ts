@@ -38,6 +38,32 @@ interface RequestOptions {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Proton attaches a `Details` object to some errors — most usefully the available human-verification
+ * methods. It can also carry tokens, so only the shape and short scalar values are kept: enough to
+ * diagnose, not enough to leak.
+ */
+function summariseDetails(details: unknown): Record<string, unknown> | undefined {
+    if (details === null || typeof details !== 'object') {
+        return undefined;
+    }
+    const summary: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(details)) {
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            summary[key] = value;
+        } else if (typeof value === 'string') {
+            summary[key] = value.length <= 40 ? value : `string(length ${value.length})`;
+        } else if (Array.isArray(value)) {
+            summary[key] = value.every((item) => typeof item === 'string' && item.length <= 40)
+                ? value
+                : `array(${value.length})`;
+        } else if (value !== null && typeof value === 'object') {
+            summary[key] = `object{${Object.keys(value).slice(0, 8).join(',')}}`;
+        }
+    }
+    return summary;
+}
+
 export class ProtonHttp {
     readonly #baseUrl: string;
     readonly #appVersion: string;
@@ -162,10 +188,12 @@ export class ProtonHttp {
     async #toApiError(response: Response, endpoint: string): Promise<ProtonApiError> {
         let protonCode: number | undefined;
         let protonMessage: string | undefined;
+        let details: Record<string, unknown> | undefined;
         try {
-            const body = (await response.json()) as { Code?: unknown; Error?: unknown };
+            const body = (await response.json()) as { Code?: unknown; Error?: unknown; Details?: unknown };
             protonCode = typeof body.Code === 'number' ? body.Code : undefined;
             protonMessage = typeof body.Error === 'string' ? body.Error : undefined;
+            details = summariseDetails(body.Details);
         } catch {
             // A non-JSON error body is itself useful information; the status carries the rest.
         }
@@ -174,6 +202,7 @@ export class ProtonHttp {
             httpStatus: response.status,
             ...(protonCode === undefined ? {} : { protonCode }),
             ...(protonMessage === undefined ? {} : { protonMessage }),
+            ...(details === undefined ? {} : { details }),
         });
     }
 }

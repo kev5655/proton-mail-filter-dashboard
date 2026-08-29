@@ -9,6 +9,8 @@
 export const ERROR_CODES = [
     // Authentication against Proton
     'PROTON_AUTH_FAILED',
+    'PROTON_AUTH_WRONG_PASSWORD',
+    'PROTON_AUTH_HUMAN_VERIFICATION_REQUIRED',
     'PROTON_AUTH_2FA_REQUIRED',
     'PROTON_AUTH_2FA_INVALID',
     'PROTON_SESSION_EXPIRED',
@@ -105,16 +107,26 @@ export class ProtonSchemaError extends AppError {
     }
 }
 
-/** Proton answered, but with an error of its own. */
+/**
+ * Proton answered, but with an error of its own.
+ *
+ * Proton's own code and message are kept on the instance, not just in the text. Callers that wrap
+ * this into something friendlier must pass them along: a wrapper that replaces "here is what Proton
+ * said" with a guess turns a diagnosable failure into a mystery, which is exactly what happened
+ * once already during the login work.
+ */
 export class ProtonApiError extends AppError {
     readonly httpStatus: number;
     readonly protonCode: number | undefined;
+    readonly protonMessage: string | undefined;
 
     constructor(params: {
         endpoint: string;
         httpStatus: number;
         protonCode?: number;
         protonMessage?: string;
+        /** Extra fields Proton attaches, e.g. the available human-verification methods. */
+        details?: Record<string, unknown>;
         cause?: unknown;
     }) {
         const detail = params.protonMessage ? `: ${params.protonMessage}` : '';
@@ -125,11 +137,19 @@ export class ProtonApiError extends AppError {
                 httpStatus: params.httpStatus,
                 protonCode: params.protonCode,
                 protonMessage: params.protonMessage,
+                ...(params.details === undefined ? {} : { details: params.details }),
             },
             ...(params.cause === undefined ? {} : { cause: params.cause }),
         });
         this.name = 'ProtonApiError';
         this.httpStatus = params.httpStatus;
         this.protonCode = params.protonCode;
+        this.protonMessage = params.protonMessage;
     }
 }
+
+/** Proton error codes we react to specifically. */
+export const PROTON_ERROR_CODE = {
+    WRONG_PASSWORD: 8002,
+    HUMAN_VERIFICATION_REQUIRED: 9001,
+} as const;

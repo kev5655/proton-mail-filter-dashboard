@@ -1,4 +1,4 @@
-import { AppError } from '@pms/core/errors';
+import { AppError, isAppError, PROTON_ERROR_CODE, ProtonApiError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import { getSrp } from '@protontech/crypto/srp';
 import { z } from 'zod';
@@ -86,12 +86,7 @@ export async function login(
             authResponseSchema
         );
     } catch (cause) {
-        throw new AppError('PROTON_AUTH_FAILED', {
-            message: 'Anmeldung bei Proton fehlgeschlagen.',
-            hint: 'Benutzername und Passwort prüfen. Nach mehreren Fehlversuchen sperrt Proton kurzzeitig.',
-            context: { username: '[redacted]' },
-            cause,
-        });
+        throw describeLoginFailure(cause, info.Version);
     }
 
     if (auth.ServerProof !== expectedServerProof) {
@@ -114,8 +109,63 @@ export async function login(
         await completeTwoFactor(http, auth.TwoFactor, promptTwoFactor);
     }
 
-    log.info({ userId: auth.UserID, twoFactor: auth.TwoFactor }, 'logged in to proton');
+    log.info(
+        { userId: auth.UserID, twoFactor: auth.TwoFactor, authVersion: info.Version },
+        'logged in to proton'
+    );
     return { session, userId: auth.UserID, scope: auth.Scope };
+}
+
+/**
+ * Turn a rejected login into something actionable.
+ *
+ * The first version of this replaced every failure with "check username and password". That reads
+ * as helpful and is actively harmful: when the real cause was an empty password from a broken
+ * prompt, and later a client Proton would not accept at all, the message pointed at the one thing
+ * that was fine. Proton's own code and message now survive into the error, and only code 8002
+ * actually claims the password was wrong.
+ */
+export function describeLoginFailure(cause: unknown, authVersion: number): AppError {
+    if (!(cause instanceof ProtonApiError)) {
+        return isAppError(cause)
+            ? cause
+            : new AppError('PROTON_AUTH_FAILED', {
+                  message: 'Anmeldung bei Proton fehlgeschlagen.',
+                  context: { authVersion },
+                  cause,
+              });
+    }
+
+    const shared = { authVersion, protonCode: cause.protonCode, protonMessage: cause.protonMessage };
+
+    if (cause.protonCode === PROTON_ERROR_CODE.WRONG_PASSWORD) {
+        return new AppError('PROTON_AUTH_WRONG_PASSWORD', {
+            message: 'Proton meldet: Benutzername oder Passwort ist falsch.',
+            hint:
+                'Bei Konten mit zwei Passwörtern ist hier das Login-Passwort gemeint, nicht das ' +
+                'Mailbox-Passwort. Nach mehreren Fehlversuchen sperrt Proton kurzzeitig.',
+            context: shared,
+            cause,
+        });
+    }
+
+    if (cause.protonCode === PROTON_ERROR_CODE.HUMAN_VERIFICATION_REQUIRED) {
+        return new AppError('PROTON_AUTH_HUMAN_VERIFICATION_REQUIRED', {
+            message: 'Proton verlangt für diese Anmeldung eine menschliche Verifizierung (CAPTCHA).',
+            hint:
+                'Das lässt sich hier nicht lösen — dafür wäre Protons Verifizierungs-Widget nötig. ' +
+                'Einmal regulär über mail.proton.me anmelden kann die Anforderung entschärfen.',
+            context: { ...shared, details: cause.context['details'] },
+            cause,
+        });
+    }
+
+    return new AppError('PROTON_AUTH_FAILED', {
+        message: `Proton hat die Anmeldung abgelehnt: ${cause.protonMessage ?? `HTTP ${cause.httpStatus}`}`,
+        hint: `Protons Fehlercode: ${cause.protonCode ?? 'keiner'}. Das ist Protons Wortlaut, nicht unsere Deutung.`,
+        context: { ...shared, httpStatus: cause.httpStatus, details: cause.context['details'] },
+        cause,
+    });
 }
 
 async function completeTwoFactor(http: ProtonHttp, twoFactor: number, prompt: TwoFactorPrompt): Promise<void> {
