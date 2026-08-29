@@ -79,13 +79,19 @@ export class LoginGuard {
         }
 
         if (state.lockedOut === true) {
+            // Says who is speaking. This is a note we wrote ourselves after an earlier attempt, and
+            // it reads far too much like a fresh rejection from Proton — which sent one reader off
+            // believing a run had failed that never left the machine.
             throw new AppError('PROTON_RATE_LIMITED', {
-                message: 'Proton hat das Konto gesperrt (Code 2028). Anmeldung ist blockiert.',
+                message:
+                    `Hier wurde nichts versucht: dieser Lauf wurde von unserer eigenen Sperre ` +
+                    `gestoppt, gesetzt ${formatTime(state.lastFailureAt)} nach Protons Code 2028. ` +
+                    'Kein Browser gestartet, kein Kontakt zu Proton.',
                 hint:
-                    'Warten hilft hier nicht — Proton löst das über einen regulären Login. Bitte ' +
-                    'einmal auf mail.proton.me anmelden. Wenn das klappt: `pnpm spike ' +
-                    '--sperre-geklaert`, danach ist wieder genau ein Versuch frei.',
+                    'Warten löst das nicht. Wenn die Anmeldung auf mail.proton.me funktioniert: ' +
+                    '`pnpm spike --sperre-geklaert`, danach ist wieder genau ein Versuch frei.',
                 context: {
+                    blockedBy: 'login-guard',
                     consecutiveFailures: state.consecutiveFailures,
                     lastFailureAt: state.lastFailureAt,
                     lastReason: state.lastReason,
@@ -180,6 +186,11 @@ export function isAccountLockout(error: unknown): boolean {
         return true;
     }
     return error.context['protonCode'] === PROTON_ERROR_CODE.ACCOUNT_LOCKED;
+}
+
+/** A local timestamp, so "when was that" does not require converting Unix seconds by hand. */
+function formatTime(unixSeconds: number): string {
+    return new Date(unixSeconds * 1000).toLocaleString('de-CH');
 }
 
 export function formatDuration(seconds: number): string {

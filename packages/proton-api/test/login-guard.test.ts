@@ -84,10 +84,10 @@ describe('login guard', () => {
         await g.recordFailure(lockout);
 
         clock += 6 * 60 * 60;
-        await expect(g.assertMayAttempt()).rejects.toThrow(/gesperrt/);
+        await expect(g.assertMayAttempt()).rejects.toThrow(/eigenen Sperre/);
 
         clock += 365 * 24 * 60 * 60;
-        await expect(g.assertMayAttempt()).rejects.toThrow(/gesperrt/);
+        await expect(g.assertMayAttempt()).rejects.toThrow(/eigenen Sperre/);
     });
 
     it('is released only by the owner saying the regular login worked', async () => {
@@ -125,7 +125,23 @@ describe('login guard', () => {
             () => expect.unreachable('should be blocked'),
             (error: AppError) => {
                 expect(error.hint).toMatch(/--sperre-geklaert/);
-                expect(error.hint).toMatch(/Warten hilft hier nicht/);
+                expect(error.hint).toMatch(/Warten löst das nicht/);
+            }
+        );
+    });
+
+    it('makes clear the refusal is ours and that nothing was sent', async () => {
+        // Read as a fresh rejection from Proton, this message costs someone an evening of
+        // diagnosing a run that never left the machine.
+        const g = guard();
+        await g.recordFailure(lockout);
+
+        await g.assertMayAttempt().then(
+            () => expect.unreachable('should be blocked'),
+            (error: AppError) => {
+                expect(error.message).toMatch(/eigenen Sperre/);
+                expect(error.message).toMatch(/kein Kontakt zu Proton/i);
+                expect(error.context['blockedBy']).toBe('login-guard');
             }
         );
     });
