@@ -11,7 +11,6 @@ export const PROTON_LOGIN_URL = 'https://account.proton.me/login';
 
 /** The API path whose response carries the session, relative to the `/api` root. */
 export const AUTH_PATH = '/api/core/v4/auth';
-export const AUTH_2FA_PATH = '/api/core/v4/auth/2fa';
 
 export const SELECTORS = {
     username: 'input#username',

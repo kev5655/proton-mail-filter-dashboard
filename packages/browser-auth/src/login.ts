@@ -2,7 +2,7 @@ import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { Browser, BrowserContext, Page, Response } from 'playwright';
 
-import { AUTH_2FA_PATH, AUTH_PATH, PROTON_LOGIN_URL, SELECTORS, type SelectorName } from './selectors.js';
+import { AUTH_PATH, PROTON_LOGIN_URL, SELECTORS, type SelectorName } from './selectors.js';
 
 const log = getLogger('browser-auth');
 
@@ -120,7 +120,6 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
 
         const seen = traceAuthRequests(page);
         const auth = watchForAuthResponse(page, seen);
-        const twoFactorAccepted = watchForTwoFactorResponse(page);
 
         await page.goto(options.loginUrl ?? PROTON_LOGIN_URL, { waitUntil: 'domcontentloaded' });
 
@@ -135,10 +134,11 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
             seen
         );
 
+        const pending = payload.TwoFactor !== 0;
+
         if ((payload.TwoFactor & TWO_FACTOR_TOTP) !== 0) {
             await fill(page, 'totp', await options.promptTotp());
             await click(page, 'submit');
-            await withTimeout(twoFactorAccepted, timeout, 'Proton hat den 2FA-Code nicht bestätigt.');
         } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0 && headless) {
             // A passkey needs something to touch, and a headless browser offers nothing.
             throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
@@ -149,11 +149,16 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
                 context: { twoFactor: payload.TwoFactor },
             });
         } else if ((payload.TwoFactor & TWO_FACTOR_FIDO2) !== 0) {
-            log.info('waiting for the passkey to be confirmed in the browser window');
-            await withTimeout(twoFactorAccepted, timeout, 'Der Passkey wurde nicht bestätigt.');
+            console.log('\n  Bitte den Passkey im Browser-Fenster bestätigen. Danach geht es von selbst weiter.\n');
         }
 
-        const session = await collectSession(context, payload.UID, timeout);
+        // Waiting for the session cookie rather than for a particular request.
+        //
+        // The first version watched `core/v4/auth/2fa` and hung on a passkey, because Proton
+        // confirms one some other way. Which call completes a second factor is Proton's business
+        // and changes; that the session cookie exists is the thing actually being waited for, and
+        // it is true however the login finished.
+        const session = await collectSession(context, payload.UID, pending ? timeout : Math.min(timeout, 20_000));
         log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in through a browser');
         return { session, userId: payload.UserID };
     } finally {
@@ -172,7 +177,7 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
  * after the response arrives, so this waits rather than reading once and giving up.
  */
 async function collectSession(context: BrowserContext, uid: string, timeoutMs: number): Promise<BrowserSession> {
-    const deadline = Date.now() + Math.min(timeoutMs, 15_000);
+    const deadline = Date.now() + timeoutMs;
     let names: string[] = [];
 
     for (;;) {
@@ -197,10 +202,11 @@ async function collectSession(context: BrowserContext, uid: string, timeoutMs: n
     }
 
     throw new AppError('BROWSER_LOGIN_UI_CHANGED', {
-        message: `Die Anmeldung war erfolgreich, aber das Sitzungs-Cookie "AUTH-${uid}" fehlt.`,
+        message: `Das Sitzungs-Cookie "AUTH-${uid}" ist nicht aufgetaucht.`,
         hint:
-            `Vorhanden sind: ${names.join(', ') || '(keine)'}. Nur die Namen — die Werte sind die ` +
-            'Sitzung selbst. Proton hat die Cookies vermutlich umbenannt; anzupassen in collectSession.',
+            `Vorhanden sind: ${names.join(', ') || '(keine)'} — nur die Namen, die Werte sind die ` +
+            'Sitzung selbst. Entweder war die Anmeldung im Fenster nicht fertig (zweiter Faktor?), ' +
+            'oder Proton hat die Cookies umbenannt; das Letztere ist in collectSession anzupassen.',
         context: { uid, cookieNames: names },
     });
 }
@@ -317,16 +323,6 @@ function unexpectedAuthResponse(body: unknown, seen: AuthTrace): AppError {
             'Nur die Namen — Werte werden bewusst nicht ausgegeben. Damit lässt sich anpassen, ' +
             'ohne einen weiteren Anmeldeversuch zu verbrauchen.',
         context: { endpoint: AUTH_PATH, fields, missing, authRequests: seen },
-    });
-}
-
-function watchForTwoFactorResponse(page: Page): Promise<void> {
-    return new Promise<void>((resolve) => {
-        page.on('response', (response: Response) => {
-            if (matches(response, AUTH_2FA_PATH) && response.ok()) {
-                resolve();
-            }
-        });
     });
 }
 
