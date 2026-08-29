@@ -14,7 +14,7 @@ import {
     ProtonHttp,
 } from '@pms/proton-api';
 
-import { ask, askSecret } from './prompt.js';
+import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 
 /**
@@ -47,13 +47,13 @@ async function main(): Promise<void> {
     console.log('Es werden ausschliesslich Daten gelesen. Am Konto wird nichts verändert.');
     console.log('Passwort und 2FA-Code werden nirgends gespeichert.\n');
 
-    const username = await ask('Proton-Benutzername (E-Mail): ');
-    const password = await askSecret('Passwort (Eingabe unsichtbar): ');
+    const username = await terminal.askRequired('Proton-Benutzername (E-Mail): ', 'Benutzername');
+    const password = await terminal.askRequiredSecret('Passwort (Eingabe unsichtbar): ', 'Passwort');
 
     const appVersion = process.env['PROTON_APP_VERSION'];
     const http = new ProtonHttp({ version: VERSION, ...(appVersion === undefined ? {} : { appVersion }) });
 
-    await login(http, { username, password }, async () => askSecret('2FA-Code: '));
+    await login(http, { username, password }, async () => terminal.askRequiredSecret('2FA-Code: ', '2FA-Code'));
     console.log('\n✓ Angemeldet.\n');
 
     const recorded: Recorded[] = [];
@@ -121,19 +121,26 @@ async function main(): Promise<void> {
     );
 }
 
-main().catch((error: unknown) => {
-    console.error('\n✗ Abgebrochen.\n');
-    if (isAppError(error)) {
-        console.error(`  [${error.code}] ${error.message}`);
-        if (error.hint !== undefined) {
-            console.error(`  → ${error.hint}`);
+main()
+    .catch((error: unknown) => {
+        console.error('\n✗ Abgebrochen.\n');
+        if (isAppError(error)) {
+            console.error(`  [${error.code}] ${error.message}`);
+            if (error.hint !== undefined) {
+                console.error(`  → ${error.hint}`);
+            }
+            if (Object.keys(error.context).length > 0) {
+                console.error(`  Kontext: ${JSON.stringify(error.context)}`);
+            }
+        } else if (error instanceof Error) {
+            console.error(`  ${error.message}`);
+        } else {
+            console.error(error);
         }
-        if (Object.keys(error.context).length > 0) {
-            console.error(`  Kontext: ${JSON.stringify(error.context)}`);
-        }
-    } else {
-        console.error(error);
-    }
-    console.error('');
-    process.exitCode = 1;
-});
+        console.error('');
+        process.exitCode = 1;
+    })
+    .finally(() => {
+        // The stdin listener keeps the process alive otherwise.
+        terminal.close();
+    });
