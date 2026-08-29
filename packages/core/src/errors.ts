@@ -157,6 +157,8 @@ export class ProtonApiError extends AppError {
 
 /** Proton error codes we react to specifically. */
 export const PROTON_ERROR_CODE = {
+    /** "unusual activity targeting your account" — see login-guard.ts and auth.ts. */
+    ACCOUNT_LOCKED: 2028,
     WRONG_PASSWORD: 8002,
     HUMAN_VERIFICATION_REQUIRED: 9001,
 } as const;

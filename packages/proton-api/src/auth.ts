@@ -215,6 +215,20 @@ export function describeLoginFailure(cause: unknown, authVersion: number): AppEr
         });
     }
 
+    if (cause.protonCode === PROTON_ERROR_CODE.ACCOUNT_LOCKED) {
+        return new AppError('PROTON_AUTH_FAILED', {
+            message: `Proton hat die Anmeldung abgelehnt: ${cause.protonMessage ?? '2028'}`,
+            hint:
+                'Das trifft die Anmeldung, nicht das Konto: dasselbe Konto kommt über ' +
+                'mail.proton.me herein. Was diesem Aufruf gegenüber dem Webclient fehlt, ist ' +
+                'dessen Browser-Challenge (`Payload`) — Telemetrie, die nur ein Browser ehrlich ' +
+                'erzeugen kann. Nachbauen hiesse, einen Browser vorzutäuschen. Nicht erneut ' +
+                'versuchen; der Weg führt über Protons Support.',
+            context: { ...shared, httpStatus: cause.httpStatus, step: 'core/v4/auth' },
+            cause,
+        });
+    }
+
     return new AppError('PROTON_AUTH_FAILED', {
         message: `Proton hat die Anmeldung abgelehnt: ${cause.protonMessage ?? `HTTP ${cause.httpStatus}`}`,
         hint: `Protons Fehlercode: ${cause.protonCode ?? 'keiner'}. Das ist Protons Wortlaut, nicht unsere Deutung.`,

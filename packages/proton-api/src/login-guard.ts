@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { AppError, isAppError } from '@pms/core/errors';
+import { AppError, isAppError, PROTON_ERROR_CODE } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 
 const log = getLogger('login-guard');
@@ -30,7 +30,6 @@ const COOLDOWN_SECONDS = [60, 300, 900, 3600] as const;
 
 
 const LOCKOUT_CODES = new Set(['PROTON_AUTH_HUMAN_VERIFICATION_REQUIRED']);
-const PROTON_ACCOUNT_LOCKED = 2028;
 
 export interface LoginAttemptState {
     consecutiveFailures: number;
@@ -180,7 +179,7 @@ export function isAccountLockout(error: unknown): boolean {
     if (LOCKOUT_CODES.has(error.code)) {
         return true;
     }
-    return error.context['protonCode'] === PROTON_ACCOUNT_LOCKED;
+    return error.context['protonCode'] === PROTON_ERROR_CODE.ACCOUNT_LOCKED;
 }
 
 export function formatDuration(seconds: number): string {
