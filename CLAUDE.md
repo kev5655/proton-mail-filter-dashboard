@@ -54,8 +54,20 @@ pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
 ```
 
-`pnpm spike` must be run by the account owner. It prompts for the password and TOTP in the terminal;
-neither is stored, logged, or written to a fixture. Do not ask for credentials or accept a token.
+`pnpm spike` must be run by the account owner. **Never ask for credentials and never accept a
+token** — not to test something, not to save a round trip.
+
+Credentials come from 1Password when `PMS_OP_VAULT` is set (see `.env.example`), otherwise from a
+terminal prompt. The 1Password path shells out to `op`, which makes the app ask for a fingerprint;
+the value goes straight into the SRP handshake and is never logged, stored, or included in an error.
+
+`pnpm spike --describe-1password` prints the item's **field labels only**. Use it when the item is
+not laid out as expected — the answer to "what is the field called" must never require revealing a
+value.
+
+Every credential passes `@pms/credentials/verify` before use. That is not ceremony: an empty
+password from a broken prompt was sent to Proton once and contributed to the account lockout. Any
+source can hand back nothing, and nothing must reach Proton.
 
 ## Three things that will bite you
 

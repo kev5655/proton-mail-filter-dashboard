@@ -35,3 +35,17 @@ export const DATA_DIR = join(REPO_ROOT, 'data');
 
 /** Scrubbed API responses, recorded for offline development. Committed. */
 export const FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'recorded');
+
+/**
+ * Load `.env` from the repository root if present.
+ *
+ * Configuration like the 1Password vault name should not be baked into a repository that is headed
+ * for GitHub, and typing it before every command is the kind of friction that ends in someone
+ * hardcoding it.
+ */
+export function loadEnvFile(): void {
+    const envFile = join(REPO_ROOT, '.env');
+    if (existsSync(envFile)) {
+        process.loadEnvFile(envFile);
+    }
+}

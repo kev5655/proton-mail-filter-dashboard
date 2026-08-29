@@ -13,6 +13,7 @@ import {
     type StoredSession,
 } from '@pms/proton-api';
 
+import { credentialConfig, resolveSource } from './credentials.js';
 import { DATA_DIR } from './paths.js';
 import { terminal } from './prompt.js';
 
@@ -75,15 +76,25 @@ export async function connect(): Promise<Connection> {
     // Only now, and only once.
     await guard.assertMayAttempt();
 
-    const username = await terminal.askRequired('Proton-Benutzername (E-Mail): ', 'Benutzername');
-    const password = await terminal.askRequiredSecret('Passwort (Eingabe unsichtbar): ', 'Passwort');
+    const source = resolveSource(credentialConfig());
+    console.log(`Zugangsdaten aus: ${source.name}`);
+
+    // Both are fetched and verified before the first request. If either is empty or malformed this
+    // throws here, and Proton never sees a login attempt it would have to count as a failure.
+    const username = await source.getUsername();
+    const password = await source.getPassword();
 
     let session: ProtonSession;
     let userId: string;
     try {
-        const result = await login(http, { username, password }, async () =>
-            terminal.askRequiredSecret('2FA-Code: ', '2FA-Code')
-        );
+        const result = await login(http, { username, password }, async () => {
+            const stored = await source.getTotp();
+            if (stored !== undefined) {
+                console.log('  2FA-Code aus 1Password übernommen.');
+                return stored;
+            }
+            return terminal.askRequiredSecret('2FA-Code: ', '2FA-Code');
+        });
         session = result.session;
         userId = result.userId;
     } catch (error) {

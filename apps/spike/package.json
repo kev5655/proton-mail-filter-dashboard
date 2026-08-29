@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@pms/core": "workspace:*",
+    "@pms/credentials": "workspace:*",
     "@pms/proton-api": "workspace:*",
     "@proton/sieve": "workspace:*"
   }

@@ -35,6 +35,13 @@ export const ERROR_CODES = [
     // Local storage and the tool's own login
     'VAULT_LOCKED',
     'VAULT_KEY_REJECTED',
+
+    // Getting credentials from wherever the user keeps them
+    'CREDENTIALS_TOOL_MISSING',
+    'CREDENTIALS_LOCKED',
+    'CREDENTIALS_NOT_FOUND',
+    'CREDENTIALS_EMPTY',
+    'CREDENTIALS_MALFORMED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

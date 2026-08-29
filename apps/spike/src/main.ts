@@ -12,10 +12,12 @@ import {
     getMessages,
 } from '@pms/proton-api';
 
-import { FIXTURE_DIR } from './paths.js';
+import { credentialConfig } from './credentials.js';
+import { FIXTURE_DIR, loadEnvFile } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 import { connect } from './session.js';
+import { describeItem } from '@pms/credentials';
 
 /**
  * M0 read-only spike.
@@ -39,8 +41,37 @@ interface Recorded {
     data: unknown;
 }
 
+/**
+ * Print the field labels of the configured 1Password item — labels only, never values.
+ *
+ * When the item is not laid out the way the code expects, the useful question is "what are the
+ * fields called", and answering it must never require anyone to reveal a password.
+ */
+async function describeCredentialItem(): Promise<void> {
+    const config = credentialConfig();
+    if (config.vault === undefined || config.vault === '') {
+        console.log('PMS_OP_VAULT ist nicht gesetzt — es gibt nichts zu beschreiben.');
+        console.log('Beispiel: PMS_OP_VAULT="Kevin Private" PMS_OP_ITEM="Proton" pnpm spike --describe-1password\n');
+        return;
+    }
+
+    const labels = await describeItem({ vault: config.vault, item: config.item });
+    console.log(`\nFelder in "${config.item}" (Tresor "${config.vault}") — nur Namen, keine Werte:\n`);
+    for (const label of labels) {
+        console.log(`  ${label}`);
+    }
+    console.log('\nErwartet werden "username" (oder "email") und "password".');
+    console.log('Heissen sie anders, sag mir die Namen — die Werte brauche ich nicht.\n');
+}
+
 async function main(): Promise<void> {
+    loadEnvFile();
     configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+
+    if (process.argv.includes('--describe-1password')) {
+        await describeCredentialItem();
+        return;
+    }
 
     console.log('\nProton Mail Sorter — M0 Spike (nur lesend)\n');
     console.log('Es werden ausschliesslich Daten gelesen. Am Konto wird nichts verändert.');

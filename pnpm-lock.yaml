@@ -29,6 +29,9 @@ importers:
       '@pms/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@pms/credentials':
+        specifier: workspace:*
+        version: link:../../packages/credentials
       '@pms/proton-api':
         specifier: workspace:*
         version: link:../../packages/proton-api
@@ -41,6 +44,12 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+
+  packages/credentials:
+    dependencies:
+      '@pms/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/proton-api:
     dependencies:
