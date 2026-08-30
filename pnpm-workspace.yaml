@@ -12,3 +12,11 @@ packages:
 onlyBuiltDependencies:
   - esbuild
   - better-sqlite3-multiple-ciphers
+
+# Pinned because vite 8 and vite-node 6 must agree on their internals, and a transitive
+# dependency pulling in an older vite has broken the test run before.
+#
+# This lived under "pnpm.overrides" in package.json, where pnpm 10 no longer reads it — it warned
+# on every command and the pin quietly did nothing.
+overrides:
+  vite: '^8.2.2'

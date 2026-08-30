@@ -32,6 +32,7 @@ Pseudonymisierer (siehe `T-02`). Test `T-01` nimmt sie sauber neu auf.
 
 ```sh
 pnpm install
+pnpm install:browser      # nötig vor der ersten Anmeldung — lädt Chromium
 pnpm check-types
 pnpm test
 ```
@@ -169,7 +170,31 @@ operable program or batch file.
 ```
 
 
-**Fix:**
+**Fix:** Drei Fehler, davon zwei von mir. Behoben.
+
+**1 — Die Fehlermeldung nannte einen Befehl, der nicht funktioniert.** `pnpm exec playwright install
+chromium` scheitert von der Wurzel aus, weil Playwright in einem Workspace-Paket liegt und nicht in
+der Root. Ich bin selbst darüber gestolpert und habe deshalb `pnpm install:browser` angelegt — und
+dann vergessen, den Hinweistext im Fehler mitzuändern. Die Meldung sagt jetzt den richtigen Befehl
+und erklärt in einem Halbsatz, warum der naheliegende nicht geht.
+
+```sh
+pnpm install:browser
+```
+
+**2 — `pnpm.overrides` wurde ignoriert.** Genau das sagt die Warnung, die bei dir bei jedem Befehl
+kam. pnpm 10 liest die Einstellung nicht mehr aus `package.json`; unsere Vite-Version war damit
+**nicht** gepinnt. Verschoben nach `pnpm-workspace.yaml`, im Lockfile jetzt sichtbar. Kein Warntext
+mehr.
+
+**3 — Die 1Password-CLI stand als „optional" im README.** Stimmt nicht: sobald `PMS_OP_VAULT`
+gesetzt ist, ist sie zwingend. Präzisiert — ohne die Variable wirst du im Terminal gefragt und
+brauchst die CLI gar nicht.
+
+Und `pnpm install:browser` steht jetzt in der Vorbereitung oben und im README als **nicht optional**.
+Es war als Kommentar hinter dem Befehl versteckt und las sich wie eine Nebenbemerkung.
+
+Status: `behoben`
 
 ---
 

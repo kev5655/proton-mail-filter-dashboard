@@ -31,18 +31,25 @@ Same on Windows and Linux unless noted.
 - A **paid** Proton Mail plan
 - **Node 24 or newer** and **pnpm** — `node --version`, `corepack enable pnpm` if pnpm is missing
 - **Google Chrome**, for signing in (see [Signing in](#signing-in) for why)
-- Optional: the [1Password CLI](https://developer.1password.com/docs/cli/), so credentials come from
-  your vault instead of a prompt. Enable *Integrate with 1Password CLI* in the desktop app.
+- The [1Password CLI](https://developer.1password.com/docs/cli/) if you set `PMS_OP_VAULT` —
+  **required** in that case, since credentials then come from the vault rather than a prompt. Enable
+  *Integrate with 1Password CLI* in the desktop app. Leave `PMS_OP_VAULT` unset to be asked in the
+  terminal instead and skip the CLI entirely.
 - Optional: [Ollama](https://ollama.com) for folder-name suggestions — local, remote, or none
 
 ## Install
 
 ```sh
 pnpm install
-pnpm install:browser     # one-off: downloads the Chromium used when Chrome is not available
+pnpm install:browser     # required before the first sign-in — downloads Chromium
 pnpm check-types
 pnpm test
 ```
+
+**`pnpm install:browser` is not optional.** Signing in needs a browser (see
+[Signing in](#signing-in)), and without this the first run stops with `BROWSER_NOT_INSTALLED`.
+Note the script name: `pnpm exec playwright install` does *not* work from the repository root,
+because Playwright is a dependency of one workspace package rather than of the root.
 
 On Windows use **PowerShell** or **Git Bash**; both work. There is nothing to compile and no
 platform-specific dependency.
