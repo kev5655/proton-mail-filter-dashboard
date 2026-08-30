@@ -7,6 +7,16 @@ PowerShell und Bash. `pnpm`-Befehle sind auf beiden Systemen identisch. Konfigur
 `.env` im Wurzelverzeichnis, nicht in Umgebungsvariablen vor dem Befehl: `VAR=wert befehl` ist
 Bash-Syntax, die PowerShell nicht kennt.
 
+**Einen einzelnen Test laufen lassen**, wenn etwas klemmt:
+
+```sh
+pnpm test packages/core/test/private-file.test.ts
+pnpm test packages/core/test/private-file.test.ts --reporter=verbose
+```
+
+Der Pfad ist ein Filter — `pnpm test private-file` tut es auch. Auf Windows genau so, mit
+Schrägstrichen.
+
 **So benutzen wir diese Datei.** Du trägst gefundene Fehler unter dem jeweiligen Test bei
 `Befund:` ein — Ausgabe hineinkopieren reicht, ich brauche keine Analyse. Ich antworte in derselben
 Datei unter `Fix:` und setze den Status. Du musst mir nichts erklären, was hier schon steht.

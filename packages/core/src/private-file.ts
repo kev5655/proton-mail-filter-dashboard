@@ -53,15 +53,20 @@ export async function restrictToOwner(path: string): Promise<void> {
             windowsHide: true,
         });
     } catch (cause) {
+        // icacls says why on stderr, and the reason is usually specific: an unknown trustee name, a
+        // path it cannot see. Passing it through beats "the call failed".
+        const detail = String((cause as { stderr?: string }).stderr ?? '')
+            .split(/\r?\n/)
+            .find((line) => line.trim() !== '');
+
         throw new AppError('VAULT_KEY_REJECTED', {
             message: `Die Zugriffsrechte auf \`${path}\` liessen sich nicht einschränken.`,
             hint:
-                'Unter Windows werden Rechte über `icacls` gesetzt. Der Aufruf ist fehlgeschlagen, ' +
-                'die Datei ist also möglicherweise für andere Konten dieses Rechners lesbar. ' +
-                'Prüfen mit: icacls "' +
-                path +
-                '"',
-            context: { path, account },
+                'Unter Windows setzt `icacls` die Rechte, und der Aufruf ist fehlgeschlagen — die ' +
+                'Datei ist also möglicherweise für andere Konten dieses Rechners lesbar.' +
+                (detail === undefined ? '' : ` icacls meldet: ${detail}`) +
+                ` Nachsehen mit: icacls "${path}"`,
+            context: { path, account, icacls: detail },
             cause,
         });
     }
@@ -79,18 +84,41 @@ export async function isOwnerOnly(path: string): Promise<boolean> {
         return ((await stat(path)).mode & 0o777) === OWNER_ONLY;
     }
 
-    const { stdout } = await execFileAsync('icacls', [path], { windowsHide: true });
+    const trustees = await windowsTrustees(path);
     const account = windowsAccount().toLowerCase();
 
-    // Every access-control entry must name this account. icacls prints one per line after the path,
-    // then a summary line; anything else with access means the file is not private.
-    const entries = stdout
-        .split(/\r?\n/)
-        .slice(0, -2)
-        .map((line) => line.replace(/^.*?[/\\][^:]*?\s+/, '').trim())
-        .filter((line) => line !== '');
+    return trustees.length > 0 && trustees.every((trustee) => trustee.toLowerCase() === account);
+}
 
-    return entries.length > 0 && entries.every((entry) => entry.toLowerCase().startsWith(account));
+/**
+ * Who icacls says has access, by name.
+ *
+ * Parsed by looking for `NAME:(` rather than by counting lines, because icacls output is localised
+ * — a German Windows prints different headings and a different summary line, and the first version
+ * of this counted two trailing lines and hoped. The `:(` is the one part that is punctuation rather
+ * than language. A drive letter cannot be mistaken for a trustee: `C:\` is a colon and a backslash.
+ */
+async function windowsTrustees(path: string): Promise<string[]> {
+    const { stdout } = await execFileAsync('icacls', [path], { windowsHide: true });
+    return [...stdout.matchAll(/(\S+):\(/g)].map((match) => match[1] ?? '');
+}
+
+/**
+ * What the system reports about a file, verbatim.
+ *
+ * For failure messages. "expected false to be true" is not something anyone can act on, and the
+ * evidence that would explain it is one command away.
+ */
+export async function describeOwnership(path: string): Promise<string> {
+    try {
+        if (process.platform !== 'win32') {
+            return `mode ${((await stat(path)).mode & 0o777).toString(8)}`;
+        }
+        const { stdout } = await execFileAsync('icacls', [path], { windowsHide: true });
+        return `icacls:\n${stdout.trim()}\n(erwartetes Konto: ${windowsAccount()})`;
+    } catch (error) {
+        return `nicht feststellbar: ${String(error)}`;
+    }
 }
 
 /** `DOMAIN\user`, which is what icacls wants; a plain username fails on a domain-joined machine. */

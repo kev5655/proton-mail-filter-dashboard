@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { isOwnerOnly } from '@pms/core/private-file';
+import { describeOwnership, isOwnerOnly } from '@pms/core/private-file';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ProtonHttp } from '../src/http.js';
@@ -50,7 +50,7 @@ describe('backing up before a write', () => {
         const result = await backupBeforeWrite(fakeProton(), directory, Date.UTC(2026, 0, 2, 3, 4, 5));
 
         // Asked through isOwnerOnly, because a POSIX mode means nothing on Windows.
-        expect(await isOwnerOnly(result.path)).toBe(true);
+        expect(await isOwnerOnly(result.path), await describeOwnership(result.path)).toBe(true);
     });
 
     it('names the file after the moment it was taken, so two never collide', async () => {

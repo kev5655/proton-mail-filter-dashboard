@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { isOwnerOnly, writePrivateFile } from '../src/private-file.js';
+import { describeOwnership, isOwnerOnly, writePrivateFile } from '../src/private-file.js';
 
 /**
  * Files only their owner may read.
@@ -40,7 +40,18 @@ describe('writing a private file', () => {
     it('creates it readable only by its owner', async () => {
         await writePrivateFile(path, 'geheim');
 
-        expect(await isOwnerOnly(path)).toBe(true);
+        // The evidence goes in the failure message. On Windows the answer depends on how icacls
+        // names the account, which is not something anyone should have to guess from a boolean.
+        expect(await isOwnerOnly(path), await describeOwnership(path)).toBe(true);
+    });
+
+    it('reports what the system says, so a failure can be diagnosed', async () => {
+        await writePrivateFile(path, 'geheim');
+
+        const description = await describeOwnership(path);
+
+        expect(description).not.toBe('');
+        expect(description).not.toContain('nicht feststellbar');
     });
 
     it.skipIf(!posix)('tightens a file that already exists with loose permissions', async () => {
