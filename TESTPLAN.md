@@ -23,7 +23,9 @@ pnpm check-types
 pnpm test
 ```
 
-Erwartet: beides ohne Fehler, aktuell 359 Tests.
+Erwartet: beides ohne Fehler. Aktuell **352 bestanden, 5 übersprungen** — übersprungen wird
+`real-filter.test.ts`, weil die dazugehörige Fixture nicht im Repository liegt. Nach `T-01` ist sie
+da und die fünf laufen mit.
 
 **Befund:**
 
@@ -231,8 +233,10 @@ Status: `offen`
 ## Offene Punkte ausserhalb der Tests
 
 - **Git-History.** `fixtures/recorded/filters.json` mit echten Werten liegt in Commit `0057c6c` auf
-  dem öffentlichen Remote. Lokal ist die History bereinigt; der Remote braucht einen Force-Push,
-  den du selbst ausführen musst — siehe die Anleitung, die ich dir dazu gegeben habe.
+  dem öffentlichen Remote. Lokal ist die History bereinigt; der Remote braucht einen Force-Push, den
+  du selbst ausführen musst — die Befehle stehen in meiner Nachricht dazu.
+- **Fixture kommt zurück.** Nach `T-01` liegt eine frisch pseudonymisierte `filters.json` wieder da.
+  Erst nach `T-02` committen. `fixture-safety.test.ts` prüft sie zusätzlich bei jedem `pnpm test`.
 - **Passkey.** Funktioniert im eigenen Browser-Profil nicht, weil dort 1Password fehlt. TOTP ist der
   bequemere Weg, weil der Code automatisch eingetragen wird.
 
