@@ -69,7 +69,7 @@ describe('session store', () => {
         expect(await loadSession(join(dir, 'absent.json'), 'passphrase')).toBeUndefined();
     });
 
-    it('keeps the file readable only by its owner', async () => {
+    it.skipIf(process.platform === 'win32')('keeps the file readable only by its owner', async () => {
         // Deliberately starting from a loose file. Writing a fresh one and checking the mode passes
         // even with `writeFile`'s `mode` option, which does nothing when the file already exists —
         // so the tokens of anyone whose file was once world-readable stayed that way. This test

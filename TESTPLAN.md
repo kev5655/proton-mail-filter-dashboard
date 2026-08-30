@@ -2,6 +2,11 @@
 
 Stand: M0 abgeschlossen — der Spike hat einmal erfolgreich gegen das echte Konto gelesen.
 
+**Getestet wird auf Windows.** Wo ein Befehl nicht überall gleich ist, stehen beide Varianten da —
+PowerShell und Bash. `pnpm`-Befehle sind auf beiden Systemen identisch. Konfiguration gehört in die
+`.env` im Wurzelverzeichnis, nicht in Umgebungsvariablen vor dem Befehl: `VAR=wert befehl` ist
+Bash-Syntax, die PowerShell nicht kennt.
+
 **So benutzen wir diese Datei.** Du trägst gefundene Fehler unter dem jeweiligen Test bei
 `Befund:` ein — Ausgabe hineinkopieren reicht, ich brauche keine Analyse. Ich antworte in derselben
 Datei unter `Fix:` und setze den Status. Du musst mir nichts erklären, was hier schon steht.
@@ -75,11 +80,23 @@ also unabhängig von der Reihenfolge. Ein zweiter Test im `write-isolation`-Set 
 per `grep` nach `0o600` im Quelltext geprüft — genau die Art Prüfung, die grün bleibt, während die
 Zusage gebrochen ist. Ersetzt durch einen Test, der die Datei auf der Platte ansieht.
 
-**Bitte einmal aufräumen**, die alte Datei behält ihre Rechte:
+**Und ein zweiter Fund, den deine Frage ausgelöst hat:** auf Windows gibt es kein `chmod`. Node's
+`chmod` schaltet dort nur das Schreibgeschützt-Bit um — Rechte liegen in ACLs. Mein Fix hätte auf
+Windows also *gar nichts* geschützt und dabei sorgfältig ausgesehen, und die Tests hätten
+fehlgeschlagen. `writePrivateFile` benutzt jetzt `icacls`, wenn es auf Windows läuft.
 
-```sh
-chmod 600 data/*.json data/*.enc.json 2>/dev/null; ls -l data/
+**Aufräumen der bestehenden Dateien** — PowerShell:
+
+```powershell
+Get-ChildItem data\*.json | ForEach-Object {
+  icacls $_.FullName /inheritance:r /grant:r "$env:USERDOMAIN\$env:USERNAME:F"
+}
+icacls data\session.enc.json
 ```
+
+In der letzten Ausgabe darf **nur dein Konto** stehen — kein `BUILTIN\Users`, kein `Everyone`.
+
+Auf Linux oder in Git Bash wäre es `chmod 600 data/*.json`.
 
 Status: `behoben`
 
@@ -210,9 +227,27 @@ Status: `offen`
 
 Sitzung beiseitelegen, damit wirklich neu angemeldet wird:
 
+Die `PMS_BROWSER_*`-Einstellungen gehören auf Windows in die `.env` im Repo-Wurzelverzeichnis —
+`VAR=wert befehl` ist Bash-Syntax und existiert in PowerShell nicht:
+
+```ini
+PMS_BROWSER_CHANNEL=chrome
+PMS_BROWSER_HEADLESS=false
+PMS_BROWSER_PROFILE=data/browser-profile
+```
+
+**PowerShell:**
+
+```powershell
+Move-Item data\session.enc.json data\session.enc.json.bak
+pnpm spike
+```
+
+**Linux oder Git Bash:**
+
 ```sh
 mv data/session.enc.json data/session.enc.json.bak
-PMS_BROWSER_CHANNEL=chrome PMS_BROWSER_HEADLESS=false PMS_BROWSER_PROFILE=data/browser-profile pnpm spike
+pnpm spike
 ```
 
 **Interessant ist hier vor allem:** Fragt Proton diesmal noch nach dem zweiten Faktor? Das Profil ist
@@ -221,10 +256,10 @@ inzwischen bekannt, es könnte durchlaufen.
 Falls 2FA kommt: im Fenster auf den Authentifizierungscode umschalten und dann **stehen lassen** —
 den Code trägt der Spike selbst ein.
 
-Zurück zur alten Sitzung, falls etwas schiefgeht:
+Zurück zur alten Sitzung, falls etwas schiefgeht — `Move-Item ... -Force` beziehungsweise `mv`:
 
-```sh
-mv data/session.enc.json.bak data/session.enc.json
+```powershell
+Move-Item data\session.enc.json.bak data\session.enc.json -Force
 ```
 
 Status: `offen`
@@ -239,12 +274,14 @@ Status: `offen`
 
 Nur sinnvoll, wenn `T-04` gelaufen ist.
 
+Sitzung wieder beiseite (`Move-Item` bzw. `mv`), dann die drei `PMS_BROWSER_*`-Zeilen in der `.env`
+auskommentieren und starten:
+
 ```sh
-mv data/session.enc.json data/session.enc.json.bak
 pnpm spike
 ```
 
-Ohne die `PMS_BROWSER_*`-Variablen, also mitgeliefertes Chromium ohne Fenster.
+Damit läuft das mitgelieferte Chromium ohne Fenster.
 
 **Beide Ausgänge sind gültige Ergebnisse** — ich möchte nur wissen, welcher:
 
@@ -378,25 +415,35 @@ Status: `offen`
 
 Das ist der Test, für den das ganze Paket existiert. Nach `T-09`:
 
-```sh
-file data/mailbox.db
-head -c 16 data/mailbox.db | xxd | head -1
-grep -c "Rechnung" data/mailbox.db        # oder ein Wort aus einem echten Betreff
+**PowerShell:**
+
+```powershell
+# Die ersten 16 Bytes — dürfen NICHT "SQLite format 3" sein
+[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("data\mailbox.db")[0..15])
+
+# Ein Wort aus einem echten Betreff — darf NICHT gefunden werden
+Select-String -Path data\mailbox.db -Pattern "Rechnung" -Encoding Byte
+Select-String -Path data\mailbox.db -Pattern "messages" -Encoding Byte
 ```
 
-**Erwartet**
-
-- `file` sagt **nicht** „SQLite 3.x database", sondern „data".
-- Die ersten 16 Bytes sind **nicht** `SQLite format 3`.
-- Kein Betreff, kein Absender, kein Tabellenname ist im Klartext zu finden.
-
-Zum Gegencheck, dass es wirklich Daten enthält und nicht nur leer ist: die Zusammenfassung aus
-`T-09` kommt aus genau dieser Datei.
-
-Falls du `sqlite3` installiert hast:
+**Linux oder Git Bash:**
 
 ```sh
-sqlite3 data/mailbox.db ".tables"      # muss scheitern
+file data/mailbox.db                       # sagt "data", nicht "SQLite 3.x database"
+head -c 16 data/mailbox.db                 # nicht "SQLite format 3"
+grep -c "Rechnung" data/mailbox.db         # 0
+grep -c "messages" data/mailbox.db         # 0 — nicht mal die Tabellennamen
+```
+
+**Erwartet:** kein SQLite-Header, kein Betreff, kein Absender, kein Tabellenname im Klartext.
+
+Zum Gegencheck, dass die Datei wirklich Daten enthält und nicht bloss leer ist: die Zusammenfassung
+aus `T-09` wird aus genau dieser Datei gelesen.
+
+Falls `sqlite3` installiert ist, muss das scheitern:
+
+```sh
+sqlite3 data/mailbox.db ".tables"
 ```
 
 Status: `offen`

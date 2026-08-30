@@ -117,6 +117,10 @@ no SQLite header and no table names, so nothing about it says "mailbox".
 
 It is a copy, and nothing in it is authoritative. Losing it costs a resync, not data.
 
+Files under `data/` are restricted to your account — `chmod` on Unix, `icacls` on Windows, where
+POSIX modes do not exist and `chmod` would only toggle a read-only flag. Check them with
+`ls -l data/` or `icacls data\session.enc.json`.
+
 Both the window and the limit default small on purpose: a page of a hundred messages costs about a
 second, so a year of mail takes minutes. Ask for more only when you need it.
 

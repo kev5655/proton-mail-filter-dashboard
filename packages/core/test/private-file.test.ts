@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { writePrivateFile } from '../src/private-file.js';
+import { isOwnerOnly, writePrivateFile } from '../src/private-file.js';
 
 /**
  * Files only their owner may read.
@@ -16,6 +16,10 @@ import { writePrivateFile } from '../src/private-file.js';
  *
  * It was noticed here only because the suite happened to run in an order where an earlier test had
  * already created the file. The case below makes that the point rather than an accident.
+ *
+ * The question is asked through `isOwnerOnly` rather than by comparing a mode, because a mode means
+ * nothing on Windows — `stat` reports one invented from the read-only flag, so `mode === 0o600`
+ * there is a test that passes without checking anything.
  */
 
 let directory: string;
@@ -30,34 +34,32 @@ afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
 });
 
-async function permissions(): Promise<string> {
-    return ((await stat(path)).mode & 0o777).toString(8);
-}
+const posix = process.platform !== 'win32';
 
 describe('writing a private file', () => {
     it('creates it readable only by its owner', async () => {
         await writePrivateFile(path, 'geheim');
 
-        expect(await permissions()).toBe('600');
+        expect(await isOwnerOnly(path)).toBe(true);
     });
 
-    it('tightens a file that already exists with loose permissions', async () => {
+    it.skipIf(!posix)('tightens a file that already exists with loose permissions', async () => {
         // The real bug. `writeFile` with a mode would leave this at 666 and report success.
         await writeFile(path, 'alt');
         await chmod(path, 0o666);
 
         await writePrivateFile(path, 'neu');
 
-        expect(await permissions()).toBe('600');
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
     });
 
-    it('tightens it even when the file is world-writable and group-owned', async () => {
+    it.skipIf(!posix)('tightens it even when the file is world-writable', async () => {
         await writeFile(path, 'alt');
         await chmod(path, 0o777);
 
         await writePrivateFile(path, 'neu');
 
-        expect(await permissions()).toBe('600');
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
     });
 
     it('creates the directory, so a caller need not remember to', async () => {
