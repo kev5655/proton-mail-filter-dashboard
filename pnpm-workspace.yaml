@@ -4,7 +4,11 @@ packages:
   - 'vendor/proton/sieve'
   - 'vendor/proton/utils'
 
-# esbuild ships a platform binary that its install script unpacks; tsx needs it.
-# Nothing else in this tree is allowed to run install scripts.
+# Packages allowed to run install scripts. Both fetch or unpack a prebuilt binary; neither
+# compiles anything here, and nothing else in this tree may run a script at all.
+#
+#   esbuild                          platform binary, needed by tsx
+#   better-sqlite3-multiple-ciphers  SQLCipher build of SQLite — the encrypted local database
 onlyBuiltDependencies:
   - esbuild
+  - better-sqlite3-multiple-ciphers
