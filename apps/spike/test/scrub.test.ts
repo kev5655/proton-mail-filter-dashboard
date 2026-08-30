@@ -135,3 +135,77 @@ describe("keeping Proton's own machinery legible", () => {
         expect((scrub({ Name: 'proton-rechnungen' }) as { Name: string }).Name).toMatch(/^s:/);
     });
 });
+
+describe('a Sieve script is a document, not a value', () => {
+    /**
+     * A script shaped exactly like the one that leaked, with invented operands.
+     *
+     * A real filter reached a committed fixture with its sender fragments and folder name in plain
+     * text. The cause was one substring test: Proton's spam preamble mentions
+     * `vnd.proton.spam-threshold`, and `value.includes('vnd.proton')` therefore matched the entire
+     * script, so the whole thing was waved through as Proton's own machinery.
+     *
+     * The operands here are made up. Pinning the fix with the values it failed on would publish
+     * them a second time, in the test that exists to stop exactly that.
+     */
+    const REAL_SCRIPT = [
+        'require ["include", "environment", "variables", "relational", "comparator-i;ascii-numeric", "spamtest"];',
+        'require ["fileinto", "imap4flags"];',
+        '',
+        '# Generated: Do not run this script on spam messages',
+        'if allof (environment :matches "vnd.proton.spam-threshold" "*", spamtest :value "ge" :comparator "i;ascii-numeric" "${1}") {',
+        '    return;',
+        '}',
+        '',
+        '/**',
+        ' * @type and',
+        ' * @comparator contains',
+        ' */',
+        'if allof (address :all :comparator "i;unicode-casemap" :contains "From" ["haendler-eins", "haendler-zwei", "haendler-drei"]) {',
+        '    fileinto "Werbepost";',
+        '}',
+    ].join('\r\n');
+
+    function scrubbed(): string {
+        const result = scrub({ Sieve: REAL_SCRIPT }, undefined) as { Sieve: string };
+        return result.Sieve;
+    }
+
+    it('removes the match values and the folder name', () => {
+        const output = scrubbed();
+
+        for (const secret of ['haendler-eins', 'haendler-zwei', 'haendler-drei', 'Werbepost']) {
+            expect(output).not.toContain(secret);
+        }
+    });
+
+    it('leaves the script compilable instead of hashing it whole', () => {
+        // Safe and useless would be one opaque hash. The recorded script is what Proton actually
+        // runs, and the only thing the compiler can be checked against.
+        const output = scrubbed();
+
+        expect(output).toContain('require ["fileinto", "imap4flags"];');
+        expect(output).toContain('fileinto');
+        expect(output).toContain(':comparator "i;unicode-casemap"');
+        expect(output).toContain(':comparator "i;ascii-numeric"');
+        expect(output).toContain('"From"');
+        expect(output).toContain('"vnd.proton.spam-threshold"');
+        expect(output).toContain('# Generated: Do not run this script on spam messages');
+        expect(output).toContain('@comparator contains');
+    });
+
+    it('replaces a comment somebody wrote themselves', () => {
+        const result = scrub({ Sieve: '# meine Regel für Rechnungen\nkeep;' }, undefined) as { Sieve: string };
+
+        expect(result.Sieve).not.toContain('Rechnungen');
+        expect(result.Sieve).toContain('keep;');
+    });
+
+    it('pseudonymises the same value the same way, so the script still makes sense', () => {
+        const output = scrubbed();
+        const names = [...output.matchAll(/s:[0-9a-f]{8}/g)].map((match) => match[0]);
+
+        // Four distinct secrets went in; four distinct pseudonyms come out.
+        expect(new Set(names).size).toBe(4);
+    });
+});
