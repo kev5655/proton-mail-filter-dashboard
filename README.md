@@ -11,7 +11,8 @@ rules you already have. You confirm; it writes the filter to Proton. **Proton st
 sorting.** The tool never moves your mail.
 
 > **Status: early.** M0 is complete — repository scaffolding, the vendored Proton rule compiler, a
-> read-only API client, and a login probe. Nothing writes to your account yet.
+> read-only API client, and a login that works against a real account. Nothing writes to your
+> account yet, and the dashboard still runs on synthetic data.
 
 ## What it will do
 
@@ -25,27 +26,101 @@ sorting.** The tool never moves your mail.
 
 ## Requirements
 
+Same on Windows and Linux unless noted.
+
 - A **paid** Proton Mail plan
-- Node 24 or newer, and pnpm
+- **Node 24 or newer** and **pnpm** — `node --version`, `corepack enable pnpm` if pnpm is missing
+- **Google Chrome**, for signing in (see [Signing in](#signing-in) for why)
+- Optional: the [1Password CLI](https://developer.1password.com/docs/cli/), so credentials come from
+  your vault instead of a prompt. Enable *Integrate with 1Password CLI* in the desktop app.
 - Optional: [Ollama](https://ollama.com) for folder-name suggestions — local, remote, or none
 
-## Getting started
+## Install
 
 ```sh
 pnpm install
+pnpm install:browser     # one-off: downloads the Chromium used when Chrome is not available
+pnpm check-types
 pnpm test
-pnpm spike        # read-only probe against your account
 ```
 
-`pnpm spike` asks for your Proton password and 2FA code in the terminal. They are used for the SRP
-handshake and nothing else — not stored, not logged, not written to disk. It performs no writes.
+On Windows use **PowerShell** or **Git Bash**; both work. There is nothing to compile and no
+platform-specific dependency.
+
+## Run the dashboard
+
+```sh
+pnpm dev
+```
+
+Then open <http://localhost:5173>. It binds to localhost only.
+
+Right now this runs entirely on a **synthetic mailbox** — no account, no network, nothing read and
+nothing changed. Every screen says so. The logic behind it is the real thing: the same matcher,
+grouping and conflict analysis that will run against your mail, so a preview that looks wrong on
+screen is a real bug rather than a fixture someone typed to look convincing.
+
+## Read your real mailbox
+
+```sh
+pnpm spike
+```
+
+A read-only probe: it signs in, then reports your folders, labels, filters and message counts, and
+writes pseudonymised fixtures to `fixtures/recorded/`. It performs **no writes** — see
+[the one rule](CLAUDE.md).
+
+Configure it through a `.env` file in the repository root. Copy [.env.example](.env.example) and
+edit it. A file rather than environment variables on purpose: `VAR=value command` is shell syntax
+that does not exist in PowerShell, so a `.env` keeps the instructions identical on both systems.
+
+```ini
+PMS_OP_VAULT=Private          # omit to be prompted in the terminal instead
+PMS_OP_ITEM=Proton
+PMS_OP_ACCOUNT=my.1password.eu             # only if several accounts are signed in
+PMS_BROWSER_CHANNEL=chrome    # use installed Chrome rather than the bundled Chromium
+PMS_BROWSER_HEADLESS=false    # show the window; needed to switch to the 2FA code
+PMS_BROWSER_PROFILE=data/browser-profile   # remember the device between runs
+```
+
+### Signing in
+
+Proton's login carries an anti-abuse challenge that only their own page can produce. Without it
+Proton refuses the login with code 2028, no matter how correct the credentials are. So the sign-in
+happens **in a real browser**, where their script runs and nothing is imitated. The browser closes
+as soon as the session is captured; everything after that is an ordinary HTTP client.
+
+The session is then stored encrypted in `data/`, and **later runs reuse it without opening a
+browser at all**. That is not a convenience — a program that signs in on every start looks exactly
+like credential stuffing, and getting that wrong is what earned the 2028 in the first place.
+
+If your account uses a passkey, run with a visible window and confirm it there. A passkey stored in
+a password manager will not be offered in the dedicated browser profile, because your extensions
+are not installed in it; a TOTP code is the easier route and is filled in for you when it comes from
+1Password.
+
+Your Proton password is typed into Proton's own page. It is never stored, logged, or included in an
+error message.
+
+### Useful flags
+
+```sh
+pnpm spike --describe-1password    # print the vault item's field names, never their values
+pnpm spike --scrub response.json   # pseudonymise a hand-captured response into a fixture
+pnpm spike --sperre-geklaert       # clear a login block after signing in at mail.proton.me
+```
 
 ## How this talks to Proton
 
 Proton publishes no API. This tool uses the same endpoints as their web client, whose source is
 open at [ProtonMail/WebClients](https://github.com/ProtonMail/WebClients), and identifies itself
-honestly through the `x-pm-appversion` header in the form Proton documents for third-party clients:
-`external-mail-proton-mail-sorter@<version>-<channel>`. It does not impersonate a first-party app.
+honestly: `x-pm-appversion: Other`, the value third-party Proton clients have used for years. It
+does not impersonate a first-party app, and it does not fabricate the anti-abuse challenge that
+guards the login — it runs a real browser instead.
+
+It also deliberately goes slowly. There is roughly a second between requests, plus jitter, and
+requests queue rather than burst. Proton runs this service for its users and gets nothing from us
+for it, and nothing this tool asks is urgent by the second.
 
 That API carries **no stability guarantee** and may change without notice. The project is built so
 that a change breaks loudly and specifically rather than silently doing the wrong thing — see

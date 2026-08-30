@@ -15,6 +15,7 @@
     "test": "pnpm build:vendor && vitest run",
     "test:watch": "vitest",
     "vendor:update": "./scripts/vendor-update.sh",
+    "install:browser": "pnpm --filter @pms/browser-auth exec playwright install chromium",
     "dev": "pnpm --filter @pms/web dev"
   },
   "devDependencies": {
