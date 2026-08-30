@@ -27,7 +27,35 @@ Erwartet: beides ohne Fehler. Aktuell **352 bestanden, 5 übersprungen** — üb
 `real-filter.test.ts`, weil die dazugehörige Fixture nicht im Repository liegt. Nach `T-01` ist sie
 da und die fünf laufen mit.
 
-**Befund:**
+**Befund:** Ein test ist gefailed:  
+```
+FAIL  packages/proton-api/test/session-store.test.ts > session store > keeps the file readable only by its owner
+AssertionError: expected 438 to be 384 // Object.is equality
+
+- Expected
++ Received
+
+- 384
++ 438
+
+ ❯ packages/proton-api/test/session-store.test.ts:76:22
+     74|         const mode = (await stat(path)).mode & 0o777;
+     75|
+     76|         expect(mode).toBe(0o600);
+       |                      ^
+     77|     });
+     78|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 28 passed | 1 skipped (30)
+      Tests  1 failed | 394 passed | 5 skipped (400)
+   Start at  15:23:59
+   Duration  16.61s (transform 4.41s, setup 0ms, import 13.34s, tests 39.93s, environment 10.64s)
+
+ ELIFECYCLE  Test failed. See above for more details. 
+```
 
 **Fix:**
 
@@ -55,6 +83,49 @@ pnpm spike
 Status: `offen`
 
 **Befund:**
+- op cli sollte requierd sein. 
+- Fehler: 
+```
+PS C:\Users\Kevin Zahn\github\private\proton-mail-filter-dashboard> pnpm spike
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+
+> proton-mail-sorter@0.1.0 spike C:\Users\Kevin Zahn\github\private\proton-mail-filter-dashboard
+> pnpm --filter @pms/spike start
+
+
+> @pms/spike@0.1.0 start C:\Users\Kevin Zahn\github\private\proton-mail-filter-dashboard\apps\spike
+> vite-node --config ../../vite.config.ts src/main.ts
+
+
+Proton Mail Sorter — M0 Spike (nur lesend)
+
+Es werden ausschliesslich Daten gelesen. Am Konto wird nichts verändert.
+Proton-Passwort und 2FA-Code werden nirgends gespeichert.
+
+Zugangsdaten aus: 1Password (Private/Proton @my.1password.eu)
+Sitzungs-Passphrase aus 1Password übernommen.
+Anmeldung über das mitgelieferte Chromium, unsichtbar. Profil wird nach der Anmeldung verworfen.
+
+✗ Abgebrochen.
+
+  [BROWSER_NOT_INSTALLED] Der Browser für die Anmeldung liess sich nicht starten.
+  → Einmalig `pnpm exec playwright install chromium` ausführen.
+  Kontext: {"headless":true}
+
+C:\Users\Kevin Zahn\github\private\proton-mail-filter-dashboard\apps\spike:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @pms/spike@0.1.0 start: `vite-node --config ../../vite.config.ts src/main.ts`
+Exit status 1
+ ELIFECYCLE  Command failed with exit code 1.
+```
+Hat auch nicht funktioniert:
+```
+PS C:\Users\Kevin Zahn\github\private\proton-mail-filter-dashboard> pnpm exec playwright install chromium
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+'playwright' is not recognized as an internal or external command,
+operable program or batch file.
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "playwright" not found
+```
+
 
 **Fix:**
 
