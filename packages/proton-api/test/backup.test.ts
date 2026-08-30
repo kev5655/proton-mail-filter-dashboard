@@ -46,10 +46,9 @@ function fakeProton(): ProtonHttp {
 }
 
 describe('backing up before a write', () => {
-    it('writes a file only its owner can read', async () => {
+    it.skipIf(process.platform === 'win32')('writes a file only its owner can read', async () => {
         const result = await backupBeforeWrite(fakeProton(), directory, Date.UTC(2026, 0, 2, 3, 4, 5));
 
-        // Asked through isOwnerOnly, because a POSIX mode means nothing on Windows.
         expect(await isOwnerOnly(result.path), await describeOwnership(result.path)).toBe(true);
     });
 

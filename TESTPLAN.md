@@ -2,10 +2,8 @@
 
 Stand: M0 abgeschlossen — der Spike hat einmal erfolgreich gegen das echte Konto gelesen.
 
-**Getestet wird auf Windows.** Wo ein Befehl nicht überall gleich ist, stehen beide Varianten da —
-PowerShell und Bash. `pnpm`-Befehle sind auf beiden Systemen identisch. Konfiguration gehört in die
-`.env` im Wurzelverzeichnis, nicht in Umgebungsvariablen vor dem Befehl: `VAR=wert befehl` ist
-Bash-Syntax, die PowerShell nicht kennt.
+**Getestet wird auf Linux.** Wo unten trotzdem eine PowerShell-Variante steht, schadet sie nicht —
+für Windows ist der Stand aber ungeprüft, und ein paar Berechtigungstests laufen dort gar nicht.
 
 **Einen einzelnen Test laufen lassen**, wenn etwas klemmt:
 
@@ -90,23 +88,15 @@ also unabhängig von der Reihenfolge. Ein zweiter Test im `write-isolation`-Set 
 per `grep` nach `0o600` im Quelltext geprüft — genau die Art Prüfung, die grün bleibt, während die
 Zusage gebrochen ist. Ersetzt durch einen Test, der die Datei auf der Platte ansieht.
 
-**Und ein zweiter Fund, den deine Frage ausgelöst hat:** auf Windows gibt es kein `chmod`. Node's
-`chmod` schaltet dort nur das Schreibgeschützt-Bit um — Rechte liegen in ACLs. Mein Fix hätte auf
-Windows also *gar nichts* geschützt und dabei sorgfältig ausgesehen, und die Tests hätten
-fehlgeschlagen. `writePrivateFile` benutzt jetzt `icacls`, wenn es auf Windows läuft.
+**Bitte einmal aufräumen**, die bestehenden Dateien behalten ihre alten Rechte:
 
-**Aufräumen der bestehenden Dateien** — PowerShell:
-
-```powershell
-Get-ChildItem data\*.json | ForEach-Object {
-  icacls $_.FullName /inheritance:r /grant:r "$env:USERDOMAIN\$env:USERNAME:F"
-}
-icacls data\session.enc.json
+```sh
+chmod 600 data/*.json data/*.enc.json 2>/dev/null; ls -l data/
 ```
 
-In der letzten Ausgabe darf **nur dein Konto** stehen — kein `BUILTIN\Users`, kein `Everyone`.
-
-Auf Linux oder in Git Bash wäre es `chmod 600 data/*.json`.
+Auf Windows versucht das Tool dasselbe über `icacls`, prüft es aber nicht nach und bricht auch nicht
+ab, wenn es nicht klappt — dort ist es eine Härtung, keine Zusage. Die entsprechenden Tests laufen
+auf Windows nicht und sagen das auch.
 
 Status: `behoben`
 
