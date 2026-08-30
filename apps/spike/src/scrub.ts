@@ -77,7 +77,12 @@ function looksStructural(value: string): boolean {
 function looksLikeProtonInternal(value: string): boolean {
     return (
         // Proton's own namespace for sieve environment variables.
-        value.includes('vnd.proton') ||
+        //
+        // Anchored, and that matters more than it looks. As a substring test this matched an entire
+        // Sieve script, because Proton's spam preamble mentions `vnd.proton.spam-threshold` — so
+        // every recorded filter was waved through verbatim, sender fragments and folder names
+        // included, into files meant for a public repository.
+        /^vnd\.proton[A-Za-z0-9._-]*$/.test(value) ||
         // A bare sieve variable reference, nothing else.
         /^\$\{\d+\}$/.test(value) ||
         // Only wildcards, so there is nothing in it to leak.
@@ -150,12 +155,56 @@ function buildVocabulary(): Set<string> {
 
 let vocabulary: Set<string> | undefined;
 
+/**
+ * Pseudonymise the contents of a Sieve script while leaving the script itself readable.
+ *
+ * Hashing the whole thing would be safe and useless: the recorded script is the most valuable
+ * fixture this project has, because it is what Proton actually runs and what the compiler is
+ * checked against. What has to go are the operands — the sender fragments, the folder names, the
+ * comments a person wrote — and those all live inside quoted literals and comments.
+ *
+ * Everything not explicitly recognised is replaced. A literal survives only by being in Proton's
+ * own vocabulary or by being provably its machinery, so an unfamiliar value fails towards the
+ * pseudonym rather than towards the repository.
+ */
+/**
+ * Comparator names the Sieve standard defines. Not Proton's, not the user's — the format's.
+ *
+ * They appear only in script text, never in the tree fixtures the vocabulary is harvested from, so
+ * nothing else here knows about them. Listed rather than pattern-matched: four fixed names cannot
+ * be smuggled past, whereas `i;anything` could be.
+ */
+const SIEVE_COMPARATORS = new Set(['i;octet', 'i;ascii-casemap', 'i;ascii-numeric', 'i;unicode-casemap']);
+
+function scrubSieve(script: string, known: Set<string>): string {
+    const withComments = script
+        .replace(/\/\*[\s\S]*?\*\//g, (comment) =>
+            isGeneratedRuleComment(comment) ? comment : `/* ${pseudonym(comment)} */`
+        )
+        .replace(/#[^\r\n]*/g, (comment) =>
+            looksLikeProtonInternal(comment) ? comment : `# ${pseudonym(comment)}`
+        );
+
+    return withComments.replace(/"(?:[^"\\]|\\.)*"/g, (literal) => {
+        const inner = literal.slice(1, -1);
+        if (inner === '' || SIEVE_COMPARATORS.has(inner) || looksLikeProtonInternal(inner) || known.has(inner)) {
+            return literal;
+        }
+        return `"${pseudonym(inner)}"`;
+    });
+}
+
 export function scrub(value: unknown, parentKey?: string): unknown {
     vocabulary ??= buildVocabulary();
 
     if (typeof value === 'string') {
         if (value === '') {
             return value;
+        }
+        // A Sieve script is a document, not a value: scrubbed from the inside so it stays a usable
+        // fixture instead of becoming one opaque hash.
+        if (parentKey === 'Sieve') {
+            return scrubSieve(value, vocabulary);
         }
         // Provably structural: safe from the string alone, so no vocabulary lookup is needed.
         // Necessary because Proton's generated rule comment encodes the rule's own operator and
