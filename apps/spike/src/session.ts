@@ -74,6 +74,14 @@ export interface Connection {
     http: ProtonHttp;
     /** True when this run had to authenticate from scratch. */
     freshLogin: boolean;
+    /**
+     * The passphrase protecting everything this tool keeps on this machine.
+     *
+     * One value for the session tokens and for the mailbox copy, because they are the same kind of
+     * thing: local state that is worthless to an attacker who cannot decrypt it and replaceable if
+     * lost. It is a separate value from the Proton password, which protects the account itself.
+     */
+    passphrase: string;
 }
 
 export async function connect(): Promise<Connection> {
@@ -103,7 +111,7 @@ export async function connect(): Promise<Connection> {
         const reused = await reuse(http, stored, passphrase);
         if (reused) {
             console.log('✓ Gespeicherte Sitzung wiederverwendet — keine Anmeldung nötig.\n');
-            return { http, freshLogin: false };
+            return { http, freshLogin: false, passphrase };
         }
         console.log('Die gespeicherte Sitzung ist abgelaufen und liess sich nicht erneuern.\n');
     }
@@ -148,7 +156,7 @@ export async function connect(): Promise<Connection> {
     await guard.recordSuccess();
     await persist(session, userId, passphrase);
     console.log('✓ Angemeldet. Die Sitzung ist gespeichert — der nächste Lauf braucht keinen Login.\n');
-    return { http, freshLogin: true };
+    return { http, freshLogin: true, passphrase };
 }
 
 interface BrowserChoice {

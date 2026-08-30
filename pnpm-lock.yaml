@@ -44,6 +44,12 @@ importers:
       '@pms/proton-api':
         specifier: workspace:*
         version: link:../../packages/proton-api
+      '@pms/store':
+        specifier: workspace:*
+        version: link:../../packages/store
+      '@pms/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@proton/sieve':
         specifier: workspace:*
         version: link:../../vendor/proton/sieve

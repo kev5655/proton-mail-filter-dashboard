@@ -230,6 +230,129 @@ Status: `offen`
 
 ---
 
+# Testplan M1 (erster Teil)
+
+Neu dazugekommen: eine **verschlüsselte lokale Datenbank** und ein **Sync**, der dein Postfach
+hineinspiegelt. Gelesen wird weiterhin nur; geschrieben wird ausschliesslich auf deine Platte.
+
+Dafür brauchst du den Branch:
+
+```sh
+git switch m1-durchstich
+pnpm install
+```
+
+`T-01` bis `T-08` gelten unverändert auch hier.
+
+---
+
+## T-09 · Der erste Sync
+
+```sh
+pnpm sync
+```
+
+Standard sind **30 Tage** und höchstens **2000 Mails** — bewusst klein, damit ein erster Lauf nicht
+zwanzig Minuten dauert.
+
+**Erwartet**
+
+- Kein Browser (die gespeicherte Sitzung wird wiederverwendet).
+- Fortschrittszeilen: erst Ordner und Labels, dann Filter, dann `Mails: 100`, `200`, …
+- Danach eine Zusammenfassung, **aus der Datenbank gelesen**, plus dein Ordnerbaum.
+- Die Zahlen sollten zu dem passen, was `pnpm spike` gemeldet hat: 15 Ordner, 10 Labels, 1 Filter.
+
+Andere Zeiträume:
+
+```sh
+pnpm sync --days 90
+pnpm sync --days 365 --max 5000
+pnpm sync --days all --max 20000     # dauert lange, ~1 Sekunde pro 100 Mails
+```
+
+Status: `offen`
+
+**Befund:**
+
+**Fix:**
+
+---
+
+## T-10 · Die Datenbank ist wirklich verschlüsselt
+
+Das ist der Test, für den das ganze Paket existiert. Nach `T-09`:
+
+```sh
+file data/mailbox.db
+head -c 16 data/mailbox.db | xxd | head -1
+grep -c "Rechnung" data/mailbox.db        # oder ein Wort aus einem echten Betreff
+```
+
+**Erwartet**
+
+- `file` sagt **nicht** „SQLite 3.x database", sondern „data".
+- Die ersten 16 Bytes sind **nicht** `SQLite format 3`.
+- Kein Betreff, kein Absender, kein Tabellenname ist im Klartext zu finden.
+
+Zum Gegencheck, dass es wirklich Daten enthält und nicht nur leer ist: die Zusammenfassung aus
+`T-09` kommt aus genau dieser Datei.
+
+Falls du `sqlite3` installiert hast:
+
+```sh
+sqlite3 data/mailbox.db ".tables"      # muss scheitern
+```
+
+Status: `offen`
+
+**Befund:**
+
+**Fix:**
+
+---
+
+## T-11 · Ein zweiter Sync ersetzt, statt zu verdoppeln
+
+```sh
+pnpm sync
+```
+
+Zweimal denselben Befehl. Die Zahlen in der Zusammenfassung müssen **gleich bleiben** — nicht
+doppelt so hoch werden.
+
+Interessanter Nebentest, wenn du magst: in Proton einen Ordner umbenennen oder einen neuen anlegen,
+dann `pnpm sync`. Der Ordnerbaum in der Ausgabe muss das übernehmen, und ein gelöschter Ordner muss
+**verschwinden**, nicht stehen bleiben.
+
+Status: `offen`
+
+**Befund:**
+
+**Fix:**
+
+---
+
+## T-12 · Falsche Passphrase, abgebrochener Sync
+
+Zwei Fälle, die im Alltag vorkommen.
+
+**Falsche Passphrase.** Wenn du die Sitzungs-Passphrase in 1Password änderst (oder das Feld
+entfernst und beim Prompt etwas anderes eingibst), muss `pnpm sync` mit `VAULT_KEY_REJECTED`
+abbrechen und erklären, dass die Datei nur eine Kopie ist und gelöscht werden darf. Danach die
+Passphrase zurückstellen.
+
+**Abbruch mitten im Lauf.** Einen längeren Sync starten (`pnpm sync --days 365 --max 5000`) und nach
+ein paar Fortschrittszeilen mit `Ctrl+C` abbrechen. Danach nochmal `pnpm sync` — es muss normal
+durchlaufen, nicht mit einer beschädigten Datenbank scheitern.
+
+Status: `offen`
+
+**Befund:**
+
+**Fix:**
+
+---
+
 ## Offene Punkte ausserhalb der Tests
 
 - **Git-History.** `fixtures/recorded/filters.json` mit echten Werten liegt in Commit `0057c6c` auf
@@ -239,6 +362,12 @@ Status: `offen`
   Erst nach `T-02` committen. `fixture-safety.test.ts` prüft sie zusätzlich bei jedem `pnpm test`.
 - **Passkey.** Funktioniert im eigenen Browser-Profil nicht, weil dort 1Password fehlt. TOTP ist der
   bequemere Weg, weil der Code automatisch eingetragen wird.
+- **Das Dashboard läuft noch auf Demo-Daten.** Der Sync füllt die Datenbank, aber die Oberfläche
+  liest sie noch nicht — das ist der nächste Schritt (tRPC-Durchstich). `T-07` prüft weiterhin die
+  Demo.
+- **Eine Passphrase für alles Lokale.** Sitzungstokens und Postfachkopie teilen sie sich; beides ist
+  ersetzbarer lokaler Zustand. Vom Proton-Passwort ist sie weiterhin getrennt, weil das etwas
+  anderes schützt.
 
 ---
 

@@ -102,6 +102,24 @@ are not installed in it; a TOTP code is the easier route and is filled in for yo
 Your Proton password is typed into Proton's own page. It is never stored, logged, or included in an
 error message.
 
+## Mirror it locally
+
+```sh
+pnpm sync                            # last 30 days, at most 2000 messages
+pnpm sync --days 90
+pnpm sync --days 365 --max 5000
+pnpm sync --days all --max 20000
+```
+
+Writes an encrypted SQLite database to `data/mailbox.db` — folders, labels, filters and message
+metadata. The whole file is encrypted with a key derived by Argon2id; without the passphrase it has
+no SQLite header and no table names, so nothing about it says "mailbox".
+
+It is a copy, and nothing in it is authoritative. Losing it costs a resync, not data.
+
+Both the window and the limit default small on purpose: a page of a hundred messages costs about a
+second, so a year of mail takes minutes. Ask for more only when you need it.
+
 ### Useful flags
 
 ```sh

@@ -12,6 +12,8 @@
     "@pms/core": "workspace:*",
     "@pms/credentials": "workspace:*",
     "@pms/proton-api": "workspace:*",
+    "@pms/store": "workspace:*",
+    "@pms/sync": "workspace:*",
     "@proton/sieve": "workspace:*"
   }
 }
