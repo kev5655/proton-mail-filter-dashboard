@@ -1,8 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import { AppError, isAppError, PROTON_ERROR_CODE } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
+import { writePrivateFile } from '@pms/core/private-file';
 
 const log = getLogger('login-guard');
 
@@ -192,8 +192,7 @@ export class LoginGuard {
     }
 
     async #write(state: LoginAttemptState): Promise<void> {
-        await mkdir(dirname(this.#path), { recursive: true });
-        await writeFile(this.#path, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+        await writePrivateFile(this.#path, JSON.stringify(state));
     }
 }
 

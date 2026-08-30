@@ -23,7 +23,7 @@ pnpm check-types
 pnpm test
 ```
 
-Erwartet: beides ohne Fehler. Aktuell **352 bestanden, 5 übersprungen** — übersprungen wird
+Erwartet: beides ohne Fehler. Aktuell **403 bestanden, 5 übersprungen** — übersprungen wird
 `real-filter.test.ts`, weil die dazugehörige Fixture nicht im Repository liegt. Nach `T-01` ist sie
 da und die fünf laufen mit.
 
@@ -57,7 +57,32 @@ AssertionError: expected 438 to be 384 // Object.is equality
  ELIFECYCLE  Test failed. See above for more details. 
 ```
 
-**Fix:**
+**Fix:** Behoben, und es war ein echter Sicherheitsfehler — danke.
+
+`writeFile(pfad, daten, { mode: 0o600 })` setzt die Rechte nur beim **Anlegen** der Datei. Existiert
+sie schon, werden sie stillschweigend ignoriert. Deine Sitzungsdatei mit den Proton-Tokens war
+dadurch `0o666` — für jeden Benutzer des Rechners lesbar.
+
+Bei mir lief der Test grün, weil er von der Reihenfolge abhing: nur wenn ein früherer Fall die Datei
+schon angelegt hatte, fiel es auf. Dass du eine `umask 000` hast, hat es sichtbar gemacht.
+
+Betroffen waren vier Stellen: Sitzungsdatei, Login-Sperre, Schlüsselkopf der Datenbank und das
+Backup deiner Filter. Alle laufen jetzt über `writePrivateFile` in `@pms/core`, das nach dem
+Schreiben ein `chmod` macht — das wirkt auf neue und auf bestehende Dateien.
+
+Der ursprüngliche Test legt die Datei jetzt absichtlich vorher mit `0o666` an, findet den Fehler
+also unabhängig von der Reihenfolge. Ein zweiter Test im `write-isolation`-Set hat die Berechtigung
+per `grep` nach `0o600` im Quelltext geprüft — genau die Art Prüfung, die grün bleibt, während die
+Zusage gebrochen ist. Ersetzt durch einen Test, der die Datei auf der Platte ansieht.
+
+**Bitte einmal aufräumen**, die alte Datei behält ihre Rechte:
+
+```sh
+chmod 600 data/*.json data/*.enc.json 2>/dev/null; ls -l data/
+```
+
+Status: `behoben`
+
 
 ---
 
@@ -309,7 +334,7 @@ hineinspiegelt. Gelesen wird weiterhin nur; geschrieben wird ausschliesslich auf
 Dafür brauchst du den Branch:
 
 ```sh
-git switch m1-durchstich
+git switch m1-vertical-slice
 pnpm install
 ```
 

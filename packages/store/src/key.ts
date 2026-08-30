@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
 import { argon2id } from '@noble/hashes/argon2.js';
 import { AppError } from '@pms/core/errors';
+import { writePrivateFile } from '@pms/core/private-file';
 import { z } from 'zod';
 
 /**
@@ -69,7 +70,7 @@ export async function loadOrCreateHeader(databasePath: string): Promise<KeyHeade
             salt: randomBytes(SALT_BYTES).toString('base64'),
             ...PARAMS,
         };
-        await writeFile(path, JSON.stringify(header, null, 2), { encoding: 'utf8', mode: 0o600 });
+        await writePrivateFile(path, JSON.stringify(header, null, 2));
         return header;
     }
 

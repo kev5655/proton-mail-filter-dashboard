@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -70,10 +70,16 @@ describe('session store', () => {
     });
 
     it('keeps the file readable only by its owner', async () => {
-        await saveSession(path, SESSION, 'passphrase');
-        const mode = (await stat(path)).mode & 0o777;
+        // Deliberately starting from a loose file. Writing a fresh one and checking the mode passes
+        // even with `writeFile`'s `mode` option, which does nothing when the file already exists —
+        // so the tokens of anyone whose file was once world-readable stayed that way. This test
+        // only caught it by accident, on a run where an earlier case had created the file first.
+        await writeFile(path, '{}');
+        await chmod(path, 0o666);
 
-        expect(mode).toBe(0o600);
+        await saveSession(path, SESSION, 'passphrase');
+
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
     });
 
     it('uses a fresh salt and iv per write, so two saves never look alike', async () => {

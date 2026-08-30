@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import { AppError } from '@pms/core/errors';
+import { writePrivateFile } from '@pms/core/private-file';
 import { getLogger } from '@pms/core/logger';
 
 import type { ProtonSession } from './http.js';
@@ -71,9 +71,8 @@ export async function saveSession(path: string, stored: StoredSession, passphras
         ciphertext: ciphertext.toString('base64'),
     };
 
-    await mkdir(dirname(path), { recursive: true });
     // 0600: the tokens inside grant full access to the mailbox until they are revoked.
-    await writeFile(path, JSON.stringify(envelope), { encoding: 'utf8', mode: 0o600 });
+    await writePrivateFile(path, JSON.stringify(envelope));
     log.debug({ path }, 'session stored');
 }
 
