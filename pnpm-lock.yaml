@@ -175,6 +175,18 @@ importers:
         specifier: 4.5.2
         version: 4.5.2
 
+  packages/sync:
+    dependencies:
+      '@pms/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pms/proton-api':
+        specifier: workspace:*
+        version: link:../proton-api
+      '@pms/store':
+        specifier: workspace:*
+        version: link:../store
+
   vendor/proton/sieve:
     dependencies:
       '@proton/utils':

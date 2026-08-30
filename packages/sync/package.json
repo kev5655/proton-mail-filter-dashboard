@@ -1,0 +1,15 @@
+{
+  "name": "@pms/sync",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pms/core": "workspace:*",
+    "@pms/proton-api": "workspace:*",
+    "@pms/store": "workspace:*"
+  }
+}
