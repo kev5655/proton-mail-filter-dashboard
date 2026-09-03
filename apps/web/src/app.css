@@ -1,6 +1,12 @@
+/*
+ * A grid track sized `1fr` still takes its *automatic minimum* from its content, so one long
+ * subject or one wide table pushed this column past the viewport and made the whole page scroll
+ * sideways. `minmax(0, …)` is what actually says "you may be narrower than your content"; every
+ * flexible track in this file needs it, and `css-overflow.test.ts` checks that they have it.
+ */
 .shell {
     display: grid;
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: 232px minmax(0, 1fr);
     min-height: 100vh;
 }
 
@@ -75,9 +81,14 @@
 
 /* ---------------------------------------------------------------- layout */
 
+/*
+ * Full width on purpose: the lists are the content, and capping them at 1080px cut them off on a
+ * wide screen. Prose is capped where prose lives (`.page-head p`, `.notice`) rather than by
+ * narrowing everything to suit it.
+ */
 .main {
     padding: 24px 28px 48px;
-    max-width: 1080px;
+    min-width: 0;
 }
 
 .page-head {
@@ -103,6 +114,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
+    min-width: 0;
 }
 
 .stack {
@@ -209,7 +221,7 @@
 
 .rule-row {
     display: grid;
-    grid-template-columns: 28px 1fr auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     gap: 12px;
     align-items: center;
     padding: 12px 14px;
@@ -261,7 +273,7 @@
 
 .mail-list li {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     padding: 7px 0;
     border-top: 1px solid var(--border);
@@ -277,9 +289,15 @@
 .mail-sender {
     color: var(--text-faint);
     font-size: 12px;
+    /* A long address widens the row exactly like a long subject does. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
+/* Prose, not data: capped so it stays readable now that `.main` is full width. */
 .notice {
+    max-width: 78ch;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
     font-size: 13px;
@@ -366,7 +384,7 @@
 
 @media (max-width: 860px) {
     .shell {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .sidebar {
@@ -545,7 +563,7 @@
 /* ---------------------------------------------------------------- selection */
 
 .mail-list li {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
 }
 
@@ -644,8 +662,11 @@
     padding: 2px 10px 8px 10px;
 }
 
+/* `width: 100%` is ignored by a table whose min-content is wider, so the layout has to be fixed
+   and long values have to be allowed to break. Without both, the diff dragged the page sideways. */
 .diff-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     margin-top: 12px;
     font-size: 13px;
@@ -665,6 +686,7 @@
     padding: 8px 10px 8px 0;
     border-top: 1px solid var(--border);
     vertical-align: top;
+    overflow-wrap: anywhere;
 }
 
 .diff-table .mail-subject,

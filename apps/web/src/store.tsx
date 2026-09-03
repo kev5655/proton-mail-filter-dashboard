@@ -11,7 +11,7 @@ import {
 } from '@pms/changes';
 import type { MailboxFolder, MailboxRule } from '@pms/server/types';
 
-import { useMailbox } from './mailbox.js';
+import { useMailbox, useMailboxStatus } from './mailbox.js';
 
 /**
  * The mutable half of the application: rules, folders, and the record of what was done to them.
@@ -61,6 +61,10 @@ export interface DriftItem {
  * Fixed here because the demo has no Proton to sync with; in the real thing the sync engine
  * produces this list by diffing the filters and folders it knows about against what the API
  * returns.
+ *
+ * Shown for the demo only. Against a real account these two invented items appeared on the one
+ * screen whose entire job is to report what actually changed at Proton — a screen about honesty,
+ * furnished with fiction.
  */
 const INITIAL_DRIFT: DriftItem[] = [
     {
@@ -86,10 +90,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     // changes, so there is no reseeding to write here: switching from the demo to the real account
     // starts a fresh store rather than carrying half-applied changes across two different mailboxes.
     const { rules: initialRules, folders: initialFolders, messages } = useMailbox();
+    const { source } = useMailboxStatus();
     const [rules, setRules] = useState<MailboxRule[]>(initialRules);
     const [folders, setFolders] = useState<MailboxFolder[]>(initialFolders);
     const [staged, setStaged] = useState<ChangePlan | undefined>(undefined);
-    const [drift, setDrift] = useState<DriftItem[]>(INITIAL_DRIFT);
+    const [drift, setDrift] = useState<DriftItem[]>(source === 'demo' ? INITIAL_DRIFT : []);
     const [journal] = useState(() => new Journal());
     const [version, setVersion] = useState(0);
 

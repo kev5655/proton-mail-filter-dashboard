@@ -58,6 +58,16 @@ export interface LoggerConfig {
 let rootConfig: LoggerConfig = {};
 let root: Logger | undefined;
 
+/**
+ * Diagnostics go to stderr, never to stdout.
+ *
+ * The commands here talk to a person: `pnpm spike` and `pnpm sync` print counts and prompts that
+ * are read as they appear. A JSON log line landing in the middle of that splits a sentence in two
+ * and makes a successful run look like a fault — which is exactly what happened when a session
+ * refresh logged itself between "Sitzungs-Passphrase übernommen" and the result. Keeping the two
+ * streams apart also means `pnpm spike > out.txt` captures the report without the log, and
+ * `2> log.jsonl` captures the log without the report.
+ */
 function build(config: LoggerConfig): Logger {
     const options: LoggerOptions = {
         level: config.level ?? 'info',
@@ -79,12 +89,12 @@ function build(config: LoggerConfig): Logger {
         return pino(
             options,
             pino.multistream([
-                { stream: process.stdout },
+                { stream: process.stderr },
                 { stream: pino.destination({ dest: config.file, mkdir: true, sync: false }) },
             ])
         );
     }
-    return pino(options);
+    return pino(options, process.stderr);
 }
 
 export function configureLogging(config: LoggerConfig): void {

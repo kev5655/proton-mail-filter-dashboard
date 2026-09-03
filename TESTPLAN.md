@@ -40,7 +40,48 @@ Stimmen sie überein, ist der Punkt erledigt.
 
 Status: `zu prüfen`
 
-**Befund:**
+**Befund:** bin mir nicht sicher ob es geklapt hat:
+Das standim env:
+PMS_BROWSER_CHANNEL=chrome
+PMS_BROWSER_HEADLESS=false
+PMS_BROWSER_PROFILE=data/browser-profile
+
+Das ist der output:
+➜  proton-mail-sorter git:(m1-vertical-slice) ✗ pnpm spike
+
+> proton-mail-sorter@0.1.0 spike /home/kevin/github/private/proton-mail-sorter
+> pnpm --filter @pms/spike start
+
+
+> @pms/spike@0.1.0 start /home/kevin/github/private/proton-mail-sorter/apps/spike
+> vite-node --config ../../vite.config.ts src/main.ts
+
+
+Proton Mail Sorter — M0 Spike (nur lesend)
+
+Es werden ausschliesslich Daten gelesen. Am Konto wird nichts verändert.
+Proton-Passwort und 2FA-Code werden nirgends gespeichert.
+
+Zugangsdaten aus: 1Password (Private/Proton @my.1password.eu)
+Sitzungs-Passphrase aus 1Password übernommen.
+{"level":"info","time":1788468895651,"pid":2187495,"hostname":"kevin-XPS-15","module":"proton-auth","uid":"[redacted]","cookieMode":true,"msg":"session refreshed"}
+✓ Gespeicherte Sitzung wiederverwendet — keine Anmeldung nötig.
+
+Ordner:  15 (davon 14 auf oberster Ebene)
+Labels:  10
+Filter:  1 (1 aktiv, 0 in der Proton-UI editierbar, 1 nur als Sieve)
+
+Mailmenge nach Zeitraum:
+  30 Tage      189 Mails
+  90 Tage      457 Mails
+  1 Jahr      1790 Mails
+  alles      13433 Mails
+
+✓ 5 Fixtures geschrieben nach fixtures/recorded/ (pseudonymisiert).
+  Bitte einmal durchsehen, bevor sie committet werden.
+
+{"level":"info","time":1788468906561,"pid":2187495,"hostname":"kevin-XPS-15","module":"spike","folders":15,"labels":10,"filters":1,"messages":13433,"msg":"spike complete"}
+
 
 ---
 
@@ -74,7 +115,7 @@ spike`. Beide Ausgänge sind gültig — ich will nur wissen, welcher:
 
 Status: `zu prüfen`
 
-**Befund:**
+**Befund:** Ist schon okay wen es nicht funktioniert
 
 ---
 
@@ -111,7 +152,7 @@ weiteren Anmeldeversuch zu reparieren.
 
 Status: `zu prüfen`
 
-**Befund:**
+**Befund:** Ist mir zu kompex
 
 ---
 

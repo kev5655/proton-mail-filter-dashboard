@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { DiffDialog } from './components/DiffDialog.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { MailViewer } from './components/MailViewer.js';
 import { SelectionDialog } from './components/SelectionDialog.js';
 import { ChangesPage } from './pages/ChangesPage.js';
@@ -99,12 +100,19 @@ function Shell(): React.JSX.Element {
             </nav>
 
             <main className="main">
-                {nav.page === 'rules' && <RulesPage />}
-                {nav.page === 'triage' && <TriagePage />}
-                {nav.page === 'folders' && <FoldersPage />}
-                {nav.page === 'changes' && <ChangesPage />}
-                {nav.page === 'history' && <HistoryPage />}
-                {nav.page === 'log' && <LogPage />}
+                {/*
+                 * The boundary that matters. A screen that throws used to unmount the root and
+                 * take the sidebar with it, leaving no way back; keyed on the page, so switching
+                 * away clears the error by itself.
+                 */}
+                <ErrorBoundary area={PAGE_LABELS[nav.page]} resetKey={nav.page}>
+                    {nav.page === 'rules' && <RulesPage />}
+                    {nav.page === 'triage' && <TriagePage />}
+                    {nav.page === 'folders' && <FoldersPage />}
+                    {nav.page === 'changes' && <ChangesPage />}
+                    {nav.page === 'history' && <HistoryPage />}
+                    {nav.page === 'log' && <LogPage />}
+                </ErrorBoundary>
 
                 {/*
                  * The manual path. Grouping will not find every rule worth having — a set of mails
@@ -141,7 +149,11 @@ function Shell(): React.JSX.Element {
                 )}
             </main>
 
-            {open !== undefined && <MailViewer message={open} onClose={() => setOpen(undefined)} />}
+            {open !== undefined && (
+                <ErrorBoundary area="Mailansicht" resetKey={open.ID}>
+                    <MailViewer message={open} onClose={() => setOpen(undefined)} />
+                </ErrorBoundary>
+            )}
 
             {/* The last step of every change, without exception — including the ones the tool
                 itself proposed. A dialog that appears only for hand-written rules teaches people

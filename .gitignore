@@ -35,3 +35,6 @@ vendor/proton/sieve/dist/
 
 
 fixtures/
+
+# Screenshots aus dem Testen. Bleiben lokal.
+image*.png

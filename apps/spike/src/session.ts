@@ -129,6 +129,14 @@ export async function connect(): Promise<Connection> {
 
     const { source, passphrase } = await openCredentials();
 
+    // Said before anything else, and only when something was actually configured.
+    //
+    // The browser settings used to be reported inside the login branch, so a run that reused its
+    // session — the good case, and the common one — printed nothing about them. "Did my .env take
+    // effect?" then had no answer short of forcing a login, which is the one thing this program
+    // exists to avoid. Silence when nothing is set keeps the ordinary run quiet.
+    reportBrowserSettings();
+
     const stored = await loadSession(SESSION_FILE, passphrase);
     if (stored !== undefined) {
         const reused = await reuse(http, stored, passphrase);
@@ -180,6 +188,20 @@ export async function connect(): Promise<Connection> {
     await persist(session, userId, passphrase);
     console.log('✓ Angemeldet. Die Sitzung ist gespeichert — der nächste Lauf braucht keinen Login.\n');
     return { http, freshLogin: true, passphrase };
+}
+
+/** Whether the user configured any of it, as opposed to accepting every default. */
+function browserSettingsPresent(): boolean {
+    return ['PMS_BROWSER_CHANNEL', 'PMS_BROWSER_HEADLESS', 'PMS_BROWSER_PROFILE'].some(
+        (name) => process.env[name] !== undefined && process.env[name] !== ''
+    );
+}
+
+function reportBrowserSettings(): void {
+    if (!browserSettingsPresent()) {
+        return;
+    }
+    console.log(`Browser-Einstellungen: ${describeBrowser(browserOptions())}`);
 }
 
 interface BrowserChoice {

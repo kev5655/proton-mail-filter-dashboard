@@ -52,7 +52,8 @@ Abgleich mit Protons eigener Oberfläche:
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja es stimmt aber etwas möchte ich noch erweiten, es gibt von proton aus neu aus vordefinierte ordner wie: "Soziale Medien", "Werbung", "Newsletter", "Transaktionen", "Akutallisierungen". Ich denke dafür müssen wir kein regel erstellen den dies wird automatisch erkannt und verschoben wen initial eine mail dort hineni verschoben wurde. Können wir das irgendwie visualisieren, denke mit ein neuen reiter link neben "Regenl", "Ordner" und so. 
+- Noch was zum Stand ich sehe nur das: "131 Mails im Posteingang, 88 davon in 17 Gruppen. Der Rest sind Einzelfälle und bleibt bewusst ungruppiert — dafür lohnt sich keine Regel." Man könnte noch die Zeit hinzufügen wan der letzte sync gemacht wurde und evlt auch einen manuellen sync im ui. Denke das ist noch wichtig.
 
 **Fix:**
 
@@ -76,7 +77,7 @@ Geht die Summe nicht auf, ist das der wichtigste Befund in dieser Datei.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Sollte stimmen
 
 **Fix:**
 
@@ -97,7 +98,7 @@ Pro Regel aufklappen:
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja die bedinungen stimmen, die mails auch. Aber siehe auch was ich dir noch am schluss geschrieben haben, bitte überarbeite das noch.
 
 **Fix:**
 
@@ -115,7 +116,7 @@ ich; ob es an deinem etwas Brauchbares findet, nicht.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja das ist nicht schlecht. Ich habe mal eine regel für github mails aber diese regel wurde nicht in Proton gespeicher ist das akutell noch der fall? Ich denke wir sollten auch die Vorschläge in sectionen gruppieren. Zumbespiel vorschläge per absender oder vorschläge per Betreff oder pro contnent, aber für betreff und inhalt braucht es evlt das llm das es besser kategorisieren kann. Was ich auch ncoh wichtig finde sollte ich in den Vorschlägen sehen wen ein email schon von einer regel matcht damit ich nicht zwei regeln erstelle die auf die gleich Mail verweisen. Falls das llm nicht aktiv oder erreichbahr ist. Sage das dem user uns lasse ihn es über ein setting menu einstellen, du musst es noch verlinken.
 
 **Fix:**
 
@@ -139,7 +140,7 @@ Rund eine Sekunde pro 100 Mails — ein Jahr dauert Minuten. Das ist die Drossel
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ich möchte die sync befehel im dashboard ausfürhe könne am bessten noch mit ein laden balken und den wichtigesten informaiton was passiert und wie vile geladen wurde. Aber das hat funktioniert: `pnpm sync --days 365 --max 5000` während dem das dashboard online war!
 
 **Fix:**
 
@@ -158,7 +159,7 @@ Auswahl beim Wechsel.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja das sollte passen.
 
 **Fix:**
 
@@ -189,7 +190,7 @@ allem anderen in dieser Datei.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja es sind kein bilder drin.
 
 **Fix:**
 
@@ -209,7 +210,7 @@ gebaut habe — dein Konto ist die einzige Instanz, die sagen kann, was tatsäch
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Nein das hatt sich nicht, aber das sollte der nächste schritt sein oder?
 
 **Fix:**
 
@@ -224,3 +225,12 @@ Status: `offen`
   Matcher.
 - **Automatische Aktualisierung.** Der Server wird einmal beim Laden gefragt; nach einem Sync die
   Seite neu laden.
+
+
+- Was mir noch aufgefallen ist wen ich auf Protokoll klicke dan kommt ein leherer screen und ich komme über das ui nicht zurück kannst du das noch anpassen.
+- Bitte das fenster nicht scrollable machen nach rechts und links: ![alt text](image.png)
+- Ich möchte auch ein update bei den Regen. 1. Die regel soll es so anzeigen wie auch bei Proton mit den verschiedenen elemente wie "Name" "Bedinung" "Aktionen" und "Vorschaue", es ist von mir aus aber okay wen wir das ime haput screen machen und nicht als overlay und es darfa auch alles direcht sichtbahr sein mit "Name" "Bedinung" "Aktionen" und "Vorschaue". Weiter ist wichtig fúr mich das ich die Regel direkt editieren kann, entweder ist es schon direkt im editir modus oder ich muss es auswählen. Dan möchte ich wen ich änderungen an der regel gemacht habe das es automatisch anzeigt welche Mails jetzt gefilter werden und welche noch nicht. Alos in zwei spalten. In den zwei spalten möchte ich auf filter könne damit ich kurz selbst nach schauen kann ob die regel jetzt alle mail auswählt die ich möchte. Der filter soll nciht nur mit den title machten sonder auch mit den inhalt, email addresse. Und der newsletter filter ist von mir aus kein Scritp-Filter sondern ein maueller den ich im ui anpassen kann. Hier noch ein bild ![alt text](image-1.png) von newsletter filter. Den script filter kannst du als advance aufbahre option anzeigen, aber das ui wie es in proton gemacht ist ist intuitiver und möchte ich auch so brauche. 
+- Noch eine updte fúr dei Regel. Ich sehe ganz unten welche emali es betrifft aber ich sollte hier keine neuen regeln ableiten könne sonder die regel überarbieten in dem ich emails entferne kan aus der regle und dan kann ich sagen entferne den absender, betreff, oder den inhalt, bettref und inhalt müssen wider mit llm gmatcht werden oder ein regex oder so erstellt werden. Aber das ist schon ein advance feature.
+- Noch ein änderung für die Vorschláge wen ich mir die mails ansehen will zeigt es mir nur die nächsten 5 an aber ich sollte in der lage sein alle anzusehen und auzuwählen. Evlt in dem ich nach rechts und links blättern kann. Und zeige pro seite 10 Mails an. Auch hier wáhre noch ein filter hilfreich wie schon bei den Reglen
+- Noch ein UI änderungen von mir aus können die liste immer in voller breite sein also das es nach rechts nicht abschneidet / begrezt ist.
+- Kann mand die mails auch zu proton verlinke damit ich auf den link clicken kann und bei mir wird da mail im proton webseite geöfftne dan könnte ich noch die bilder oder so betrachten.

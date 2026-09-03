@@ -1,0 +1,121 @@
+// @vitest-environment happy-dom
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ErrorBoundary } from '../src/components/ErrorBoundary.js';
+import { log } from '../src/log.js';
+import { LogPage } from '../src/pages/LogPage.js';
+
+/**
+ * „Protokoll", rendered the way a browser renders it.
+ *
+ * The rest of the suite uses `renderToStaticMarkup`, which calls a store's `getServerSnapshot`
+ * exactly once and then stops. That is why nobody saw this page take the whole application down:
+ * the failure needs a *client* render, where `useSyncExternalStore` compares one snapshot with the
+ * next and re-renders until two of them are the same object.
+ *
+ * So this file mounts for real. If `snapshot()` ever goes back to returning a fresh array, React
+ * loops and throws here instead of in someone's browser.
+ */
+
+let container: HTMLDivElement;
+
+beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+});
+
+afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+});
+
+function mount(element: React.JSX.Element): void {
+    const root = createRoot(container);
+    act(() => {
+        root.render(element);
+    });
+}
+
+describe('the log page', () => {
+    it('renders without looping, on an empty log', () => {
+        mount(<LogPage />);
+
+        expect(container.textContent).toContain('Protokoll');
+    });
+
+    it('renders the entries and survives new ones arriving', () => {
+        log('warn', 'sync.truncated', { count: 2000 });
+        mount(<LogPage />);
+
+        expect(container.textContent).toContain('sync.truncated');
+
+        act(() => {
+            log('error', 'rule.stage.failed', { code: 'RULE_COMPILE_FAILED' });
+        });
+
+        expect(container.textContent).toContain('rule.stage.failed');
+    });
+
+    it('does not warn that the snapshot should be cached', () => {
+        // React's own diagnosis of the bug. It arrives as a console error just before the throw,
+        // so catching it here means catching the loop before it becomes a blank screen.
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        mount(<LogPage />);
+
+        const said = errors.mock.calls.map((call) => String(call[0] ?? '')).join(' ');
+        expect(said).not.toContain('getSnapshot should be cached');
+    });
+});
+
+describe('the error boundary', () => {
+    function Exploding(): React.JSX.Element {
+        throw new Error('kaputt');
+    }
+
+    it('keeps a crashing screen from taking the rest with it', () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        mount(
+            <div>
+                <nav>Navigation</nav>
+                <ErrorBoundary area="Regeln">
+                    <Exploding />
+                </ErrorBoundary>
+            </div>
+        );
+
+        // The whole point: something is still on screen, and it is not a white page.
+        expect(container.textContent).toContain('Navigation');
+        expect(container.textContent).toContain('Hier ist etwas abgestürzt');
+        expect(container.textContent).toContain('Regeln');
+    });
+
+    it('says that nothing was written to the account', () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        mount(
+            <ErrorBoundary area="Regeln">
+                <Exploding />
+            </ErrorBoundary>
+        );
+
+        expect(container.textContent).toContain('nichts geändert');
+    });
+
+    it('logs the error name but never its message', () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+        mount(
+            <ErrorBoundary area="Regeln">
+                <Exploding />
+            </ErrorBoundary>
+        );
+
+        // A message can quote a subject line, and the log is meant to be handed over unedited.
+        const report = container.textContent ?? '';
+        expect(report).not.toContain('kaputt');
+    });
+});
