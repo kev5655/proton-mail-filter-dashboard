@@ -260,7 +260,9 @@ async function launchBrowser(options: BrowserLoginOptions, headless: boolean): P
                     : `Der installierte Browser "${channel}" liess sich nicht starten.`,
             hint:
                 channel === undefined
-                    ? 'Einmalig `pnpm exec playwright install chromium` ausführen.'
+                    ? 'Einmalig `pnpm install:browser` ausführen — das lädt Chromium herunter. ' +
+                      '(`pnpm exec playwright ...` funktioniert nicht: Playwright liegt in einem ' +
+                      'Workspace-Paket und ist von der Wurzel aus nicht aufrufbar.)'
                     : 'Ist er installiert? Und läuft er gerade mit demselben Profil — Playwright ' +
                       'braucht das Profil für sich allein.',
             context: { headless, channel, profileDir: options.profileDir },

@@ -17,6 +17,7 @@ import { FIXTURE_DIR, loadEnvFile } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 import { clearLockout, connect } from './session.js';
+import { runSync } from './sync-command.js';
 import { describeItem } from '@pms/credentials';
 
 /**
@@ -108,6 +109,11 @@ async function describeCredentialItem(): Promise<void> {
 async function main(): Promise<void> {
     loadEnvFile();
     configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+
+    if (process.argv.includes('--sync')) {
+        await runSync(process.argv);
+        return;
+    }
 
     if (process.argv.includes('--sperre-geklaert')) {
         const cleared = await clearLockout();

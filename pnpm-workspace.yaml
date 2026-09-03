@@ -4,7 +4,19 @@ packages:
   - 'vendor/proton/sieve'
   - 'vendor/proton/utils'
 
-# esbuild ships a platform binary that its install script unpacks; tsx needs it.
-# Nothing else in this tree is allowed to run install scripts.
+# Packages allowed to run install scripts. Both fetch or unpack a prebuilt binary; neither
+# compiles anything here, and nothing else in this tree may run a script at all.
+#
+#   esbuild                          platform binary, needed by tsx
+#   better-sqlite3-multiple-ciphers  SQLCipher build of SQLite — the encrypted local database
 onlyBuiltDependencies:
   - esbuild
+  - better-sqlite3-multiple-ciphers
+
+# Pinned because vite 8 and vite-node 6 must agree on their internals, and a transitive
+# dependency pulling in an older vite has broken the test run before.
+#
+# This lived under "pnpm.overrides" in package.json, where pnpm 10 no longer reads it — it warned
+# on every command and the pin quietly did nothing.
+overrides:
+  vite: '^8.2.2'

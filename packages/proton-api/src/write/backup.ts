@@ -1,7 +1,8 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getLogger } from '@pms/core/logger';
+import { writePrivateFile } from '@pms/core/private-file';
 
 import { getFilters, getFolders, getLabels } from '../read.js';
 import type { ProtonHttp } from '../http.js';
@@ -40,12 +41,8 @@ export async function backupBeforeWrite(
     const path = join(directory, `proton-${stamp}.json`);
 
     await mkdir(directory, { recursive: true });
-    await writeFile(
-        path,
-        `${JSON.stringify({ takenAt: now, filters, folders, labels }, null, 2)}\n`,
-        // Filter names and folder names are personal; the backup is as sensitive as the mailbox.
-        { encoding: 'utf8', mode: 0o600 }
-    );
+    // Filter names and folder names are personal; the backup is as sensitive as the mailbox.
+    await writePrivateFile(path, `${JSON.stringify({ takenAt: now, filters, folders, labels }, null, 2)}\n`);
 
     log.info({ path, filters: filters.length, folders: folders.length }, 'backup written');
     return { path, filters: filters.length, folders: folders.length };

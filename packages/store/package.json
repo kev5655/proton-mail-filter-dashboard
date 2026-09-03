@@ -1,0 +1,16 @@
+{
+  "name": "@pms/store",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@pms/core": "workspace:*",
+    "better-sqlite3-multiple-ciphers": "^12.4.1",
+    "zod": "4.5.2"
+  }
+}

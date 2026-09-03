@@ -31,18 +31,25 @@ Same on Windows and Linux unless noted.
 - A **paid** Proton Mail plan
 - **Node 24 or newer** and **pnpm** — `node --version`, `corepack enable pnpm` if pnpm is missing
 - **Google Chrome**, for signing in (see [Signing in](#signing-in) for why)
-- Optional: the [1Password CLI](https://developer.1password.com/docs/cli/), so credentials come from
-  your vault instead of a prompt. Enable *Integrate with 1Password CLI* in the desktop app.
+- The [1Password CLI](https://developer.1password.com/docs/cli/) if you set `PMS_OP_VAULT` —
+  **required** in that case, since credentials then come from the vault rather than a prompt. Enable
+  *Integrate with 1Password CLI* in the desktop app. Leave `PMS_OP_VAULT` unset to be asked in the
+  terminal instead and skip the CLI entirely.
 - Optional: [Ollama](https://ollama.com) for folder-name suggestions — local, remote, or none
 
 ## Install
 
 ```sh
 pnpm install
-pnpm install:browser     # one-off: downloads the Chromium used when Chrome is not available
+pnpm install:browser     # required before the first sign-in — downloads Chromium
 pnpm check-types
 pnpm test
 ```
+
+**`pnpm install:browser` is not optional.** Signing in needs a browser (see
+[Signing in](#signing-in)), and without this the first run stops with `BROWSER_NOT_INSTALLED`.
+Note the script name: `pnpm exec playwright install` does *not* work from the repository root,
+because Playwright is a dependency of one workspace package rather than of the root.
 
 On Windows use **PowerShell** or **Git Bash**; both work. There is nothing to compile and no
 platform-specific dependency.
@@ -101,6 +108,28 @@ are not installed in it; a TOTP code is the easier route and is filled in for yo
 
 Your Proton password is typed into Proton's own page. It is never stored, logged, or included in an
 error message.
+
+## Mirror it locally
+
+```sh
+pnpm sync                            # last 30 days, at most 2000 messages
+pnpm sync --days 90
+pnpm sync --days 365 --max 5000
+pnpm sync --days all --max 20000
+```
+
+Writes an encrypted SQLite database to `data/mailbox.db` — folders, labels, filters and message
+metadata. The whole file is encrypted with a key derived by Argon2id; without the passphrase it has
+no SQLite header and no table names, so nothing about it says "mailbox".
+
+It is a copy, and nothing in it is authoritative. Losing it costs a resync, not data.
+
+Files under `data/` are restricted to your account — `chmod` on Unix, `icacls` on Windows, where
+POSIX modes do not exist and `chmod` would only toggle a read-only flag. Check them with
+`ls -l data/` or `icacls data\session.enc.json`.
+
+Both the window and the limit default small on purpose: a page of a hundred messages costs about a
+second, so a year of mail takes minutes. Ask for more only when you need it.
 
 ### Useful flags
 

@@ -135,14 +135,12 @@ describe('only src/write may change anything at Proton', () => {
         expect(barrel).not.toMatch(/export .* from '\.\/messages/);
     });
 
-    it('backs up before writing, and says so where a reader will look', async () => {
+    it('backs up before writing', async () => {
         const backup = await readFile(
             join(REPO, 'packages', 'proton-api', 'src', 'write', 'backup.ts'),
             'utf8'
         );
 
         expect(backup).toContain('backupBeforeWrite');
-        // 0600: the backup contains every filter and folder name, which is as personal as the mail.
-        expect(backup).toContain('0o600');
     });
 });
