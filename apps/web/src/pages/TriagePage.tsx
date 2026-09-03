@@ -5,8 +5,8 @@ import { explainScore } from '@pms/grouping';
 
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
-import { inboxMessages, suggestions } from '../data.js';
 import { log } from '../log.js';
+import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -18,6 +18,7 @@ import { useStore } from '../store.js';
  * accepting only stages the change; the diff and the confirmation come after.
  */
 export function TriagePage(): React.JSX.Element {
+    const { inboxMessages, suggestions } = useMailbox();
     const { setOpen, selectMany } = useAppState();
     const { stage, rules } = useStore();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});

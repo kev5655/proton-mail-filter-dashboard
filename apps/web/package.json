@@ -17,7 +17,8 @@
     "@pms/mail-view": "workspace:*",
     "@pms/rules": "workspace:*",
     "@proton/sieve": "workspace:*",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "@pms/server": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

@@ -11,6 +11,7 @@
   "scripts": {
     "spike": "pnpm --filter @pms/spike start",
     "sync": "pnpm --filter @pms/spike start --sync",
+    "serve": "pnpm --filter @pms/spike start --serve",
     "build:vendor": "pnpm --filter @proton/sieve build",
     "check-types": "pnpm build:vendor && tsc && tsc -p tsconfig.browser.json",
     "test": "pnpm build:vendor && vitest run",

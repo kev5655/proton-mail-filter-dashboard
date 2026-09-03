@@ -9,32 +9,64 @@ import { HistoryPage } from './pages/HistoryPage.js';
 import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
 import { TriagePage } from './pages/TriagePage.js';
-import { groups } from './data.js';
+import { MailboxProvider, useMailbox, useMailboxStatus } from './mailbox.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
 
 export function App(): React.JSX.Element {
     return (
-        <AppStateProvider>
-            <StoreProvider>
-                <Shell />
-            </StoreProvider>
-        </AppStateProvider>
+        <MailboxProvider>
+            <AppStateProvider>
+                <Sources />
+            </AppStateProvider>
+        </MailboxProvider>
     );
 }
 
+/**
+ * Remount the store when the mailbox underneath it changes.
+ *
+ * The dashboard renders the demo while it asks the local server, so the source can change once,
+ * shortly after startup. `key` makes that a fresh store rather than a merge: staged changes,
+ * journal and drift all belong to one mailbox, and carrying them into another would show the user
+ * a history of things that never happened to the account they are now looking at.
+ */
+function Sources(): React.JSX.Element {
+    const { source } = useMailboxStatus();
+    return (
+        <StoreProvider key={source}>
+            <Shell />
+        </StoreProvider>
+    );
+}
+
+/** One name per screen, used by the navigation and by the selection bar so the two agree. */
+const PAGE_LABELS: Record<Page, string> = {
+    triage: 'Vorschläge',
+    rules: 'Regeln',
+    folders: 'Ordner',
+    changes: 'Änderungen',
+    history: 'Verlauf',
+    log: 'Protokoll',
+};
+
 function Shell(): React.JSX.Element {
-    const { nav, goTo, selected, clearSelection, open, setOpen } = useAppState();
+    const { nav, goTo, selected, selectedFrom, clearSelection, open, setOpen } = useAppState();
+    const { groups } = useMailbox();
+    const status = useMailboxStatus();
     const { rules, folders, drift, journal } = useStore();
     const [buildingRule, setBuildingRule] = useState(false);
 
+    // Only screens other than this one. Saying "aus Regeln" while standing on Regeln is noise.
+    const elsewhere = selectedFrom.filter((entry) => entry !== nav.page);
+
     const nav_: Array<{ id: Page; label: string; count: number }> = [
-        { id: 'triage', label: 'Vorschläge', count: groups.length },
-        { id: 'rules', label: 'Regeln', count: rules.length },
-        { id: 'folders', label: 'Ordner', count: folders.length },
-        { id: 'changes', label: 'Änderungen', count: drift.filter((item) => item.resolved === undefined).length },
-        { id: 'history', label: 'Verlauf', count: journal.length },
-        { id: 'log', label: 'Protokoll', count: 0 },
+        { id: 'triage', label: PAGE_LABELS.triage, count: groups.length },
+        { id: 'rules', label: PAGE_LABELS.rules, count: rules.length },
+        { id: 'folders', label: PAGE_LABELS.folders, count: folders.length },
+        { id: 'changes', label: PAGE_LABELS.changes, count: drift.filter((item) => item.resolved === undefined).length },
+        { id: 'history', label: PAGE_LABELS.history, count: journal.length },
+        { id: 'log', label: PAGE_LABELS.log, count: 0 },
     ];
 
     return (
@@ -63,10 +95,7 @@ function Shell(): React.JSX.Element {
                  * plausible list of their own folder names should never have to wonder whether they
                  * are looking at their real mailbox.
                  */}
-                <p className="demo-banner">
-                    <strong>Demo-Daten.</strong> Kein Proton-Konto verbunden. Alle Mails, Regeln und
-                    Ordner sind erfunden — es wird nichts gelesen und nichts verändert.
-                </p>
+                <SourceBanner status={status} />
             </nav>
 
             <main className="main">
@@ -91,6 +120,16 @@ function Shell(): React.JSX.Element {
                             {[...new Set(selected.map((message) => message.Sender.Address))].length}{' '}
                             verschiedene Absender
                         </span>
+                        {/*
+                         * Where the mail was picked. Without this the bar follows you to a screen
+                         * you never selected anything on and looks like something left behind by
+                         * mistake, rather than a selection you are still carrying on purpose.
+                         */}
+                        {elsewhere.length > 0 && (
+                            <span className="faint">
+                                aus {elsewhere.map((entry) => PAGE_LABELS[entry]).join(', ')}
+                            </span>
+                        )}
                         <span style={{ flex: 1 }} />
                         <button type="button" className="button" onClick={() => setBuildingRule(true)}>
                             Regel daraus bauen
@@ -118,4 +157,72 @@ function Shell(): React.JSX.Element {
             )}
         </div>
     );
+}
+
+/**
+ * Which mailbox is on screen, said plainly and on every screen.
+ *
+ * The demo half of this was already load-bearing: someone looking at a plausible list of folder
+ * names must never have to wonder whether it is theirs. The real half is load-bearing for the
+ * opposite reason — once the names *are* theirs, the questions become "how old is this" and "is it
+ * all of it", and both have to be answered where the data is, not in a settings page.
+ *
+ * Nothing here claims a live connection. The dashboard reads a copy; the copy is as old as the last
+ * sync, and saying so is the difference between a stale screen and a lying one.
+ */
+export function SourceBanner({ status }: { status: ReturnType<typeof useMailboxStatus> }): React.JSX.Element {
+    if (status.source === 'demo') {
+        return (
+            <p className="demo-banner">
+                <strong>Demo-Daten.</strong> Kein Proton-Konto verbunden. Alle Mails, Regeln und
+                Ordner sind erfunden — es wird nichts gelesen und nichts verändert.
+                {status.problem !== undefined && (
+                    <>
+                        <br />
+                        <br />
+                        <strong>Der lokale Server hat geantwortet, aber unbrauchbar:</strong>{' '}
+                        {status.problem}
+                    </>
+                )}
+                {status.problem === undefined && !status.loading && (
+                    <>
+                        <br />
+                        <br />
+                        Für das echte Postfach: <code>pnpm sync</code>, dann <code>pnpm serve</code>.
+                    </>
+                )}
+            </p>
+        );
+    }
+
+    return (
+        <p className="demo-banner">
+            <strong>Echtes Postfach.</strong> Gelesen aus der lokalen, verschlüsselten Kopie. Es
+            werden keine Mails verschoben und nichts an Proton gesendet.
+            <br />
+            <br />
+            Stand: {status.syncedAt === undefined ? 'unbekannt' : formatSyncTime(status.syncedAt)}.
+            {status.truncated && ' Die Kopie ist unvollständig — der letzte Sync hat seine Obergrenze erreicht.'}
+            {status.unreadable.length > 0 && (
+                <>
+                    <br />
+                    <br />
+                    <strong>
+                        {status.unreadable.length}{' '}
+                        {status.unreadable.length === 1 ? 'Filter' : 'Filter'} nicht lesbar:
+                    </strong>{' '}
+                    {status.unreadable.map((entry) => entry.name).join(', ')}. Sie laufen bei Proton
+                    weiter, tauchen hier aber nicht auf.
+                </>
+            )}
+        </p>
+    );
+}
+
+/** Absolute, not "vor 3 Stunden": how stale the copy is, is exactly what the user has to judge. */
+function formatSyncTime(unixSeconds: number): string {
+    return new Date(unixSeconds * 1000).toLocaleString('de-CH', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+    });
 }

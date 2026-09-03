@@ -44,6 +44,9 @@ importers:
       '@pms/proton-api':
         specifier: workspace:*
         version: link:../../packages/proton-api
+      '@pms/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       '@pms/store':
         specifier: workspace:*
         version: link:../../packages/store
@@ -74,6 +77,9 @@ importers:
       '@pms/rules':
         specifier: workspace:*
         version: link:../../packages/rules
+      '@pms/server':
+        specifier: workspace:*
+        version: link:../../packages/server
       '@proton/sieve':
         specifier: workspace:*
         version: link:../../vendor/proton/sieve
@@ -162,6 +168,24 @@ importers:
       '@pms/core':
         specifier: workspace:*
         version: link:../core
+      '@proton/sieve':
+        specifier: workspace:*
+        version: link:../../vendor/proton/sieve
+
+  packages/server:
+    dependencies:
+      '@pms/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pms/proton-api':
+        specifier: workspace:*
+        version: link:../proton-api
+      '@pms/store':
+        specifier: workspace:*
+        version: link:../store
+      '@pms/sync':
+        specifier: workspace:*
+        version: link:../sync
       '@proton/sieve':
         specifier: workspace:*
         version: link:../../vendor/proton/sieve

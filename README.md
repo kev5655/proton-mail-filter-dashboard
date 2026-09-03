@@ -62,10 +62,13 @@ pnpm dev
 
 Then open <http://localhost:5173>. It binds to localhost only.
 
-Right now this runs entirely on a **synthetic mailbox** — no account, no network, nothing read and
+On its own this runs entirely on a **synthetic mailbox** — no account, no network, nothing read and
 nothing changed. Every screen says so. The logic behind it is the real thing: the same matcher,
-grouping and conflict analysis that will run against your mail, so a preview that looks wrong on
-screen is a real bug rather than a fixture someone typed to look convincing.
+grouping and conflict analysis that run against your mail, so a preview that looks wrong on screen is
+a real bug rather than a fixture someone typed to look convincing.
+
+To point it at your own mailbox instead, mirror the account once and then serve the mirror — see
+[Show your own mailbox](#show-your-own-mailbox) below.
 
 ## Read your real mailbox
 
@@ -123,6 +126,33 @@ metadata. The whole file is encrypted with a key derived by Argon2id; without th
 no SQLite header and no table names, so nothing about it says "mailbox".
 
 It is a copy, and nothing in it is authoritative. Losing it costs a resync, not data.
+
+## Show your own mailbox
+
+Two terminals. The first serves the local copy:
+
+```sh
+pnpm serve                           # http://127.0.0.1:5174, loopback only
+```
+
+The second is the dashboard as before:
+
+```sh
+pnpm dev                             # http://localhost:5173
+```
+
+The dashboard now reads your mirror instead of the demo, and says so — including how old the copy is
+and whether the last sync was cut short. Stop the server and reload, and it falls back to the demo
+without an error: no server running is the ordinary case, not a failure.
+
+**The server never talks to Proton.** It has no Proton client in reach; it opens `data/mailbox.db`,
+serves it on the loopback interface, and refuses every HTTP method that is not `GET` before it looks
+at the path — so there is no route table a write could be added to. Refreshing the copy is
+`pnpm sync`, which is the only part of the system that knows the account exists.
+
+There is no authentication on that port, deliberately. The database is open in the process, so
+anything that can reach the port can read the mailbox; the answer to that is that nothing remote can
+reach it, not a token that would make exposing it look safe.
 
 Files under `data/` are restricted to your account — `chmod` on Unix, `icacls` on Windows, where
 POSIX modes do not exist and `chmod` would only toggle a read-only flag. Check them with

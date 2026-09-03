@@ -1,7 +1,8 @@
 import type { SimpleObject } from '@proton/sieve/filterModel';
 import { toSieveTree } from '@proton/sieve/toSieveTree';
 
-import { DEMO_FOLDERS, DEMO_RULES, generateMailbox, INBOX, type DemoMessage, type DemoRule } from '@pms/demo';
+import { INBOX } from '@pms/demo';
+import type { MailboxFolder, MailboxMessage, MailboxRule } from '@pms/server/types';
 import { groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
 import {
     analyseRules,
@@ -13,45 +14,36 @@ import {
 } from '@pms/rules';
 
 /**
- * Everything the interface shows, computed once from the demo mailbox.
+ * Everything the interface shows, derived from one mailbox.
  *
- * The point of wiring the real engine to fake mail rather than mocking the screens: what appears
- * here is genuinely what the matcher, the grouping and the conflict analysis produce. If a preview
- * looks wrong on screen, the bug is in the logic and not in a fixture someone typed to look nice.
+ * A function of its input rather than a module of constants, because there are now two inputs: the
+ * demo mailbox and the real one the local server mirrors. The screens must not be able to tell
+ * which they were given — a dashboard that only works on the demo has been testing itself.
+ *
+ * The point of wiring the real engine to the data rather than mocking the screens still holds: what
+ * appears here is genuinely what the matcher, the grouping and the conflict analysis produce. If a
+ * preview looks wrong on screen, the bug is in the logic and not in a fixture someone typed to look
+ * nice.
  */
 
-export const messages: DemoMessage[] = generateMailbox();
-export const folders = DEMO_FOLDERS;
-export const rules: DemoRule[] = DEMO_RULES;
-
-export const inboxMessages = messages.filter((message) => message.LabelIDs.includes(INBOX));
-
-/** Groups, ranked — the triage screen in data form. */
-export const groups: ScoredGroup[] = scoreGroups(groupMessages(inboxMessages));
-
-export const analysis: RuleAnalysis[] = analyseRules(rules, messages);
-
-export function analysisFor(ruleId: string): RuleAnalysis | undefined {
-    return analysis.find((entry) => entry.ruleId === ruleId);
+export interface MailboxInput {
+    messages: MailboxMessage[];
+    folders: MailboxFolder[];
+    rules: MailboxRule[];
 }
 
-/** The messages a rule catches, newest first. Capped: the list is for judging, not for browsing. */
-export function matchedBy(ruleId: string, limit = 8): DemoMessage[] {
-    const entry = rules.find((candidate) => candidate.id === ruleId);
-    if (entry === undefined) {
-        return [];
-    }
-    return messages.filter((message) => matchesRule(entry.rule, message)).slice(0, limit);
-}
-
-/**
- * Where a message actually ends up once every rule has run.
- *
- * Not the same as "which rules match": several can, and the last one to file it wins. Showing only
- * the matches would tell the user something true and useless.
- */
-export function destinationOf(message: DemoMessage): string | undefined {
-    return resolveOutcome(rules, message).destination;
+export interface MailboxData extends MailboxInput {
+    inboxMessages: MailboxMessage[];
+    groups: ScoredGroup[];
+    analysis: RuleAnalysis[];
+    suggestions: Suggestion[];
+    shadowFolders: MailboxFolder[];
+    analysisFor: (ruleId: string) => RuleAnalysis | undefined;
+    matchedBy: (ruleId: string, limit?: number) => MailboxMessage[];
+    destinationOf: (message: MailboxMessage) => string | undefined;
+    messageCountIn: (folderName: string) => number;
+    sieveTextFor: (ruleId: string) => string;
+    rulesTargeting: (folderName: string) => MailboxRule[];
 }
 
 export interface Suggestion {
@@ -93,62 +85,102 @@ function proposeFolder(group: ScoredGroup): string {
         : organisation.charAt(0).toUpperCase() + organisation.slice(1);
 }
 
-export const suggestions: Suggestion[] = groups.map((group) => {
-    const folder = proposeFolder(group);
-    const { rule, explanation } = ruleFromGroup(
-        {
-            kind: group.kind,
-            ...(group.match.sender === undefined ? {} : { sender: group.match.sender }),
-            ...(group.match.domain === undefined ? {} : { domain: group.match.domain }),
-            ...(group.match.subjectTemplate === undefined
-                ? {}
-                : { subjectTemplate: group.match.subjectTemplate }),
-        },
-        folder
-    );
+/**
+ * Derive everything the screens read from one mailbox.
+ *
+ * Called once per source. Nothing in here reaches for a module-level constant, which is what makes
+ * the demo and the real account interchangeable rather than merely similar.
+ */
+export function buildMailbox(input: MailboxInput): MailboxData {
+    const { messages, folders, rules } = input;
 
-    const groupMessageIds = new Set(group.messageIds);
-    const covered = messages.filter(
-        (message) => groupMessageIds.has(message.ID) && matchesRule(rule, message)
-    ).length;
+    const inboxMessages = messages.filter((message) => message.LabelIDs.includes(INBOX));
+    const groups = scoreGroups(groupMessages(inboxMessages));
+    const analysis = analyseRules(rules, messages);
+
+    /**
+     * Where a message actually ends up once every rule has run.
+     *
+     * Not the same as "which rules match": several can, and the last one to file it wins. Showing
+     * only the matches would tell the user something true and useless.
+     */
+    const destinationOf = (message: MailboxMessage): string | undefined =>
+        resolveOutcome(rules, message).destination;
+
+    const suggestions: Suggestion[] = groups.map((group) => {
+        const folder = proposeFolder(group);
+        const { rule, explanation } = ruleFromGroup(
+            {
+                kind: group.kind,
+                ...(group.match.sender === undefined ? {} : { sender: group.match.sender }),
+                ...(group.match.domain === undefined ? {} : { domain: group.match.domain }),
+                ...(group.match.subjectTemplate === undefined
+                    ? {}
+                    : { subjectTemplate: group.match.subjectTemplate }),
+            },
+            folder
+        );
+
+        const groupMessageIds = new Set(group.messageIds);
+        const covered = messages.filter(
+            (message) => groupMessageIds.has(message.ID) && matchesRule(rule, message)
+        ).length;
+
+        return {
+            group,
+            folder,
+            rule,
+            explanation,
+            warnings: protonEscapingIsBroken(rule).map((warning) => `„${warning.value}": ${warning.reason}`),
+            covered,
+        };
+    });
 
     return {
-        group,
-        folder,
-        rule,
-        explanation,
-        warnings: protonEscapingIsBroken(rule).map((warning) => `„${warning.value}": ${warning.reason}`),
-        covered,
+        messages,
+        folders,
+        rules,
+        inboxMessages,
+        groups,
+        analysis,
+        suggestions,
+
+        /** Folders whose name duplicates one of Proton's own — usually an IMAP migration leftover. */
+        shadowFolders: folders.filter((folder) => folder.shadowsSystemFolder !== undefined),
+
+        analysisFor: (ruleId) => analysis.find((entry) => entry.ruleId === ruleId),
+
+        /** The messages a rule catches. Capped: the list is for judging, not for browsing. */
+        matchedBy: (ruleId, limit = 8) => {
+            const entry = rules.find((candidate) => candidate.id === ruleId);
+            return entry === undefined
+                ? []
+                : messages.filter((message) => matchesRule(entry.rule, message)).slice(0, limit);
+        },
+
+        destinationOf,
+
+        messageCountIn: (folderName) =>
+            messages.filter((message) => destinationOf(message) === folderName).length,
+
+        /**
+         * The Sieve a rule compiles to.
+         *
+         * Generated from the rule rather than stored, so what is shown is provably the same rule
+         * the structural view above it renders. Storing a separate copy would let the two drift,
+         * and the whole point of showing both is that they agree.
+         */
+        sieveTextFor: (ruleId) => {
+            const entry = rules.find((candidate) => candidate.id === ruleId);
+            return entry === undefined ? '' : JSON.stringify(toSieveTree(entry.rule, 2), null, 2);
+        },
+
+        /** Rules whose destination is this folder, including one nested beneath another. */
+        rulesTargeting: (folderName) =>
+            rules.filter((entry) =>
+                entry.rule.Actions.FileInto.some(
+                    (target) => target === folderName || target.endsWith(`/${folderName}`)
+                )
+            ),
     };
-});
-
-/** Folders whose name duplicates one of Proton's own — leftovers from an IMAP migration. */
-export const shadowFolders = folders.filter((folder) => folder.shadowsSystemFolder !== undefined);
-
-export function messageCountIn(folderName: string): number {
-    return messages.filter((message) => destinationOf(message) === folderName).length;
-}
-
-/**
- * The Sieve a rule compiles to.
- *
- * Generated from the rule rather than stored, so what is shown is provably the same rule the
- * structural view above it renders. Storing a separate copy would let the two drift, and the whole
- * point of showing both is that they agree.
- */
-export function sieveTextFor(ruleId: string): string {
-    const entry = rules.find((candidate) => candidate.id === ruleId);
-    if (entry === undefined) {
-        return '';
-    }
-    return JSON.stringify(toSieveTree(entry.rule, 2), null, 2);
-}
-
-/** Rules whose destination is this folder, including one nested beneath another. */
-export function rulesTargeting(folderName: string): DemoRule[] {
-    return rules.filter((entry) =>
-        entry.rule.Actions.FileInto.some(
-            (target) => target === folderName || target.endsWith(`/${folderName}`)
-        )
-    );
 }

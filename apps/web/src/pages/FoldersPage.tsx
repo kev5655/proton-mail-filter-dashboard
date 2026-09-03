@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import type { DemoFolder } from '@pms/demo';
+import type { MailboxFolder } from '@pms/server/types';
 
-import { messageCountIn, rulesTargeting } from '../data.js';
 import { log } from '../log.js';
+import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -20,7 +20,7 @@ export function FoldersPage(): React.JSX.Element {
 
     const shadowFolders = folders.filter((folder) => folder.shadowsSystemFolder !== undefined);
     const roots = folders.filter((folder) => folder.ParentID === null);
-    const childrenOf = (id: string): DemoFolder[] => folders.filter((folder) => folder.ParentID === id);
+    const childrenOf = (id: string): MailboxFolder[] => folders.filter((folder) => folder.ParentID === id);
 
     return (
         <>
@@ -103,10 +103,11 @@ function FolderNode({
     childrenOf,
     highlight,
 }: {
-    folder: DemoFolder;
-    childrenOf: (id: string) => DemoFolder[];
+    folder: MailboxFolder;
+    childrenOf: (id: string) => MailboxFolder[];
     highlight: string | undefined;
 }): React.JSX.Element {
+    const { messageCountIn, rulesTargeting } = useMailbox();
     const { goTo } = useAppState();
     const { stage } = useStore();
     const children = childrenOf(folder.ID);

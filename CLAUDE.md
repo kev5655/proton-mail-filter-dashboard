@@ -12,6 +12,12 @@ The rule is enforced structurally, not by discipline: only `packages/proton-api/
 issue non-GET requests, and the message-moving calls inside it are reachable only from the undo
 service. If you are about to add a write path anywhere else, that is the signal to stop.
 
+`packages/server/` is the same idea one layer out. It hands the dashboard the mirrored mailbox and
+has no Proton client in reach at all, so nothing it does can become a request to the account. It
+refuses every method that is not `GET` *before* it looks at the path, which means there is no route
+table a write could be added to — "there are no write routes" is true of any server until someone
+adds one, and that is not a guarantee.
+
 Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
 a full JSON backup of all filters and folders.
 
@@ -92,8 +98,11 @@ packages/demo/          A synthetic mailbox, so the interface can be built witho
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
 packages/changes/       Diff, undo journal and post-write verification
-apps/spike/             M0 read-only probe against a real account
-apps/web/               The dashboard. Currently runs on demo data only.
+packages/store/         The encrypted local database
+packages/sync/          Mirroring Proton into it, and reading it back
+packages/server/        Serving that mirror to the dashboard — read-only, loopback only
+apps/spike/             M0 read-only probe, plus `--sync` and `--serve`
+apps/web/               The dashboard. Reads the real mirror when the server runs, else the demo.
 ```
 
 The rule engine has three parts that must agree: the **compiler** (vendored, produces what Proton
@@ -108,11 +117,19 @@ pnpm install
 pnpm check-types        # builds vendor declarations, then tsc over everything
 pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
-pnpm dev                # the dashboard on demo data, http://localhost:5173
+pnpm sync               # mirror the account into the local encrypted database
+pnpm serve              # serve that mirror on 127.0.0.1:5174 — reads locally, never calls Proton
+pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
 ```
 
+The dashboard renders whichever mailbox it is given — the demo, or the real mirror when
+`pnpm serve` is running — through the same screens and the same engine. It says which one it is
+showing, on every screen, along with how old the copy is and whether it is complete. That the two
+sources are interchangeable is the point: a dashboard that only works on the demo has been testing
+itself.
+
 The web app is wired to the real engine, not to mock screens: what it shows is genuinely what the
-matcher, the grouping and the conflict analysis produce from `@pms/demo`. A preview that looks wrong
+matcher, the grouping and the conflict analysis produce from its source. A preview that looks wrong
 on screen is a bug in the logic, not in a fixture someone typed to look convincing. Its demo
 mailbox is deliberately awkward — a sender whose mail splits in two, a rule that never fires, one
 that is always overridden, folders shadowing Proton's own — because a tidy demo makes every screen

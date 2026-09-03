@@ -17,6 +17,7 @@ import { FIXTURE_DIR, loadEnvFile } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 import { clearLockout, connect } from './session.js';
+import { runServe } from './serve-command.js';
 import { runSync } from './sync-command.js';
 import { describeItem } from '@pms/credentials';
 
@@ -107,11 +108,22 @@ async function describeCredentialItem(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-    loadEnvFile();
+    const env = loadEnvFile();
     configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+
+    // Said once, up front. A setting that was never read looks exactly like a setting that was read
+    // and ignored, and the difference is usually a `.env` sitting one directory over.
+    if (!env.found) {
+        console.log(`\nKeine .env gefunden (erwartet unter ${env.path}). Es gelten nur die Vorgaben.`);
+    }
 
     if (process.argv.includes('--sync')) {
         await runSync(process.argv);
+        return;
+    }
+
+    if (process.argv.includes('--serve')) {
+        await runServe(process.argv);
         return;
     }
 

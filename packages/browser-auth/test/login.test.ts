@@ -87,6 +87,28 @@ function fakeBrowser(
 
     const hidden = new Set(options.hidden ?? []);
 
+    /**
+     * The control that switches the second-factor screen to the code field.
+     *
+     * Only `revealedBy` exists; everything else counts zero. `role` is ignored on purpose — the
+     * test says *what* is on the page, and which of button/link/text finds it is exactly the part
+     * the code is allowed to change without the test being rewritten.
+     */
+    const switchLocator = (
+        role: string,
+        pattern: RegExp
+    ): { count: () => Promise<number>; first: () => { click: () => Promise<void> } } => {
+        const present = options.revealedBy?.source === pattern.source;
+        const click = async (): Promise<void> => {
+            page.clicked.push(`${role}:${pattern.source}`);
+            hidden.clear();
+        };
+        return {
+            count: async () => (present ? 1 : 0),
+            first: () => ({ click }),
+        };
+    };
+
     const fakePage = {
         setDefaultTimeout: () => {},
         waitForSelector: async (selector: string) => {
@@ -111,15 +133,11 @@ function fakeBrowser(
                 },
             }),
         }),
-        getByRole: (_role: string, query: { name: RegExp }) => ({
-            first: () => ({
-                count: async () => (options.revealedBy?.source === query.name.source ? 1 : 0),
-                click: async () => {
-                    page.clicked.push(query.name.source);
-                    hidden.clear();
-                },
-            }),
-        }),
+        // Shaped like a Playwright locator: `count()` and `click()` both hang off it, and `first()`
+        // returns another locator rather than a different kind of thing. The code under test calls
+        // them in that order, and a fake that only offered `first()` let a wrong call sequence pass.
+        getByRole: (role: string, query: { name: RegExp }) => switchLocator(role, query.name),
+        getByText: (pattern: RegExp) => switchLocator('text', pattern),
         on: (_event: string, handler: (response: unknown) => void) => page.handlers.push(handler),
         goto: async () => {},
         fill: async (selector: string, value: string) => {
@@ -233,7 +251,10 @@ describe('signing in through a browser', () => {
 
         await loginWithBrowser({ ...baseOptions, headless: false, launch });
 
-        expect(page.clicked).toContain(switcher.source);
+        // By its wording, not by the role it was found under: the control is a button today and
+        // has already been something else once, and pinning the role here would turn a working
+        // fallback into a failing test.
+        expect(page.clicked.some((entry) => entry.endsWith(switcher.source))).toBe(true);
         // Whichever candidate matched first — the point is that a code reached a code field.
         expect(Object.values(page.filled)).toContain('123456');
     });

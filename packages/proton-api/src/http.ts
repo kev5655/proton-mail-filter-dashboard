@@ -69,6 +69,14 @@ interface RequestOptions {
     anonymous?: boolean;
     /** Extra headers for this one request. Merged last, so it can override the defaults. */
     headers?: Record<string, string>;
+    /**
+     * Look at the successful response before its body is read.
+     *
+     * Only `auth/refresh` needs this, and only for `Set-Cookie`: in cookie mode Proton rotates the
+     * session in the headers, and a caller that reads the body alone keeps sending the cookies it
+     * was given at login until they stop working.
+     */
+    observe?: (response: Response) => void;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -224,6 +232,7 @@ export class ProtonHttp {
             }
 
             log.debug({ endpoint, status: response.status, attempt }, 'proton request ok');
+            options.observe?.(response);
             return (await response.json()) as unknown;
         }
 

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { createDemoProvider, type RuleProposal } from '@pms/llm';
 import { matchesRule, ruleFromCriteria } from '@pms/rules';
 
-import { folders, messages } from '../data.js';
+import { useMailbox } from '../mailbox.js';
 import { MailList, type ListableMessage } from './MailList.js';
 import { RuleConditions } from './RuleConditions.js';
 
@@ -42,6 +42,7 @@ export function SelectionDialog({
     onClose: () => void;
     onOpenMail: (message: ListableMessage) => void;
 }): React.JSX.Element {
+    const { folders, messages } = useMailbox();
     const [instruction, setInstruction] = useState('');
     const [result, setResult] = useState<Result | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);

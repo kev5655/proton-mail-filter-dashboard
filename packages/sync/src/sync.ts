@@ -71,6 +71,10 @@ export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {
     const { messages, truncated } = await syncMessages(db, http, options, report);
 
     setMeta(db, 'lastSyncAt', String(Math.floor(Date.now() / 1000)));
+    // Recorded, not just returned. Whether the copy is complete outlives the run that made it, and
+    // anything reading the database later — the dashboard above all — has to be able to say "these
+    // are the mails I know about" rather than implying it has the account.
+    setMeta(db, 'lastSyncTruncated', truncated ? '1' : '0');
     log.info({ labels: labelCount, filters: filterCount, messages, truncated }, 'sync complete');
 
     return { labels: labelCount, filters: filterCount, messages, truncated };

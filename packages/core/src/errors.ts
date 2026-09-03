@@ -48,6 +48,10 @@ export const ERROR_CODES = [
     'CREDENTIALS_NOT_FOUND',
     'CREDENTIALS_EMPTY',
     'CREDENTIALS_MALFORMED',
+
+    // The local server that hands the dashboard the mirrored mailbox
+    'SERVER_PORT_IN_USE',
+    'SERVER_DATABASE_MISSING',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

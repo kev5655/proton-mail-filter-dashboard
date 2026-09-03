@@ -15,6 +15,8 @@ import {
     type StoredSession,
 } from '@pms/proton-api';
 
+import type { CredentialSource } from '@pms/credentials';
+
 import { credentialConfig, resolveSource } from './credentials.js';
 import { DATA_DIR, REPO_ROOT } from './paths.js';
 import { terminal } from './prompt.js';
@@ -84,10 +86,24 @@ export interface Connection {
     passphrase: string;
 }
 
-export async function connect(): Promise<Connection> {
-    const guard = new LoginGuard({ path: GUARD_FILE });
-    const http = newHttp();
+/**
+ * The passphrase for everything this tool keeps on this machine.
+ *
+ * Its own function because the server needs it without needing Proton: it opens the mirrored
+ * database and never authenticates against the account at all. Going through `connect()` for it
+ * would have meant a login path in a program that must not have one.
+ */
+export async function resolvePassphrase(): Promise<string> {
+    return (await openCredentials()).passphrase;
+}
 
+/**
+ * The credential source, and the passphrase taken from it.
+ *
+ * Both come back together because announcing the source twice in one run reads as two separate
+ * lookups, and because asking 1Password twice means two fingerprints for one command.
+ */
+async function openCredentials(): Promise<{ source: CredentialSource; passphrase: string }> {
     const source = resolveSource(credentialConfig());
     console.log(`Zugangsdaten aus: ${source.name}`);
 
@@ -95,16 +111,23 @@ export async function connect(): Promise<Connection> {
     // can be a long random string nobody has to remember. Falling back to a prompt keeps the tool
     // usable without 1Password.
     const fromVault = await source.getSessionPassphrase();
-    const passphrase =
-        fromVault ??
-        (await terminal.askRequiredSecret(
-            'Passphrase für die gespeicherte Sitzung (nur lokal, frei wählbar): ',
-            'Passphrase'
-        ));
-
     if (fromVault !== undefined) {
         console.log('Sitzungs-Passphrase aus 1Password übernommen.');
+        return { source, passphrase: fromVault };
     }
+
+    const passphrase = await terminal.askRequiredSecret(
+        'Passphrase für die gespeicherte Sitzung (nur lokal, frei wählbar): ',
+        'Passphrase'
+    );
+    return { source, passphrase };
+}
+
+export async function connect(): Promise<Connection> {
+    const guard = new LoginGuard({ path: GUARD_FILE });
+    const http = newHttp();
+
+    const { source, passphrase } = await openCredentials();
 
     const stored = await loadSession(SESSION_FILE, passphrase);
     if (stored !== undefined) {
@@ -211,14 +234,27 @@ function warnAboutLiveProfile(profileDir: string | undefined): void {
     }
 }
 
+/**
+ * The browser settings actually in force, each with the variable that would change it.
+ *
+ * Naming the variables is the point. The previous version described the outcome only, so a setting
+ * that had not been picked up — a `.env` in the wrong directory, a line still commented out —
+ * looked exactly like a setting that had been picked up and ignored, and there was no way to tell
+ * from the output which of the two it was.
+ */
 function describeBrowser(choice: BrowserChoice): string {
-    const which = choice.channel === undefined ? 'das mitgelieferte Chromium' : `den installierten ${choice.channel}`;
-    const window = choice.headless ? 'unsichtbar' : 'mit sichtbarem Fenster';
+    const which =
+        choice.channel === undefined
+            ? 'das mitgelieferte Chromium (PMS_BROWSER_CHANNEL nicht gesetzt)'
+            : `den installierten ${choice.channel} (PMS_BROWSER_CHANNEL)`;
+    const window = choice.headless
+        ? 'unsichtbar (PMS_BROWSER_HEADLESS ist nicht "false")'
+        : 'mit sichtbarem Fenster (PMS_BROWSER_HEADLESS=false)';
     const profile =
         choice.profileDir === undefined
-            ? 'Profil wird nach der Anmeldung verworfen'
-            : `Profil bleibt in ${choice.profileDir}`;
-    return `${which}, ${window}. ${profile}.`;
+            ? 'Profil wird nach der Anmeldung verworfen (PMS_BROWSER_PROFILE nicht gesetzt)'
+            : `Profil bleibt in ${choice.profileDir} (PMS_BROWSER_PROFILE)`;
+    return `${which}, ${window}.\n  ${profile}.`;
 }
 
 async function reuse(http: ProtonHttp, stored: StoredSession, passphrase: string): Promise<boolean> {
@@ -235,9 +271,38 @@ async function reuse(http: ProtonHttp, stored: StoredSession, passphrase: string
         return true;
     } catch (error) {
         if (isAppError(error)) {
-            console.log(`  (Erneuern fehlgeschlagen: ${error.code})`);
+            // The whole message, not just the code. A failed refresh means the next run logs in,
+            // and a login is the expensive thing here — so the one line that says why must carry
+            // enough to fix it without spending another attempt.
+            console.log(`  (Erneuern fehlgeschlagen: [${error.code}] ${error.message})`);
+            if (error.hint !== undefined && error.hint !== '') {
+                console.log(`   → ${error.hint}`);
+            }
+            const context = describeContext(error.context);
+            if (context !== undefined) {
+                console.log(`   Kontext: ${context}`);
+            }
         }
         return false;
+    }
+}
+
+/**
+ * The error's context as one line, or nothing.
+ *
+ * `AppError` context is built to be safe to show — `validate.ts` describes values rather than
+ * quoting them — but a diagnostic must never be the reason a run falls over, so a context that
+ * will not serialise is simply left out.
+ */
+function describeContext(context: unknown): string | undefined {
+    if (context === undefined || context === null) {
+        return undefined;
+    }
+    try {
+        const line = JSON.stringify(context);
+        return line === '{}' ? undefined : line;
+    } catch {
+        return undefined;
     }
 }
 

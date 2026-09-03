@@ -43,9 +43,11 @@ export const FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'recorded');
  * for GitHub, and typing it before every command is the kind of friction that ends in someone
  * hardcoding it.
  */
-export function loadEnvFile(): void {
+export function loadEnvFile(): { path: string; found: boolean } {
     const envFile = join(REPO_ROOT, '.env');
-    if (existsSync(envFile)) {
+    const found = existsSync(envFile);
+    if (found) {
         process.loadEnvFile(envFile);
     }
+    return { path: envFile, found };
 }

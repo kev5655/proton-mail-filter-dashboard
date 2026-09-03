@@ -1,6 +1,6 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
-import type { Browser, BrowserContext, Page, Response } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page, Response } from 'playwright';
 
 import {
     AUTH_PATH,
@@ -363,27 +363,34 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
     }
 
     for (const pattern of TOTP_SWITCH_PATTERNS) {
-        try {
-            const control = page.getByRole('button', { name: pattern }).first();
-            if ((await control.count()) > 0) {
-                await control.click({ timeout: 2_000 });
+        for (const candidate of switchCandidates(page, pattern)) {
+            try {
+                if ((await candidate.count()) === 0) {
+                    continue;
+                }
+                await candidate.first().click({ timeout: 2_000 });
                 const revealed = await findTotpField(page, 2_000);
                 if (revealed !== undefined) {
                     return revealed;
                 }
+            } catch {
+                // A guess that did not land. The wait below is the part that is meant to work.
             }
-        } catch {
-            // A guess that did not land. The wait below is the part that is meant to work.
         }
     }
 
     if (headless) {
+        // The same diagnosis the visible path gets. Without it this error said only which selectors
+        // were tried — which we already knew — and the attempt it cost taught us nothing.
         throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
             message: 'Protons 2FA-Seite zeigt den Passkey, und das Code-Feld liess sich nicht öffnen.',
             hint:
                 'Unsichtbar kann das niemand umschalten. Mit PMS_BROWSER_HEADLESS=false starten — ' +
-                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen.',
-            context: { tried: [...TOTP_SELECTORS] },
+                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen. Was die Seite ' +
+                'tatsächlich anbietet, steht im Kontext unter `inputs` und `buttons`; daraus lässt ' +
+                'sich packages/browser-auth/src/selectors.ts anpassen, ohne noch einen Versuch zu ' +
+                'verbrauchen.',
+            context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
         });
     }
 
@@ -405,6 +412,22 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
             'anpassen, ohne noch einen Anmeldeversuch zu verbrauchen.',
         context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
     });
+}
+
+/**
+ * The things on the page that might be the switch to the code method, likeliest first.
+ *
+ * A button by its accessible name is the shape Proton uses today. The other two exist because that
+ * assumption has already been wrong once and cost a login attempt to find out: the control may be a
+ * link, and Proton's own components sometimes render one as neither — a styled `div` with a click
+ * handler, which has no role at all and is reachable only by its text.
+ */
+function switchCandidates(page: Page, pattern: RegExp): Locator[] {
+    return [
+        page.getByRole('button', { name: pattern }),
+        page.getByRole('link', { name: pattern }),
+        page.getByText(pattern),
+    ];
 }
 
 /** The first candidate that is actually on screen, or undefined. */

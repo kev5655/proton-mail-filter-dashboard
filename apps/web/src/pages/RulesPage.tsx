@@ -4,8 +4,8 @@ import { createDemoProvider, type SieveExplanation } from '@pms/llm';
 
 import { MailList } from '../components/MailList.js';
 import { RuleConditions } from '../components/RuleConditions.js';
-import { analysisFor, matchedBy, shadowFolders, sieveTextFor } from '../data.js';
 import { log } from '../log.js';
+import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -16,6 +16,7 @@ import { useStore } from '../store.js';
  * Order is a number rather than an implication, because with filters the order *is* the outcome.
  */
 export function RulesPage(): React.JSX.Element {
+    const { analysisFor, matchedBy, shadowFolders } = useMailbox();
     const { nav, goTo, setOpen } = useAppState();
     const { rules, stage } = useStore();
     const [openId, setOpenId] = useState<string | undefined>(nav.focusRuleId);
@@ -178,6 +179,7 @@ const provider = createDemoProvider();
  * about, and a plausible-sounding wrong summary of what moves someone's mail is worse than none.
  */
 function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
+    const { sieveTextFor } = useMailbox();
     const sieve = sieveTextFor(ruleId);
     const [explanation, setExplanation] = useState<SieveExplanation | undefined>(undefined);
     const [failed, setFailed] = useState(false);

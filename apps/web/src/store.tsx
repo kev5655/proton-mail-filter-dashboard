@@ -9,9 +9,9 @@ import {
     type JournalEntry,
     type PendingChange,
 } from '@pms/changes';
-import type { DemoFolder, DemoRule } from '@pms/demo';
+import type { MailboxFolder, MailboxRule } from '@pms/server/types';
 
-import { folders as initialFolders, messages, rules as initialRules } from './data.js';
+import { useMailbox } from './mailbox.js';
 
 /**
  * The mutable half of the application: rules, folders, and the record of what was done to them.
@@ -27,8 +27,8 @@ import { folders as initialFolders, messages, rules as initialRules } from './da
  */
 
 export interface StoreState {
-    rules: DemoRule[];
-    folders: DemoFolder[];
+    rules: MailboxRule[];
+    folders: MailboxFolder[];
     journal: readonly JournalEntry[];
 
     /** The change awaiting confirmation, with its consequences already computed. */
@@ -82,8 +82,12 @@ const INITIAL_DRIFT: DriftItem[] = [
 const Context = createContext<StoreState | undefined>(undefined);
 
 export function StoreProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
-    const [rules, setRules] = useState<DemoRule[]>(initialRules);
-    const [folders, setFolders] = useState<DemoFolder[]>(initialFolders);
+    // Seeded from whichever mailbox is in play. `App` remounts this provider when the source
+    // changes, so there is no reseeding to write here: switching from the demo to the real account
+    // starts a fresh store rather than carrying half-applied changes across two different mailboxes.
+    const { rules: initialRules, folders: initialFolders, messages } = useMailbox();
+    const [rules, setRules] = useState<MailboxRule[]>(initialRules);
+    const [folders, setFolders] = useState<MailboxFolder[]>(initialFolders);
     const [staged, setStaged] = useState<ChangePlan | undefined>(undefined);
     const [drift, setDrift] = useState<DriftItem[]>(INITIAL_DRIFT);
     const [journal] = useState(() => new Journal());
@@ -104,7 +108,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
         }
 
         const now = Date.now();
-        const next = applyChangeToRules(rules, staged.change) as DemoRule[];
+        const next = applyChangeToRules(rules, staged.change) as MailboxRule[];
         setRules(next);
         applyFolderChange(staged.change, setFolders);
 
@@ -143,7 +147,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     const undo = useCallback(
         (entryId: string) => {
             const result = journal.undo(entryId, rules, Date.now());
-            setRules(result.rules as DemoRule[]);
+            setRules(result.rules as MailboxRule[]);
             setVersion((current) => current + 1);
         },
         [journal, rules]
@@ -177,7 +181,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
 
 function applyFolderChange(
     change: PendingChange,
-    setFolders: React.Dispatch<React.SetStateAction<DemoFolder[]>>
+    setFolders: React.Dispatch<React.SetStateAction<MailboxFolder[]>>
 ): void {
     if (change.folder === undefined) {
         return;

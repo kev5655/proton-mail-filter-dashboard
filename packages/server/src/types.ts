@@ -1,0 +1,77 @@
+import type { SimpleObject } from '@proton/sieve/filterModel';
+
+/**
+ * What the dashboard receives from the local server.
+ *
+ * Its own module, with nothing but types in it, because the browser imports this file and must not
+ * end up importing anything that opens a database. `@pms/server/types` is a separate entry point
+ * from `@pms/server` for that reason: a value import from the wrong one is a build error rather
+ * than a bundle that fails at runtime.
+ *
+ * The shapes are Proton's, not the database's. The dashboard already speaks them — the demo
+ * mailbox is written in them too — so the same screens render either source without knowing which
+ * one they are looking at. That is the point of the exercise: if the real mailbox needed different
+ * components, the demo would have stopped being a test of anything.
+ */
+
+export interface MailboxMessage {
+    ID: string;
+    Subject: string;
+    Sender: { Address: string; Name: string };
+    ToList: Array<{ Address: string }>;
+    Time: number;
+    LabelIDs: string[];
+    Unread: number;
+    NumAttachments: number;
+}
+
+export interface MailboxFolder {
+    ID: string;
+    Name: string;
+    ParentID: string | null;
+    /** Set when the folder duplicates one of Proton's own — usually an IMAP migration leftover. */
+    shadowsSystemFolder?: string;
+}
+
+export interface MailboxRule {
+    id: string;
+    name: string;
+    priority: number;
+    enabled: boolean;
+    /** Sieve-authored rules cannot be edited in Proton's own interface any more. */
+    authoredAs: 'tree' | 'sieve';
+    rule: SimpleObject;
+}
+
+/**
+ * A filter that is in the account but could not be read as a rule.
+ *
+ * Kept and reported rather than dropped. A filter the tool cannot parse still runs at Proton and
+ * still moves mail, so a screen that silently omits it would be showing a mailbox that does not
+ * exist — and every conflict analysis built on that list would be wrong in the user's favour.
+ */
+export interface UnreadableRule {
+    id: string;
+    name: string;
+    reason: string;
+}
+
+export interface MailboxMeta {
+    /** `demo` never reaches the wire; it is what the dashboard uses when no server answers. */
+    source: 'proton';
+    /** Unix seconds of the last completed sync, or undefined if none has finished. */
+    syncedAt: number | undefined;
+    /** Messages in the local copy, which is not the same as messages in the account. */
+    messageCount: number;
+    /** True when the last sync stopped at its limit, so the copy is known to be partial. */
+    truncated: boolean;
+}
+
+export interface MailboxSnapshot {
+    meta: MailboxMeta;
+    folders: MailboxFolder[];
+    labels: MailboxFolder[];
+    rules: MailboxRule[];
+    unreadable: UnreadableRule[];
+    messages: MailboxMessage[];
+}

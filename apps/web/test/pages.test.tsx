@@ -8,7 +8,8 @@ import { RulesPage } from '../src/pages/RulesPage.js';
 import { TriagePage } from '../src/pages/TriagePage.js';
 import { MailList } from '../src/components/MailList.js';
 import { RuleConditions } from '../src/components/RuleConditions.js';
-import { rules } from '../src/data.js';
+import { DEMO_RULES as rules } from '@pms/demo';
+import { MailboxProvider } from '../src/mailbox.js';
 import { AppStateProvider } from '../src/state.js';
 import { ChangesPage } from '../src/pages/ChangesPage.js';
 import { HistoryPage } from '../src/pages/HistoryPage.js';
@@ -31,9 +32,11 @@ import { StoreProvider } from '../src/store.js';
  */
 function render(element: React.JSX.Element): string {
     return renderToStaticMarkup(
-        <AppStateProvider>
-            <StoreProvider>{element}</StoreProvider>
-        </AppStateProvider>
+        <MailboxProvider>
+            <AppStateProvider>
+                <StoreProvider>{element}</StoreProvider>
+            </AppStateProvider>
+        </MailboxProvider>
     );
 }
 

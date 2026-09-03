@@ -32,3 +32,6 @@ Thumbs.db
 
 # Generated type declarations for the vendored Proton code (built by pnpm build:vendor).
 vendor/proton/sieve/dist/
+
+
+fixtures/
