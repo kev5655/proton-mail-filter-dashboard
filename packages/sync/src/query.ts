@@ -35,6 +35,10 @@ export interface StoredMessage {
     unread: boolean;
     numAttachments: number;
     labelIds: string[];
+    /** Who it was addressed to. Mirrored since the first sync, but read back only now. */
+    recipients: string[];
+    /** Proton's mailbox shows conversations, so this is what a link to the message needs. */
+    conversationId: string | undefined;
 }
 
 export interface StoredFilter {
@@ -160,13 +164,15 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         query.labelId === undefined
             ? db
                   .prepare(
-                      `SELECT id, subject, sender_address, sender_name, time, unread, num_attachments
+                      `SELECT id, subject, sender_address, sender_name, time, unread, num_attachments,
+                              conversation_id
                        FROM messages ORDER BY time DESC LIMIT ? OFFSET ?`
                   )
                   .all(limit, offset)
             : db
                   .prepare(
-                      `SELECT m.id, m.subject, m.sender_address, m.sender_name, m.time, m.unread, m.num_attachments
+                      `SELECT m.id, m.subject, m.sender_address, m.sender_name, m.time, m.unread,
+                              m.num_attachments, m.conversation_id
                        FROM messages m
                        JOIN message_labels ml ON ml.message_id = m.id
                        WHERE ml.label_id = ?
@@ -181,6 +187,7 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         time: number;
         unread: number;
         num_attachments: number;
+        conversation_id: string | null;
     }>;
 
     if (rows.length === 0) {
@@ -204,6 +211,23 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         }
     }
 
+    // Recipients, in the same one-query-for-the-page shape as the labels above. `mirrorMessages`
+    // has been writing this table since the first sync and nothing ever read it back, which is why
+    // a rule filtering on the recipient matched nothing here while working perfectly at Proton.
+    const recipientRows = db
+        .prepare(`SELECT message_id, address FROM recipients WHERE message_id IN (${placeholders})`)
+        .all(...rows.map((row) => row.id)) as Array<{ message_id: string; address: string }>;
+
+    const recipientsByMessage = new Map<string, string[]>();
+    for (const row of recipientRows) {
+        const existing = recipientsByMessage.get(row.message_id);
+        if (existing === undefined) {
+            recipientsByMessage.set(row.message_id, [row.address]);
+        } else {
+            existing.push(row.address);
+        }
+    }
+
     return rows.map((row) => ({
         id: row.id,
         subject: row.subject,
@@ -212,5 +236,7 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         unread: row.unread === 1,
         numAttachments: row.num_attachments,
         labelIds: labelsByMessage.get(row.id) ?? [],
+        recipients: recipientsByMessage.get(row.id) ?? [],
+        conversationId: row.conversation_id ?? undefined,
     }));
 }

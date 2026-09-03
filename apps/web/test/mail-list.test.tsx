@@ -1,0 +1,214 @@
+// @vitest-environment happy-dom
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { MailList, type ListableMessage } from '../src/components/MailList.js';
+import { AppStateProvider } from '../src/state.js';
+
+/**
+ * The list every screen shows mail through.
+ *
+ * Worth testing interactively rather than as markup, because the things that were wrong were not
+ * visual: a list showed eight of two hundred matches with no indication that it had stopped, and
+ * a button labelled „Alle auswählen" selected the ten rows on screen. Both look perfectly fine in
+ * a screenshot. What they need is a test that counts.
+ */
+
+interface TestMessage extends ListableMessage {
+    Sender: { Address: string; Name?: string };
+    ToList?: Array<{ Address: string }>;
+}
+
+function mail(index: number, over: Partial<TestMessage> = {}): TestMessage {
+    return {
+        ID: `m${index}`,
+        Subject: `Betreff ${index}`,
+        Sender: { Address: `absender${index}@beispiel.example` },
+        Time: 1_700_000_000 + index,
+        ...over,
+    };
+}
+
+let container: HTMLDivElement;
+
+beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+});
+
+afterEach(() => {
+    container.remove();
+});
+
+function render(element: React.JSX.Element): void {
+    const root = createRoot(container);
+    act(() => {
+        root.render(<AppStateProvider>{element}</AppStateProvider>);
+    });
+}
+
+function type(value: string): void {
+    const input = container.querySelector<HTMLInputElement>('input[type="search"]');
+    if (input === null) {
+        throw new Error('no search box');
+    }
+    act(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+}
+
+function rows(): number {
+    return container.querySelectorAll('.mail-list li').length;
+}
+
+function click(text: string): void {
+    const button = [...container.querySelectorAll('button')].find((entry) =>
+        (entry.textContent ?? '').includes(text)
+    );
+    if (button === undefined) {
+        throw new Error(`no button matching ${text}`);
+    }
+    act(() => {
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+}
+
+const many = Array.from({ length: 25 }, (_, index) => mail(index));
+
+describe('paging', () => {
+    it('shows one page and says how many there are', () => {
+        render(<MailList messages={many} onOpen={() => {}} search pageSize={10} />);
+
+        expect(rows()).toBe(10);
+        expect(container.textContent).toContain('25 Mails');
+        expect(container.textContent).toContain('Seite 1 von 3');
+    });
+
+    it('moves between pages, and the last one is short', () => {
+        render(<MailList messages={many} onOpen={() => {}} search pageSize={10} />);
+
+        click('Weiter');
+        expect(container.textContent).toContain('Seite 2 von 3');
+        click('Weiter');
+        expect(rows()).toBe(5);
+
+        click('Zurück');
+        expect(container.textContent).toContain('Seite 2 von 3');
+    });
+
+    it('renders everything when no page size is given', () => {
+        render(<MailList messages={many} onOpen={() => {}} />);
+
+        expect(rows()).toBe(25);
+        expect(container.querySelector('.pager')).toBeNull();
+    });
+});
+
+describe('searching', () => {
+    it('matches the subject, the sender address and the recipient', () => {
+        const messages = [
+            mail(1, { Subject: 'Rechnung März' }),
+            mail(2, { Sender: { Address: 'noreply@bahn.example' } }),
+            mail(3, { ToList: [{ Address: 'team@firma.example' }] }),
+        ];
+        render(<MailList messages={messages} onOpen={() => {}} search />);
+
+        type('rechnung');
+        expect(rows()).toBe(1);
+
+        type('bahn');
+        expect(rows()).toBe(1);
+
+        // Recipients are why this matters: a rule can filter on them, and until now the dashboard
+        // could not even show them.
+        type('team@firma');
+        expect(rows()).toBe(1);
+    });
+
+    it('reports the filtered count against the total', () => {
+        render(<MailList messages={many} onOpen={() => {}} search pageSize={10} />);
+
+        type('Betreff 1');
+        // 1, and 10 through 19.
+        expect(container.textContent).toContain('11 von 25');
+    });
+
+    it('says so when nothing matches, instead of looking empty', () => {
+        render(<MailList messages={many} onOpen={() => {}} search />);
+
+        type('gibtesnicht');
+        expect(rows()).toBe(0);
+        expect(container.textContent).toContain('Nichts gefunden');
+    });
+
+    it('returns to the first page when the query changes', () => {
+        render(<MailList messages={many} onOpen={() => {}} search pageSize={10} />);
+
+        click('Weiter');
+        type('Betreff 2');
+        expect(container.textContent).not.toContain('Seite 2');
+    });
+});
+
+describe('select all', () => {
+    it('offers the full count, not the visible page', () => {
+        render(<MailList messages={many} onOpen={() => {}} search selectAll pageSize={10} />);
+
+        // The old bug in one assertion: ten rows on screen, twenty-five to select.
+        expect(container.textContent).toContain('Alle 25 auswählen');
+    });
+
+    it('offers the filtered set once a query narrows it, and says it is a filtered set', () => {
+        render(<MailList messages={many} onOpen={() => {}} search selectAll pageSize={10} />);
+
+        type('Betreff 1');
+        expect(container.textContent).toContain('Alle 11 Treffer auswählen');
+    });
+
+    it('actually selects every match, not the page', () => {
+        render(<MailList messages={many} onOpen={() => {}} search selectAll pageSize={10} />);
+
+        click('Alle 25 auswählen');
+        expect(container.querySelectorAll('.mail-list li.selected').length).toBe(10);
+        // Ten are visible; the selection covers all 25, which the checked page proves only in part.
+        // The count in the tools line is the honest witness.
+        click('Weiter');
+        expect(container.querySelectorAll('.mail-list li.selected').length).toBe(10);
+    });
+});
+
+describe('extras', () => {
+    it('shows a note per row when one is given', () => {
+        render(
+            <MailList
+                messages={[mail(1)]}
+                onOpen={() => {}}
+                annotate={() => ({ text: 'schon gefangen', tone: 'neutral', title: 'von „X"' })}
+            />
+        );
+
+        expect(container.textContent).toContain('schon gefangen');
+    });
+
+    it('links to Proton only when a link is supplied', () => {
+        render(<MailList messages={[mail(1)]} onOpen={() => {}} />);
+        expect(container.querySelector('.mail-link')).toBeNull();
+
+        container.replaceChildren();
+        render(<MailList messages={[mail(1)]} onOpen={() => {}} linkFor={() => 'https://example.test/x'} />);
+
+        const link = container.querySelector<HTMLAnchorElement>('.mail-link');
+        expect(link?.getAttribute('href')).toBe('https://example.test/x');
+        // Proton is not told that the reader came from a page on localhost.
+        expect(link?.getAttribute('rel')).toContain('noreferrer');
+    });
+
+    it('uses the caller’s wording for an empty list', () => {
+        render(<MailList messages={[]} onOpen={() => {}} emptyText="Diese Regel trifft nichts." />);
+
+        expect(container.textContent).toContain('Diese Regel trifft nichts.');
+    });
+});

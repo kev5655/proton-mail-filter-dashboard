@@ -5,7 +5,8 @@ import { createDemoProvider, type SieveExplanation } from '@pms/llm';
 import { MailList } from '../components/MailList.js';
 import { RuleConditions } from '../components/RuleConditions.js';
 import { log } from '../log.js';
-import { useMailbox } from '../mailbox.js';
+import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { protonMailUrl } from '../proton-link.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -17,7 +18,11 @@ import { useStore } from '../store.js';
  */
 export function RulesPage(): React.JSX.Element {
     const { analysisFor, matchedBy, shadowFolders } = useMailbox();
+    const { source } = useMailboxStatus();
     const { nav, goTo, setOpen } = useAppState();
+
+    const linkFor =
+        source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
     const { rules, stage } = useStore();
     const [openId, setOpenId] = useState<string | undefined>(nav.focusRuleId);
 
@@ -106,7 +111,15 @@ export function RulesPage(): React.JSX.Element {
                                     Lokal berechnet und bis zur Verifikation gegen das echte Verhalten
                                     eine Schätzung.
                                 </p>
-                                <MailList messages={matchedBy(entry.id)} onOpen={setOpen} />
+                                <MailList
+                                    messages={matchedBy(entry.id)}
+                                    onOpen={setOpen}
+                                    search
+                                    selectAll
+                                    pageSize={10}
+                                    emptyText="Diese Regel trifft im erfassten Zeitraum keine Mail."
+                                    {...(linkFor === undefined ? {} : { linkFor })}
+                                />
 
                                 <div className="row" style={{ marginTop: 16 }}>
                                     <button

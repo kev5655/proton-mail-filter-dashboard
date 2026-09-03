@@ -67,13 +67,14 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
         ID: message.id,
         Subject: message.subject,
         Sender: { Address: message.sender.address, Name: message.sender.name },
-        // Not stored. The recipient matters for rules that filter on it, and adding it is a sync
-        // change rather than something to invent here; an empty list is the honest placeholder.
-        ToList: [],
+        // Stored all along, in the `recipients` table, and never read back until now — which is
+        // why a rule filtering on the recipient matched nothing here while working at Proton.
+        ToList: message.recipients.map((address) => ({ Address: address })),
         Time: message.time,
         LabelIDs: message.labelIds,
         Unread: message.unread ? 1 : 0,
         NumAttachments: message.numAttachments,
+        ...(message.conversationId === undefined ? {} : { ConversationID: message.conversationId }),
     }));
 
     const syncedAt = Number(getMeta(db, 'lastSyncAt') ?? NaN);

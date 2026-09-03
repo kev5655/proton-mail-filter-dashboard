@@ -6,7 +6,8 @@ import { explainScore } from '@pms/grouping';
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
 import { log } from '../log.js';
-import { useMailbox } from '../mailbox.js';
+import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { protonMailUrl } from '../proton-link.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -18,8 +19,13 @@ import { useStore } from '../store.js';
  * accepting only stages the change; the diff and the confirmation come after.
  */
 export function TriagePage(): React.JSX.Element {
-    const { inboxMessages, suggestions } = useMailbox();
-    const { setOpen, selectMany } = useAppState();
+    const { inboxMessages, suggestions, messagesInGroup, caughtBy } = useMailbox();
+    const { source } = useMailboxStatus();
+    const { setOpen } = useAppState();
+
+    // Only for the real mailbox: a demo message id points at nothing in anyone's account.
+    const linkFor =
+        source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
     const { stage, rules } = useStore();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
@@ -42,6 +48,31 @@ export function TriagePage(): React.JSX.Element {
 
             {open.map((entry) => {
                 const isOpen = openKey === entry.group.key;
+                const members = messagesInGroup(entry.group);
+                const alreadyCaught = members.filter((message) => caughtBy(message.ID) !== undefined).length;
+
+                /**
+                 * What an existing rule already does with this message.
+                 *
+                 * Two different facts wearing the same badge: filing it where this suggestion
+                 * would (neutral — the suggestion is redundant) and filing it somewhere else
+                 * (warning — accepting this would change where the mail lands, which is the part
+                 * nobody expects).
+                 */
+                const noteFor = (message: { ID: string }): { text: string; tone: 'neutral' | 'warning'; title: string } | undefined => {
+                    const owner = caughtBy(message.ID);
+                    if (owner === undefined) {
+                        return undefined;
+                    }
+                    const sameTarget = owner.destination === entry.folder;
+                    return {
+                        text: sameTarget ? 'schon gefangen' : `→ ${owner.destination}`,
+                        tone: sameTarget ? 'neutral' : 'warning',
+                        title: sameTarget
+                            ? `„${owner.ruleName}" sortiert diese Mail bereits nach „${owner.destination}".`
+                            : `„${owner.ruleName}" sortiert diese Mail heute nach „${owner.destination}" — diese Regel würde sie nach „${entry.folder}" umleiten.`,
+                    };
+                };
 
                 return (
                     <div className="card" key={entry.group.key}>
@@ -63,6 +94,18 @@ export function TriagePage(): React.JSX.Element {
                         <p className="notice notice-info" style={{ marginTop: 12 }}>
                             {entry.explanation}
                         </p>
+
+                        {alreadyCaught > 0 && (
+                            // The point of this line: a second rule for mail a first one already
+                            // files is not an improvement, it is two rules to keep in step. Said
+                            // per card as a count, and per row below as a badge.
+                            <p className="notice notice-warning">
+                                {alreadyCaught === entry.group.size
+                                    ? 'Diese Mails fängt bereits eine bestehende Regel.'
+                                    : `${alreadyCaught} der ${entry.group.size} Mails fängt bereits eine bestehende Regel.`}{' '}
+                                Dafür braucht es keine zweite.
+                            </p>
+                        )}
 
                         {entry.covered < entry.group.size && (
                             <p className="notice notice-warning">
@@ -138,17 +181,18 @@ export function TriagePage(): React.JSX.Element {
                         </div>
 
                         {isOpen && (
-                            <>
-                                <MailList messages={entry.group.samples} onOpen={setOpen} />
-                                <button
-                                    type="button"
-                                    className="button button-quiet"
-                                    onClick={() => selectMany(entry.group.samples)}
-                                    style={{ marginTop: 8 }}
-                                >
-                                    Alle auswählen und eigene Regel bauen
-                                </button>
-                            </>
+                            // The whole group, not `group.samples` — that holds five, so the
+                            // button saying "17 Mails ansehen" showed five of them, and "alle
+                            // auswählen" selected five. Both were wrong in the same place.
+                            <MailList
+                                messages={members}
+                                onOpen={setOpen}
+                                search
+                                selectAll
+                                pageSize={10}
+                                annotate={noteFor}
+                                {...(linkFor === undefined ? {} : { linkFor })}
+                            />
                         )}
                     </div>
                 );

@@ -135,6 +135,43 @@ function compare(comparator: ConditionComparator, haystack: string, needle: stri
  * escapes either. The pattern must cover the whole value.
  */
 export function globMatches(value: string, pattern: string): boolean {
+    return patternFor(pattern).test(value);
+}
+
+/**
+ * The compiled form of a glob, kept.
+ *
+ * A rule preview runs one condition across the whole mailbox, so this is called once per message —
+ * thirteen thousand times for one keystroke in the rule editor, each time building the same
+ * `RegExp` from the same pattern. The patterns come from rules, and there are only ever a handful
+ * of those, so a small map ends the repetition entirely.
+ *
+ * Bounded rather than unbounded: the editor produces a new pattern on every edit, and an
+ * ever-growing cache in a long-running page is a leak. The cap is generous enough that no real
+ * rule set reaches it, and evicting the oldest costs one recompile.
+ */
+const MAX_CACHED_PATTERNS = 256;
+const patterns = new Map<string, RegExp>();
+
+function patternFor(pattern: string): RegExp {
+    const cached = patterns.get(pattern);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const compiled = compileGlob(pattern);
+    if (patterns.size >= MAX_CACHED_PATTERNS) {
+        const oldest = patterns.keys().next();
+        if (!oldest.done) {
+            patterns.delete(oldest.value);
+        }
+    }
+    patterns.set(pattern, compiled);
+    return compiled;
+}
+
+// No `g` flag, so the returned expression carries no `lastIndex` and is safe to share.
+function compileGlob(pattern: string): RegExp {
     let expression = '';
     for (let index = 0; index < pattern.length; index++) {
         const char = pattern[index] as string;
@@ -161,7 +198,7 @@ export function globMatches(value: string, pattern: string): boolean {
         expression += escapeRegExp(char);
     }
 
-    return new RegExp(`^${expression}$`).test(value);
+    return new RegExp(`^${expression}$`);
 }
 
 function escapeRegExp(text: string): string {

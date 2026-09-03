@@ -8,8 +8,8 @@ import {
     analyseRules,
     matchesRule,
     protonEscapingIsBroken,
-    resolveOutcome,
     ruleFromGroup,
+    type OrderedRule,
     type RuleAnalysis,
 } from '@pms/rules';
 
@@ -32,12 +32,36 @@ export interface MailboxInput {
     rules: MailboxRule[];
 }
 
+/**
+ * What every rule together does to one message.
+ *
+ * Computed once for the whole mailbox rather than per question, because the naive shape of this —
+ * calling `resolveOutcome` wherever the answer is needed — sorts and filters the rule array *per
+ * message*. Asking "how much mail lands in this folder" for fifteen folders then costs fifteen
+ * full passes with a sort inside each, and a per-row "which rule catches this" badge would be
+ * unaffordable outright.
+ */
+export interface Outcome {
+    /** Where it ends up once every rule has run. Undefined means it stays in the inbox. */
+    destination: string | undefined;
+    /** The rule whose fileinto won — the last one, since a later rule moves it again. */
+    decidedBy: { id: string; name: string } | undefined;
+    /** Every rule that matches, in execution order. Several can. */
+    matching: OrderedRule[];
+}
+
 export interface MailboxData extends MailboxInput {
     inboxMessages: MailboxMessage[];
     groups: ScoredGroup[];
     analysis: RuleAnalysis[];
     suggestions: Suggestion[];
     shadowFolders: MailboxFolder[];
+    byId: Map<string, MailboxMessage>;
+    outcomes: Map<string, Outcome>;
+    /** The rule that decides where this message goes, when one does. */
+    caughtBy: (messageId: string) => { ruleId: string; ruleName: string; destination: string } | undefined;
+    /** Every message of a group, not the five samples the grouping keeps for a preview. */
+    messagesInGroup: (group: ScoredGroup) => MailboxMessage[];
     analysisFor: (ruleId: string) => RuleAnalysis | undefined;
     matchedBy: (ruleId: string, limit?: number) => MailboxMessage[];
     destinationOf: (message: MailboxMessage) => string | undefined;
@@ -98,14 +122,74 @@ export function buildMailbox(input: MailboxInput): MailboxData {
     const groups = scoreGroups(groupMessages(inboxMessages));
     const analysis = analyseRules(rules, messages);
 
+    const byId = new Map(messages.map((message) => [message.ID, message]));
+
+    /*
+     * The execution order, hoisted out of the loop.
+     *
+     * `resolveOutcome` does this filter and sort itself, on every call. Doing it once here is the
+     * whole difference between one pass over the mailbox and one pass per question asked.
+     */
+    const ordered = rules.filter((entry) => entry.enabled).sort((a, b) => a.priority - b.priority);
+
     /**
-     * Where a message actually ends up once every rule has run.
+     * Where every message ends up, in one pass.
      *
      * Not the same as "which rules match": several can, and the last one to file it wins. Showing
-     * only the matches would tell the user something true and useless.
+     * only the matches would tell the user something true and useless — so the deciding rule is
+     * recorded alongside, which is what lets a suggestion say "this is already caught by X".
      */
+    const outcomes = new Map<string, Outcome>();
+    for (const message of messages) {
+        const matching: OrderedRule[] = [];
+        let destination: string | undefined;
+        let decidedBy: { id: string; name: string } | undefined;
+
+        for (const entry of ordered) {
+            if (!matchesRule(entry.rule, message)) {
+                continue;
+            }
+            matching.push(entry);
+            const target = entry.rule.Actions.FileInto.at(-1);
+            if (target !== undefined && target !== '') {
+                destination = target;
+                decidedBy = { id: entry.id, name: entry.name };
+            }
+        }
+
+        outcomes.set(message.ID, { destination, decidedBy, matching });
+    }
+
     const destinationOf = (message: MailboxMessage): string | undefined =>
-        resolveOutcome(rules, message).destination;
+        outcomes.get(message.ID)?.destination;
+
+    /** Folder totals, from the one pass above rather than a scan per folder. */
+    const countsByFolder = new Map<string, number>();
+    for (const outcome of outcomes.values()) {
+        if (outcome.destination !== undefined) {
+            countsByFolder.set(outcome.destination, (countsByFolder.get(outcome.destination) ?? 0) + 1);
+        }
+    }
+
+    /** Which messages each rule catches, from the same pass. Uncapped — the caller paginates. */
+    const matchedByRule = new Map<string, MailboxMessage[]>();
+    for (const [id, outcome] of outcomes) {
+        const message = byId.get(id);
+        if (message === undefined) {
+            continue;
+        }
+        for (const entry of outcome.matching) {
+            const list = matchedByRule.get(entry.id);
+            if (list === undefined) {
+                matchedByRule.set(entry.id, [message]);
+            } else {
+                list.push(message);
+            }
+        }
+    }
+
+    // Groups are stable for the life of this mailbox, so resolving one is worth remembering.
+    const groupMembers = new Map<string, MailboxMessage[]>();
 
     const suggestions: Suggestion[] = groups.map((group) => {
         const folder = proposeFolder(group);
@@ -148,20 +232,51 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         /** Folders whose name duplicates one of Proton's own — usually an IMAP migration leftover. */
         shadowFolders: folders.filter((folder) => folder.shadowsSystemFolder !== undefined),
 
+        byId,
+        outcomes,
+
+        caughtBy: (messageId) => {
+            const outcome = outcomes.get(messageId);
+            if (outcome?.decidedBy === undefined || outcome.destination === undefined) {
+                return undefined;
+            }
+            return {
+                ruleId: outcome.decidedBy.id,
+                ruleName: outcome.decidedBy.name,
+                destination: outcome.destination,
+            };
+        },
+
+        /**
+         * Every message of a group.
+         *
+         * `group.samples` holds five, which is why "17 Mails ansehen" showed five for as long as
+         * anyone looked. The full membership is in `messageIds`; this resolves it and remembers
+         * the answer, because a group's contents cannot change without a new mailbox.
+         */
+        messagesInGroup: (group) => {
+            const cached = groupMembers.get(group.key);
+            if (cached !== undefined) {
+                return cached;
+            }
+            const resolved = group.messageIds
+                .map((id) => byId.get(id))
+                .filter((message): message is MailboxMessage => message !== undefined);
+            groupMembers.set(group.key, resolved);
+            return resolved;
+        },
+
         analysisFor: (ruleId) => analysis.find((entry) => entry.ruleId === ruleId),
 
-        /** The messages a rule catches. Capped: the list is for judging, not for browsing. */
-        matchedBy: (ruleId, limit = 8) => {
-            const entry = rules.find((candidate) => candidate.id === ruleId);
-            return entry === undefined
-                ? []
-                : messages.filter((message) => matchesRule(entry.rule, message)).slice(0, limit);
+        /** The messages a rule catches, all of them. Callers paginate rather than truncate. */
+        matchedBy: (ruleId, limit) => {
+            const all = matchedByRule.get(ruleId) ?? [];
+            return limit === undefined ? all : all.slice(0, limit);
         },
 
         destinationOf,
 
-        messageCountIn: (folderName) =>
-            messages.filter((message) => destinationOf(message) === folderName).length,
+        messageCountIn: (folderName) => countsByFolder.get(folderName) ?? 0,
 
         /**
          * The Sieve a rule compiles to.

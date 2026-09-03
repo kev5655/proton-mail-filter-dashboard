@@ -23,6 +23,13 @@ export interface MailboxMessage {
     LabelIDs: string[];
     Unread: number;
     NumAttachments: number;
+    /**
+     * Proton's conversation, when it gave one.
+     *
+     * Only for building a link into their web interface — the mailbox there shows conversations,
+     * not messages. Nothing matches on it.
+     */
+    ConversationID?: string | undefined;
 }
 
 export interface MailboxFolder {

@@ -271,9 +271,12 @@
     flex-direction: column;
 }
 
+/* Flex rather than grid: a row carries between two and five things — checkbox, the message, an
+   optional note, the date, an optional link to Proton — and a fixed set of grid tracks cannot hold
+   an optional middle child without the others sliding under it. */
 .mail-list li {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
+    align-items: center;
     gap: 12px;
     padding: 7px 0;
     border-top: 1px solid var(--border);
@@ -404,6 +407,8 @@
     border: 0;
     padding: 0;
     text-align: left;
+    /* The growing child in a flex row, and the only one allowed to shrink below its content. */
+    flex: 1 1 auto;
     min-width: 0;
     color: inherit;
     border-radius: 4px;
@@ -563,7 +568,6 @@
 /* ---------------------------------------------------------------- selection */
 
 .mail-list li {
-    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
 }
 
@@ -692,6 +696,52 @@
 .diff-table .mail-subject,
 .diff-table .mail-sender {
     display: block;
+}
+
+/* ---------------------------------------------------------------- list tools */
+
+.mail-list-block {
+    min-width: 0;
+}
+
+.mail-list-tools {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.mail-search {
+    flex: 0 1 280px;
+    min-width: 0;
+}
+
+.mail-date {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.mail-link {
+    flex: 0 0 auto;
+    text-decoration: none;
+    color: var(--text-faint);
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+}
+
+.mail-link:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.pager {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
 }
 
 .text-input {
