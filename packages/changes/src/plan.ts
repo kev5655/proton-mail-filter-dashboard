@@ -94,6 +94,17 @@ export interface PendingChange {
     category?: { id: string; messageIds: string[] } | undefined;
     /** For an undo: which recorded change is being taken back. */
     undo?: { entryId: string } | undefined;
+    /**
+     * For a rule change: whether its destination is a folder or a label.
+     *
+     * Proton's filter model cannot express this — the name goes into `FileInto` either way and
+     * Proton resolves it against whichever object carries it — so the intention has to travel with
+     * the change. Without it a rule meant to *mark* mail would create a folder and move it out of
+     * the inbox instead, which is the opposite of what was asked for and invisible until it happens.
+     *
+     * Absent means folder, which is both the old behaviour and the ordinary case.
+     */
+    targetKind?: 'folder' | 'label' | undefined;
 }
 
 /** One message whose destination the change alters. */

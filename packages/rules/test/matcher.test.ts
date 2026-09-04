@@ -269,3 +269,85 @@ describe('warning about Proton\'s broken escaping', () => {
         ).toEqual([]);
     });
 });
+
+/**
+ * A label marks the mail; it does not move it.
+ *
+ * Proton's filter model has no label action. A rule's destination is a name in `FileInto`, and
+ * whether that name resolves to a folder or a label is decided at Proton, by which object carries
+ * it. So a rule that adds a label reads here as a rule that moves the message unless this function
+ * is told the difference — and every preview built on `destination` then claims mail leaves the
+ * inbox when it stays exactly where it was.
+ */
+describe('rules that mark rather than move', () => {
+    const message: MatchableMessage = {
+        Subject: 'Rechnung März',
+        Sender: { Address: 'buchhaltung@firma.example' },
+        ToList: [],
+    };
+
+    function ruleFiling(id: string, priority: number, target: string): OrderedRule {
+        return {
+            id,
+            name: id,
+            priority,
+            enabled: true,
+            rule: {
+                Operator: { label: 'all', value: FilterStatement.ALL },
+                Conditions: [
+                    {
+                        Type: { label: 'Sender', value: ConditionType.SENDER },
+                        Comparator: { label: 'contains', value: ConditionComparator.CONTAINS },
+                        Values: ['firma.example'],
+                    },
+                ],
+                Actions: { FileInto: [target], Mark: { Read: false, Starred: false } },
+            },
+        };
+    }
+
+    it('leaves the message in the inbox when the only rule adds a label', () => {
+        const outcome = resolveOutcome(
+            [ruleFiling('r-1', 1, 'Steuerrelevant')],
+            message,
+            new Set(['Steuerrelevant'])
+        );
+
+        expect(outcome.destination).toBeUndefined();
+        expect(outcome.labels).toEqual(['Steuerrelevant']);
+    });
+
+    it('would call it a move if the labels were unknown', () => {
+        // The old behaviour, and the reason the set has to be passed: with nothing known, every
+        // name in FileInto is a folder.
+        expect(resolveOutcome([ruleFiling('r-1', 1, 'Steuerrelevant')], message).destination).toBe(
+            'Steuerrelevant'
+        );
+    });
+
+    it('keeps the folder when one rule marks and another moves', () => {
+        // Both happen. The label does not overwrite the destination, and the destination does not
+        // swallow the label — they are different kinds of outcome.
+        const outcome = resolveOutcome(
+            [ruleFiling('r-1', 1, 'Steuerrelevant'), ruleFiling('r-2', 2, 'Archiv')],
+            message,
+            new Set(['Steuerrelevant'])
+        );
+
+        expect(outcome.destination).toBe('Archiv');
+        expect(outcome.labels).toEqual(['Steuerrelevant']);
+    });
+
+    it('accumulates labels instead of letting the last one win', () => {
+        // Two folders are a contradiction and the later one wins; two labels are not, and both
+        // stay. Treating labels the way folders are treated would drop one silently.
+        const outcome = resolveOutcome(
+            [ruleFiling('r-1', 1, 'Steuerrelevant'), ruleFiling('r-2', 2, 'Zu erledigen')],
+            message,
+            new Set(['Steuerrelevant', 'Zu erledigen'])
+        );
+
+        expect(outcome.destination).toBeUndefined();
+        expect(outcome.labels).toEqual(['Steuerrelevant', 'Zu erledigen']);
+    });
+});

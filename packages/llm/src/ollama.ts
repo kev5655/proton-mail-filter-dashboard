@@ -1,5 +1,13 @@
+import { buildLabelPrompt, validateLabelProposal } from './labels.js';
 import { buildProposalPrompt, validateProposal, type RuleProposal, type SelectionSummary } from './propose.js';
-import type { GroupSummary, LlmProvider, SieveExplanation, Suggestion } from './provider.js';
+import type {
+    GroupSummary,
+    LabelProposal,
+    LabelRequest,
+    LlmProvider,
+    SieveExplanation,
+    Suggestion,
+} from './provider.js';
 
 /**
  * Ollama, local or on a server.
@@ -120,6 +128,13 @@ export function createOllamaProvider(config: OllamaConfig): LlmProvider {
         async proposeRule(selection: SelectionSummary): Promise<RuleProposal> {
             const raw = await generate(buildProposalPrompt(selection), 'json');
             return validateProposal(JSON.parse(raw));
+        },
+
+        async proposeLabels(input: LabelRequest): Promise<LabelProposal> {
+            const raw = await generate(buildLabelPrompt(input), 'json');
+            // Validated against the account's own labels rather than taken at its word. The prompt
+            // asks the model to choose from what exists; this is what makes it true.
+            return validateLabelProposal(JSON.parse(raw), input);
         },
 
         async explainSieve(sieve: string): Promise<SieveExplanation> {

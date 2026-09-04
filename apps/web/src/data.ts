@@ -40,6 +40,18 @@ import {
 export interface MailboxInput {
     messages: MailboxMessage[];
     folders: MailboxFolder[];
+    /**
+     * The account's own labels, which are not folders.
+     *
+     * Proton stores both as the same object with a different `Type`, and the difference is what a
+     * rule does with them: a folder *moves* the mail, a label *marks* it and leaves it in the
+     * inbox. They were mirrored, they reached the snapshot, and the dashboard threw them away.
+     *
+     * That was not only a missing feature. `categoryIdsOf` decides what counts as one of Proton's
+     * categories by elimination — a short numeric id that is not a system location and not a known
+     * folder — so every real label was being reported to the user as an unknown category.
+     */
+    labels?: MailboxFolder[];
     rules: MailboxRule[];
     /**
      * What Proton's own sorting has been observed doing, across syncs.
@@ -68,6 +80,8 @@ export interface Outcome {
     decidedBy: { id: string; name: string } | undefined;
     /** Every rule that matches, in execution order. Several can. */
     matching: OrderedRule[];
+    /** Labels the matching rules put on it. A label marks the mail; it does not move it. */
+    labels: string[];
 }
 
 /**
@@ -105,6 +119,10 @@ export interface MailboxData extends MailboxInput {
     autoRules: AutoRule[];
     /** The verdict for one sender, when there is one. */
     autoRuleFor: (address: string) => AutoRule | undefined;
+    /** The account's own labels — a rule target that marks rather than moves. */
+    labels: MailboxFolder[];
+    /** Whether a rule's destination name is a label rather than a folder. */
+    isLabelName: (name: string) => boolean;
     /**
      * Which of Proton's categories one message carries today, if any.
      *
@@ -187,6 +205,16 @@ function proposeFolder(group: ScoredGroup): string {
  * the demo and the real account interchangeable rather than merely similar.
  */
 export function buildMailbox(input: MailboxInput): MailboxData {
+    const labels = input.labels ?? [];
+    /*
+     * Label names, for the one question the matcher cannot answer on its own.
+     *
+     * Proton's filter model has no label action: a rule's destination is a name in `FileInto`, and
+     * whether that name resolves to a folder or a label is decided at Proton. So predicting what a
+     * rule *does* — moves the mail out of the inbox, or marks it and leaves it — needs this set,
+     * and without it the preview would claim mail leaves the inbox when it does not.
+     */
+    const labelNames = new Set(labels.map((label) => label.Name));
     const { messages, folders, rules } = input;
 
     const inboxMessages = messages.filter((message) => message.LabelIDs.includes(INBOX));
@@ -216,19 +244,36 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         let destination: string | undefined;
         let decidedBy: { id: string; name: string } | undefined;
 
+        const applied: string[] = [];
         for (const entry of ordered) {
             if (!matchesRule(entry.rule, message)) {
                 continue;
             }
             matching.push(entry);
-            const target = entry.rule.Actions.FileInto.at(-1);
-            if (target !== undefined && target !== '') {
+            for (const target of entry.rule.Actions.FileInto) {
+                if (target === '') {
+                    continue;
+                }
+                /*
+                 * A label is not a destination.
+                 *
+                 * Proton's filter model has no label action — the name goes in `FileInto` either
+                 * way, and Proton decides what it means by which object carries it. A folder moves
+                 * the mail out of the inbox; a label marks it and leaves it. Counting a label as a
+                 * destination would make every preview claim mail leaves the inbox when it does not.
+                 */
+                if (labelNames.has(target)) {
+                    if (!applied.includes(target)) {
+                        applied.push(target);
+                    }
+                    continue;
+                }
                 destination = target;
                 decidedBy = { id: entry.id, name: entry.name };
             }
         }
 
-        outcomes.set(message.ID, { destination, decidedBy, matching });
+        outcomes.set(message.ID, { destination, decidedBy, matching, labels: applied });
     }
 
     const destinationOf = (message: MailboxMessage): string | undefined =>
@@ -274,7 +319,9 @@ export function buildMailbox(input: MailboxInput): MailboxData {
      * An unrecognised id is still reported, marked unknown. Dropping it would hide exactly the
      * evidence needed to correct the map.
      */
-    const knownFolderIds = new Set(folders.map((folder) => folder.ID));
+    // Folders *and* labels: an id that belongs to either is not a category. Leaving the labels out
+    // is how every real label came to be reported as an unknown Proton category.
+    const knownFolderIds = new Set([...folders, ...labels].map((entry) => entry.ID));
     const byCategory = new Map<string, MailboxMessage[]>();
 
     for (const message of messages) {
@@ -393,6 +440,8 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         inboxMessages,
         autoRules,
         autoRuleFor: (address) => autoRuleBySender.get(address),
+        labels,
+        isLabelName: (name) => labelNames.has(name),
         categoryOfMessage: (messageId) => categoryOf.get(messageId)?.[0],
 
         /*

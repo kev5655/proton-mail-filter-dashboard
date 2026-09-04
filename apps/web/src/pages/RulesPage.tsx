@@ -93,12 +93,16 @@ export function RulesPage(): React.JSX.Element {
                       id: `create-${rule.id}`,
                       kind: 'create-rule',
                       after: rule,
+                      // Travels with the change because the compiled rule cannot carry it: Proton
+                      // puts the name in `FileInto` whether it is a folder or a label.
+                      targetKind: activeDraft.targetKind,
                   }
                 : {
                       id: `update-${rule.id}`,
                       kind: 'update-rule',
                       before: selected,
                       after: rule,
+                      targetKind: activeDraft.targetKind,
                   }
         );
     };

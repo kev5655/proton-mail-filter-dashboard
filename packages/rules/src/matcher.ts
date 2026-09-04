@@ -225,23 +225,63 @@ export interface MatchOutcome {
     matching: OrderedRule[];
     /** The folder the message ends up in, or undefined when no matching rule moves it. */
     destination: string | undefined;
+    /**
+     * Labels the matching rules put on it, in the order the rules run.
+     *
+     * Separate from `destination` because they are a different kind of outcome: a label marks the
+     * message and leaves it where it is, so it can never answer "where does this end up".
+     */
+    labels: string[];
 }
 
-export function resolveOutcome(rules: OrderedRule[], message: MatchableMessage): MatchOutcome {
+/**
+ * Which rule wins, and what else happens on the way.
+ *
+ * Proton's filter model has no label action — a rule's destination is a name in `FileInto`, and
+ * whether that name resolves to a *folder* or a *label* is decided at Proton, by which object
+ * happens to carry it. The difference is what the mail does: a folder moves it out of the inbox, a
+ * label marks it and leaves it there.
+ *
+ * So `labelNames` is not a nicety. Without it a rule that adds a label reads here as a rule that
+ * moves the message, and every preview built on `destination` says mail leaves the inbox when it
+ * does not — a wrong answer to the one question this function exists to answer.
+ *
+ * The set is optional and empty by default, which is the old behaviour: with no labels known,
+ * everything in `FileInto` is treated as a folder. That is the right fallback — a name we cannot
+ * place is much more often a folder, and being wrong about a rare label is cheaper than refusing to
+ * predict anything.
+ */
+export function resolveOutcome(
+    rules: OrderedRule[],
+    message: MatchableMessage,
+    labelNames: ReadonlySet<string> = new Set()
+): MatchOutcome {
     const matching = rules
         .filter((entry) => entry.enabled)
         .sort((a, b) => a.priority - b.priority)
         .filter((entry) => matchesRule(entry.rule, message));
 
     let destination: string | undefined;
+    const labels: string[] = [];
     for (const entry of matching) {
-        const target = entry.rule.Actions.FileInto.at(-1);
-        if (target !== undefined && target !== '') {
+        for (const target of entry.rule.Actions.FileInto) {
+            if (target === '') {
+                continue;
+            }
+            if (labelNames.has(target)) {
+                if (!labels.includes(target)) {
+                    labels.push(target);
+                }
+                continue;
+            }
+            // The last folder wins: Proton runs filters in priority order and a later `fileinto`
+            // moves the message again. Labels accumulate instead, because marking twice is not a
+            // contradiction the way being in two folders would be.
             destination = target;
         }
     }
 
-    return { matching, destination };
+    return { matching, destination, labels };
 }
 
 /**

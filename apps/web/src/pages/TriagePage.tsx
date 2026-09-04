@@ -8,6 +8,7 @@ import { ScoreBar } from '../components/ScoreBar.js';
 import { log } from '../log.js';
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
 import { useSettings } from '../llm.js';
+import { ModelStatus } from '../components/ModelStatus.js';
 import { protonMailUrl } from '../proton-link.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
@@ -92,6 +93,16 @@ export function TriagePage(): React.JSX.Element {
                     sich keine Regel.
                 </p>
             </header>
+
+            {/*
+             * Where a model would help, said on the screen where it would help.
+             *
+             * The folder names below are derived — from the group's own senders and subjects — and
+             * they stay that way with or without a model. What a model adds here is a better *name*,
+             * which is the one thing it is allowed to decide: a wrong name costs a rename, and that
+             * is a different order of mistake from a wrongly trusted filter.
+             */}
+            <ModelStatus what="werden die Ordnernamen unten nur abgeleitet und nicht formuliert" />
 
             {open.length === 0 && <p className="muted">Alle Vorschläge bearbeitet.</p>}
 

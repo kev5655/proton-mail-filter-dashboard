@@ -4,6 +4,7 @@ import {
     DEMO_CATEGORY_CHANGES,
     DEMO_CATEGORY_OBSERVATIONS,
     DEMO_FOLDERS,
+    DEMO_LABELS,
     DEMO_RULES,
     generateMailbox,
 } from '@pms/demo';
@@ -89,6 +90,7 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
             buildMailbox({
                 messages: generateMailbox(),
                 folders: DEMO_FOLDERS,
+                labels: DEMO_LABELS,
                 rules: DEMO_RULES,
                 categoryObservations: DEMO_CATEGORY_OBSERVATIONS,
                 categoryChanges: DEMO_CATEGORY_CHANGES,
@@ -129,6 +131,10 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                     data: buildMailbox({
                         messages: snapshot.messages,
                         folders: snapshot.folders,
+                        // Not discarded any more. Without them every real label was reported to
+                        // the user as an unknown Proton category, and no rule could mark mail
+                        // rather than move it.
+                        labels: snapshot.labels ?? [],
                         rules: snapshot.rules,
                         // Absent on a copy made before the history existed. That is a real state
                         // with a real answer — "not enough looks yet" — rather than a gap.

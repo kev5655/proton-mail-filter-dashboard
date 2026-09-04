@@ -298,6 +298,15 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
         for (const folder of account.folders) {
             folderIds.set(folder.Name, folder.ID);
         }
+        // Labels as well: a rule that marks rather than moves has a destination that has to be
+        // verifiable, and it is a label id in the message's `LabelIDs` exactly like a folder is.
+        // Folders first, so a shared name resolves to the folder — which is what a plan that says
+        // „verschieben" meant.
+        for (const label of account.labels) {
+            if (!folderIds.has(label.Name)) {
+                folderIds.set(label.Name, label.ID);
+            }
+        }
         // Proton's categories, so a category move can be verified by looking, exactly like a folder
         // move: the plan says „Transaktionen", Proton answers with label 26, and this is where the
         // two are allowed to meet. Without it every category move would report itself unconfirmed.
@@ -500,7 +509,10 @@ async function perform(
     // folder in a rule *is* asking for it.
     const target = change.after?.rule.Actions.FileInto.at(-1);
     if (target !== undefined && target !== '') {
-        const folder = await ensureFolder(http, account, target);
+        // Folder or label, as the change says. Proton's filter model cannot tell them apart — the
+        // name goes into `FileInto` either way — so the intention has to travel with the change or
+        // a rule meant to mark would create a folder and move the mail out of the inbox.
+        const folder = await ensureFolder(http, account, target, undefined, change.targetKind ?? 'folder');
         if (folder.created) {
             performed.folders.push({ name: target, id: folder.id });
         }

@@ -41,6 +41,16 @@ export interface RuleDraft {
     conditions: DraftCondition[];
     /** Empty means the rule only marks; Proton allows that and so do we. */
     folder: string;
+    /**
+     * Whether the target above is a folder or a label.
+     *
+     * It compiles to the same thing — Proton's filter model has no label action, the name goes into
+     * `FileInto` either way and Proton resolves it against whichever object carries it. What this
+     * decides is two other things: what the preview predicts (a folder moves the mail out of the
+     * inbox, a label marks it and leaves it), and what gets *created* when the name is new. Without
+     * it, somebody typing a new label name silently got a folder.
+     */
+    targetKind: 'folder' | 'label';
     markRead: boolean;
     markStarred: boolean;
     enabled: boolean;
@@ -63,6 +73,8 @@ export function newDraft(folder = ''): RuleDraft {
         operator: FilterStatement.ALL,
         conditions: [emptyCondition()],
         folder,
+        // Moving is the ordinary case and the one somebody arriving at an empty rule means.
+        targetKind: 'folder',
         markRead: false,
         markStarred: false,
         enabled: true,
@@ -82,6 +94,9 @@ export function fromRule(rule: MailboxRule): RuleDraft {
             pending: '',
         })),
         folder: rule.rule.Actions.FileInto.at(-1) ?? '',
+        // Read back from the account rather than stored on the rule, because Proton does not store
+        // it on the rule either.
+        targetKind: 'folder',
         markRead: rule.rule.Actions.Mark.Read,
         markStarred: rule.rule.Actions.Mark.Starred,
         enabled: rule.enabled,
@@ -131,6 +146,9 @@ function signature(draft: RuleDraft): string {
     return JSON.stringify({
         name: draft.name,
         folder: draft.folder,
+        // Part of the signature because it changes what a save *creates* when the name is new —
+        // a folder or a label — even though it compiles to the same rule either way.
+        targetKind: draft.targetKind,
         enabled: draft.enabled,
         markRead: draft.markRead,
         markStarred: draft.markStarred,
@@ -155,7 +173,11 @@ export interface DraftProblem {
  * then it is the user's decision, because a rule that catches everything is occasionally what
  * someone actually wants.
  */
-export function validateDraft(draft: RuleDraft, folders: readonly MailboxFolder[]): DraftProblem[] {
+export function validateDraft(
+    draft: RuleDraft,
+    folders: readonly MailboxFolder[],
+    labels: readonly MailboxFolder[] = []
+): DraftProblem[] {
     const problems: DraftProblem[] = [];
 
     if (draft.name.trim() === '') {
@@ -184,13 +206,38 @@ export function validateDraft(draft: RuleDraft, folders: readonly MailboxFolder[
     if (draft.folder === '') {
         problems.push({
             level: 'warning',
-            message: 'Ohne Zielordner verschiebt die Regel nichts — sie markiert höchstens.',
+            message: 'Ohne Ziel verschiebt und markiert die Regel nichts.',
         });
-    } else if (!folders.some((folder) => folder.Name === draft.folder || folder.Name.endsWith(`/${draft.folder}`))) {
-        problems.push({
-            level: 'warning',
-            message: `Den Ordner „${draft.folder}" gibt es noch nicht. Er wird zusammen mit der Regel angelegt.`,
-        });
+    } else {
+        const known = draft.targetKind === 'label' ? labels : folders;
+        const exists = known.some(
+            (entry) => entry.Name === draft.folder || entry.Name.endsWith(`/${draft.folder}`)
+        );
+        // The opposite kind having the name is worth its own sentence: Proton allows a folder and a
+        // label to be called the same thing, and then the rule's behaviour depends on which one it
+        // resolves against — which is not something to discover after the mail has moved.
+        const other = (draft.targetKind === 'label' ? folders : labels).some(
+            (entry) => entry.Name === draft.folder
+        );
+
+        if (!exists) {
+            problems.push({
+                level: 'warning',
+                message:
+                    draft.targetKind === 'label'
+                        ? `Das Label „${draft.folder}" gibt es noch nicht. Es wird zusammen mit der Regel angelegt.`
+                        : `Den Ordner „${draft.folder}" gibt es noch nicht. Er wird zusammen mit der Regel angelegt.`,
+            });
+        }
+        if (other) {
+            problems.push({
+                level: 'warning',
+                message:
+                    draft.targetKind === 'label'
+                        ? `Es gibt auch einen Ordner „${draft.folder}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`
+                        : `Es gibt auch ein Label „${draft.folder}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`,
+            });
+        }
     }
 
     // Proton's own escaping defect, surfaced before the rule is written rather than after mail has

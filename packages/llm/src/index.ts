@@ -1,3 +1,4 @@
+export { buildLabelPrompt, validateLabelProposal } from './labels.js';
 export { createDemoProvider } from './demo.js';
 export { createOllamaProvider, type OllamaConfig } from './ollama.js';
 export {
@@ -14,6 +15,8 @@ export {
 export {
     NO_PROVIDER,
     type GroupSummary,
+    type LabelProposal,
+    type LabelRequest,
     type LlmProvider,
     type SieveExplanation,
     type Suggestion,

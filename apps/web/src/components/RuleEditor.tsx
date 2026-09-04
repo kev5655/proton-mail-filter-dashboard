@@ -5,6 +5,7 @@ import { FilterStatement } from '@proton/sieve/filterModel';
 
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
 import { useSettings } from '../llm.js';
+import { LabelPicker } from './LabelPicker.js';
 import { protonMailUrl } from '../proton-link.js';
 import {
     emptyCondition,
@@ -58,7 +59,7 @@ export function RuleEditor({
     onCancel: () => void;
     onOpenMail: (message: MailboxMessage) => void;
 }): React.JSX.Element {
-    const { messages, folders, caughtBy, categoryCoverage } = useMailbox();
+    const { messages, folders, labels, caughtBy, categoryCoverage } = useMailbox();
     const settings = useSettings();
     const { source } = useMailboxStatus();
     const [showAllOthers, setShowAllOthers] = useState(false);
@@ -83,7 +84,7 @@ export function RuleEditor({
         [index, original, savedRule]
     );
 
-    const problems = validateDraft(draft, folders);
+    const problems = validateDraft(draft, folders, labels);
     const blocking = problems.filter((problem) => problem.level === 'error');
     const general = problems.filter((problem) => problem.uid === undefined);
 
@@ -313,7 +314,40 @@ export function RuleEditor({
                 <h3>Aktionen</h3>
                 <div className="row">
                     <label className="stack">
-                        <span className="faint">Verschieben nach</span>
+                        {/*
+                 * Move or mark, and it is a real difference rather than a wording one.
+                 *
+                 * Proton's filter model has no label action — the name goes into `FileInto` either
+                 * way and Proton resolves it against whichever object carries it. What this choice
+                 * decides is what the preview predicts, and what gets *created* when the name is
+                 * new: without it, typing a new label name silently produced a folder.
+                 */}
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                    <button
+                        type="button"
+                        className={draft.targetKind === 'folder' ? 'button' : 'button button-quiet'}
+                        aria-pressed={draft.targetKind === 'folder'}
+                        onClick={() => onChange({ ...draft, targetKind: 'folder' })}
+                    >
+                        In einen Ordner verschieben
+                    </button>
+                    <button
+                        type="button"
+                        className={draft.targetKind === 'label' ? 'button' : 'button button-quiet'}
+                        aria-pressed={draft.targetKind === 'label'}
+                        onClick={() => onChange({ ...draft, targetKind: 'label' })}
+                    >
+                        Mit einem Label markieren
+                    </button>
+                </div>
+
+                <p className="faint" style={{ marginBottom: 8 }}>
+                    {draft.targetKind === 'folder'
+                        ? 'Die Mail verlässt den Posteingang und liegt danach im Ordner.'
+                        : 'Die Mail bleibt im Posteingang und trägt zusätzlich das Label.'}
+                </p>
+
+                <span className="faint">{draft.targetKind === 'folder' ? 'Verschieben nach' : 'Markieren mit'}</span>
                         <input
                             type="text"
                             className="text-input"
@@ -324,7 +358,19 @@ export function RuleEditor({
                             onChange={(event) => onChange({ ...draft, folder: event.target.value })}
                             aria-label="Zielordner"
                         />
-                        <datalist id="folder-names">
+                        {draft.targetKind === 'label' && (
+                    <div style={{ marginTop: 12 }}>
+                        <LabelPicker
+                            labels={labels}
+                            value={draft.folder}
+                            subjects={matched.map((message) => message.Subject)}
+                            senders={matched.map((message) => message.Sender.Address)}
+                            onPick={(name) => onChange({ ...draft, folder: name })}
+                        />
+                    </div>
+                )}
+
+                <datalist id="folder-names">
                             {folders.map((folder) => (
                                 <option key={folder.ID} value={folder.Name} />
                             ))}

@@ -1,7 +1,8 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { ProtonHttp } from '@pms/proton-api';
-import { getFilters, getFolders } from '@pms/proton-api';
+import { getFilters, getFolders, getLabels } from '@pms/proton-api';
+import { LABEL_TYPE } from '@pms/proton-api/schemas';
 import type { ProtonFilter, ProtonLabel } from '@pms/proton-api/schemas';
 import {
     applyFiltersToExisting,
@@ -41,12 +42,28 @@ const log = getLogger('apply');
 export interface Account {
     filters: ProtonFilter[];
     folders: ProtonLabel[];
+    /**
+     * The account's labels, kept apart from the folders on purpose.
+     *
+     * Proton stores both as the same object with a different `Type`, and merging them here would be
+     * the tidier-looking mistake: the account fingerprint is computed from the folders alone, so a
+     * merged list would make every change look stale — and a lookup by name could hand a delete or
+     * a rename the label that happens to share a folder's name.
+     *
+     * They are here at all so that `ensureFolder` can find an existing label instead of creating a
+     * second one beside it every time a rule marks with it.
+     */
+    labels: ProtonLabel[];
 }
 
 /** Everything the decisions in `apply.ts` are made against, read fresh. */
 export async function readAccount(http: ProtonHttp): Promise<Account> {
-    const [filters, folders] = await Promise.all([getFilters(http), getFolders(http)]);
-    return { filters, folders };
+    const [filters, folders, labels] = await Promise.all([
+        getFilters(http),
+        getFolders(http),
+        getLabels(http),
+    ]);
+    return { filters, folders, labels };
 }
 
 export async function backup(http: ProtonHttp, directory: string, now: number): Promise<BackupResult> {
@@ -62,13 +79,28 @@ export async function backup(http: ProtonHttp, directory: string, now: number): 
     }
 }
 
+/**
+ * The folder or label a rule files into, created if it is not there yet.
+ *
+ * `kind` decides which, and the lookup follows it: Proton allows a folder and a label to have the
+ * same name, so searching one list for the other's name would find nothing and create a duplicate —
+ * or find a match of the wrong sort and file mail into it.
+ *
+ * The type is asked for explicitly because getting it wrong is invisible until the mail moves.
+ * A rule marked "label" that quietly made a folder would take mail out of the inbox that the user
+ * meant to leave there.
+ */
 export async function ensureFolder(
     http: ProtonHttp,
     account: Account,
     name: string,
-    parentId?: string | undefined
+    parentId?: string | undefined,
+    kind: 'folder' | 'label' = 'folder'
 ): Promise<{ created: boolean; id: string }> {
-    const existing = account.folders.find((folder) => folder.Name === name);
+    const wanted = kind === 'label' ? LABEL_TYPE.LABEL : LABEL_TYPE.FOLDER;
+    const existing = (kind === 'label' ? account.labels : account.folders).find(
+        (entry) => entry.Name === name
+    );
     if (existing !== undefined) {
         return { created: false, id: existing.ID };
     }
@@ -76,18 +108,29 @@ export async function ensureFolder(
     try {
         // Proton requires a colour and offers no "unset". Its own palette starts here, and a
         // folder created by this tool should look like one created by hand.
-        const folder = await createFolder(http, {
-            Name: name,
-            Color: '#8080FF',
-            ...(parentId === undefined || parentId === '' ? {} : { ParentID: parentId }),
-        });
-        log.info({ name, id: folder.ID }, 'folder created');
+        const folder = await createFolder(
+            http,
+            {
+                Name: name,
+                Color: '#8080FF',
+                // A label has no parent. Sending one would be describing a hierarchy Proton does
+                // not have for them.
+                ...(kind === 'label' || parentId === undefined || parentId === ''
+                    ? {}
+                    : { ParentID: parentId }),
+            },
+            wanted
+        );
+        log.info({ name, id: folder.ID, kind }, kind === 'label' ? 'label created' : 'folder created');
         return { created: true, id: folder.ID };
     } catch (cause) {
         throw new AppError('WRITE_FOLDER_FAILED', {
-            message: `Der Ordner „${name}" liess sich nicht anlegen.`,
-            hint: 'Es wurde noch kein Filter geschrieben — der Ordner kommt zuerst, genau dafür.',
-            context: { name },
+            message:
+                kind === 'label'
+                    ? `Das Label „${name}" liess sich nicht anlegen.`
+                    : `Der Ordner „${name}" liess sich nicht anlegen.`,
+            hint: 'Es wurde noch kein Filter geschrieben — das Ziel kommt zuerst, genau dafür.',
+            context: { name, kind },
             cause,
         });
     }

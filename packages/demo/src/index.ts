@@ -3,6 +3,7 @@ export {
     generateMailbox,
     ARCHIVE,
     DEMO_FOLDERS,
+    DEMO_LABELS,
     INBOX,
     type DemoFilter,
     type DemoFolder,

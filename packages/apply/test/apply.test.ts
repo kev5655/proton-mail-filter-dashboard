@@ -42,6 +42,7 @@ const ACCOUNT_FILTERS = [
 ];
 
 const ACCOUNT_FOLDERS = [{ ID: 'l-1', Name: 'Archiv', Path: 'Archiv', Type: 3, Color: '#fff' }];
+const ACCOUNT_LABELS = [{ ID: 'lb-1', Name: 'Steuerrelevant', Path: 'Steuerrelevant', Type: 1, Color: '#fff' }];
 
 interface Call {
     method: string;
@@ -70,7 +71,11 @@ function fakeProton(over: { failFilterWrite?: boolean; movedIds?: string[] } = {
             return json({ Code: 1000, Filters: ACCOUNT_FILTERS });
         }
         if (path.startsWith('core/v4/labels') && method === 'GET') {
-            return json({ Code: 1000, Labels: ACCOUNT_FOLDERS });
+            // Proton answers the same endpoint for both, distinguished by `Type`. Folders are 3,
+            // labels are 1 — and a rule filing into „Wichtig" means a different thing depending on
+            // which of them carries the name.
+            const type = url.searchParams.get('Type');
+            return json({ Code: 1000, Labels: type === '1' ? ACCOUNT_LABELS : ACCOUNT_FOLDERS });
         }
         if (path === 'mail/v4/messages' && method === 'GET') {
             const moved = new Set(over.movedIds ?? []);
@@ -957,5 +962,90 @@ describe('rewinding to an earlier point', () => {
                 }
             )
         ).rejects.toMatchObject({ code: 'APPLY_MALFORMED' });
+    });
+});
+
+
+/**
+ * A rule that marks rather than moves.
+ *
+ * Proton's filter model has no label action: the name goes into `FileInto` either way and Proton
+ * decides what it means by which object carries it. So the intention has to travel with the change,
+ * and the thing that must not happen is a rule meant to *mark* quietly creating a folder — which
+ * takes the mail out of the inbox, the opposite of what was asked, and is invisible until it does.
+ */
+describe('creating the target a rule files into', () => {
+    function ruleFilingInto(target: string) {
+        return {
+            ...rule(),
+            Actions: { FileInto: [target], Mark: { Read: false, Starred: false } },
+        };
+    }
+
+    function requestFor(target: string, targetKind: 'folder' | 'label'): ChangeRequest {
+        const after = { id: 'r-neu', name: 'Neu', priority: 2, enabled: true, rule: ruleFilingInto(target) };
+        return {
+            ...request({ applyToExisting: false }),
+            change: { id: 'c-1', kind: 'create-rule', after, targetKind },
+        };
+    }
+
+    it('creates a label as a label, not as a folder', async () => {
+        const proton = fakeProton();
+
+        await applyChange(requestFor('Zu erledigen', 'label'), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        const created = proton.writes().find((call) => call.path === 'core/v4/labels');
+        expect(created?.body).toMatchObject({ Name: 'Zu erledigen', Type: 1 });
+    });
+
+    it('creates a folder as a folder', async () => {
+        const proton = fakeProton();
+
+        await applyChange(requestFor('Ablage', 'folder'), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(proton.writes().find((call) => call.path === 'core/v4/labels')?.body).toMatchObject({
+            Name: 'Ablage',
+            Type: 3,
+        });
+    });
+
+    it('reuses a label that is already there instead of making a second one', async () => {
+        // The lookup follows the kind. Searching the folders for a label's name would find nothing
+        // and create a duplicate beside the label that was already there.
+        const proton = fakeProton();
+
+        await applyChange(requestFor('Steuerrelevant', 'label'), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(proton.writes().filter((call) => call.path === 'core/v4/labels')).toEqual([]);
+    });
+
+    it('does not mistake a folder of the same name for the label', async () => {
+        // Proton allows both to be called „Archiv". A rule that marks with a label of that name
+        // must not silently reuse the folder — the mail would leave the inbox.
+        const proton = fakeProton();
+
+        await applyChange(requestFor('Archiv', 'label'), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(proton.writes().find((call) => call.path === 'core/v4/labels')?.body).toMatchObject({
+            Name: 'Archiv',
+            Type: 1,
+        });
     });
 });
