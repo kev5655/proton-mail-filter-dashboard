@@ -176,6 +176,24 @@ export class ProtonHttp {
     }
 
     async #send(options: RequestOptions): Promise<unknown> {
+        /*
+         * No session, no request — unless the caller said the request is anonymous.
+         *
+         * Clearing the session used to be quieter than it looked: the request still went out, just
+         * without the auth headers, and Proton answered 401. That is a pointless request to a
+         * service this project is deliberately polite to, and it made "signed out" a weaker
+         * statement than it reads as — the client was still talking, just badly.
+         *
+         * Only the first call of the login handshake is genuinely anonymous, and it says so.
+         */
+        if (options.anonymous !== true && this.#session === undefined) {
+            throw new AppError('SESSION_DISCONNECTED', {
+                message: 'Es besteht keine Sitzung zu Proton.',
+                hint: 'Im Dashboard neu verbinden. Es wurde nichts gesendet.',
+                context: { endpoint: `${options.method} ${options.path}` },
+            });
+        }
+
         const url = new URL(`${this.#baseUrl}/${options.path}`);
         for (const [key, value] of Object.entries(options.query ?? {})) {
             if (value !== undefined) {

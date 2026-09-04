@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 
 import { AppError } from '@pms/core/errors';
 import { writePrivateFile } from '@pms/core/private-file';
@@ -125,4 +125,25 @@ export function passphraseMatches(a: string, b: string): boolean {
     const left = Buffer.from(a.normalize('NFKC'), 'utf8');
     const right = Buffer.from(b.normalize('NFKC'), 'utf8');
     return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/**
+ * Forget the stored session.
+ *
+ * A missing file is the goal, not an error — signing out twice is a reasonable thing to do, and so
+ * is signing out of a tool that was never signed in.
+ *
+ * The `.bak` beside it goes too. Nothing in this project writes one, but one exists on at least one
+ * machine, and a sign-out that leaves a readable copy of the tokens next to the file it deleted
+ * would be the exact failure this function is for.
+ *
+ * Deleting this file is only half a sign-out, and the smaller half: the tokens the caller already
+ * holds in memory keep working until somebody clears them. The order that makes it real lives in
+ * `apps/spike/src/session.ts`.
+ */
+export async function deleteSession(path: string): Promise<void> {
+    for (const candidate of [path, `${path}.bak`]) {
+        await rm(candidate, { force: true });
+    }
+    log.info('stored session removed');
 }

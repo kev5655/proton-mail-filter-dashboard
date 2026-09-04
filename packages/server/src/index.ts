@@ -1,6 +1,11 @@
 export { buildSnapshot } from './snapshot.js';
 export { route, READ_ONLY_MESSAGE, STREAM_PATHS, type Channels, type Reply } from './handler.js';
-export { LoginChannel, type LoginRunner, type LoginState } from './login-channel.js';
+export {
+    SessionChannel,
+    type DisconnectRunner,
+    type LoginRunner,
+    type SessionState,
+} from './session-channel.js';
 export { ApplyChannel, type Described, type Offered, type OfferRunner, type OfferState } from './apply-channel.js';
 export {
     isUsableInterval,

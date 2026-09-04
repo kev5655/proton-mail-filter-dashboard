@@ -6,7 +6,7 @@ import type { Db } from '@pms/store';
 
 import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
-import type { LoginChannel } from './login-channel.js';
+import type { SessionChannel } from './session-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
 const log = getLogger('server');
@@ -29,7 +29,7 @@ export interface ServeOptions {
     /** Absent when nothing may be written — then a change can be offered but never accepted. */
     apply?: ApplyChannel | undefined;
     /** Absent when this process cannot open a browser — then the dashboard says so and offers none. */
-    login?: LoginChannel | undefined;
+    login?: SessionChannel | undefined;
 }
 
 export interface RunningServer {
@@ -151,7 +151,14 @@ function actualPort(server: Server, requested: number): number {
 function streamState(
     request: IncomingMessage,
     response: ServerResponse,
-    channel: { available: boolean; state: unknown; subscribe: (listener: (state: unknown) => void) => () => void } | undefined
+    channel:
+        | {
+              available: boolean;
+              signedIn?: boolean;
+              state: unknown;
+              subscribe: (listener: (state: unknown) => void) => () => void;
+          }
+        | undefined
 ): void {
     response.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -171,9 +178,17 @@ function streamState(
         return;
     }
 
-    send({ ...(channel.state as object), available: true });
+    // `signedIn` rides on every event so the interface never has to guess which button to show
+    // from the state name — „done" and „idle-with-a-stored-session" look the same otherwise.
+    const shape = (state: unknown): object => ({
+        ...(state as object),
+        available: true,
+        ...(channel.signedIn === undefined ? {} : { signedIn: channel.signedIn }),
+    });
+
+    send(shape(channel.state));
     const unsubscribe = channel.subscribe((state) => {
-        send({ ...(state as object), available: true });
+        send(shape(state));
     });
 
     // Proxies and browsers drop a stream that says nothing for long enough, and a sync's quietest

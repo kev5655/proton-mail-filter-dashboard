@@ -125,6 +125,33 @@ export async function login(
 }
 
 /**
+ * End the session at Proton, so the token stops being a key.
+ *
+ * The inverse of `openUnauthSession` below, and it lives here for the same reason that one does:
+ * `write-isolation.test.ts` names `src/auth.ts` as the one file outside `src/write/` that may make
+ * a non-GET request to Proton, because authenticating cannot be done any other way. Ending an
+ * authentication belongs in the same place. Putting it under `src/write/` would also mean
+ * `serve-command.ts` importing the write barrel, which a different assertion forbids — only
+ * `steps.ts` may.
+ *
+ * **The path is the one unverified thing in this file.** `DELETE auth/v4/sessions` is the plausible
+ * inverse of the `POST` two functions down, but nothing in this repository has ever called it and
+ * nothing here documents it. That is normally the point at which this project stops guessing — and
+ * the exception is deliberate and narrow: a revoke that fails **takes nothing away that the user
+ * still has, and grants nothing.** The worst case is a token that stays alive, which is exactly the
+ * state we were in before asking. So it is attempted, its failure is reported rather than
+ * swallowed, and the caller signs out locally either way.
+ *
+ * It has to run while the session is still set. For a browser-derived session the access token can
+ * be empty and the cookies are the authority (`http.ts`), so this must go through the same client
+ * that has them.
+ */
+export async function revokeSession(http: ProtonHttp): Promise<void> {
+    await http.request({ method: 'DELETE', path: 'auth/v4/sessions' }, z.object({ Code: z.number() }));
+    log.info('session revoked at Proton');
+}
+
+/**
  * Open the unauthenticated session that the SRP handshake runs inside.
  *
  * This is the only call of the whole login that is genuinely anonymous. Everything after it carries

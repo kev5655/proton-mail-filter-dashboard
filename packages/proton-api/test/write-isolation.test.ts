@@ -321,7 +321,7 @@ describe('signing in from the dashboard', () => {
     it('keeps the server unable to perform one', async () => {
         // Same shape as sync and apply: the routing file knows a login was asked for and nothing
         // about how one is done. The runner comes from the process that holds the session.
-        const channel = await readFile(join(REPO, 'packages', 'server', 'src', 'login-channel.ts'), 'utf8');
+        const channel = await readFile(join(REPO, 'packages', 'server', 'src', 'session-channel.ts'), 'utf8');
 
         expect(channel).not.toMatch(/@pms\/browser-auth|playwright/);
     });

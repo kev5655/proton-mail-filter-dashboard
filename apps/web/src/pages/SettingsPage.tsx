@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { ProtonConnection } from '../components/ProtonConnection.js';
 import { useModel } from '../llm.js';
 import { useMailboxStatus } from '../mailbox.js';
 import { protonMailUrl } from '../proton-link.js';
@@ -250,6 +251,8 @@ export function SettingsPage(): React.JSX.Element {
                     <code>pnpm serve --auto-sync {form.sync.autoSyncMinutes}</code>.
                 </p>
             </div>
+
+            <ProtonConnection />
 
             <div className="card">
                 <h2>Anmelden</h2>

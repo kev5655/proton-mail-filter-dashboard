@@ -3,7 +3,7 @@ import type { Db } from '@pms/store';
 
 import { buildSnapshot } from './snapshot.js';
 import type { ApplyChannel } from './apply-channel.js';
-import type { LoginChannel } from './login-channel.js';
+import type { SessionChannel } from './session-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
 const log = getLogger('server');
@@ -42,7 +42,7 @@ export const STREAM_PATHS = new Set(['/api/sync/stream', '/api/login/stream']);
 export interface Channels {
     sync?: SyncChannel | undefined;
     apply?: ApplyChannel | undefined;
-    login?: LoginChannel | undefined;
+    login?: SessionChannel | undefined;
 }
 
 export function route(
@@ -136,6 +136,34 @@ export function route(
             : { status: 409, body: { error: refused, code: 'SERVER_LOGIN_BUSY' } };
     }
 
+    /*
+     * The fourth non-GET route, and the only one that only ever takes away.
+     *
+     * Every other route on this list is guarded because it grants or changes something. This one
+     * ends the connection, removes the stored session and deletes the local copy of the mailbox —
+     * and a tool that makes connecting easy and disconnecting hard has the wrong shape. That is the
+     * whole argument for it being here rather than being a command somebody has to find.
+     *
+     * `everywhere` additionally asks Proton to revoke the token. It is a separate decision because
+     * the answers differ: forgetting locally always works, revoking is one request that can fail.
+     */
+    if (method === 'POST' && path === '/api/logout') {
+        if (login === undefined) {
+            return {
+                status: 503,
+                body: {
+                    error: 'Dieser Server verwaltet keine Verbindung.',
+                    code: 'SERVER_LOGIN_UNAVAILABLE',
+                },
+            };
+        }
+        const everywhere = (body as { everywhere?: unknown } | undefined)?.everywhere === true;
+        const refused = login.disconnect(everywhere);
+        return refused === undefined
+            ? { status: 202, body: { started: true } }
+            : { status: 409, body: { error: refused, code: 'SERVER_LOGIN_BUSY' } };
+    }
+
     if (method !== 'GET') {
         return { status: 405, body: { error: READ_ONLY_MESSAGE, code: 'SERVER_READ_ONLY' } };
     }
@@ -153,7 +181,11 @@ export function route(
         case '/api/login':
             return {
                 status: 200,
-                body: { available: login?.available ?? false, ...(login?.state ?? { state: 'idle' }) },
+                body: {
+                    available: login?.available ?? false,
+                    signedIn: login?.signedIn ?? false,
+                    ...(login?.state ?? { state: 'idle' }),
+                },
             };
 
         case '/api/mailbox': {

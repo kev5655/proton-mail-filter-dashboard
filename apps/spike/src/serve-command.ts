@@ -8,7 +8,7 @@ import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import { getFolders, getMessages } from '@pms/proton-api';
-import { ApplyChannel, LoginChannel, serveMailbox, SyncChannel } from '@pms/server';
+import { ApplyChannel, SessionChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import {
     getMeta,
@@ -23,7 +23,8 @@ import {
 } from '@pms/sync';
 
 import { DATA_DIR, logFilePath } from './paths.js';
-import { connect, loginInBrowser } from './session.js';
+import { deleteLocalCopy } from './local-data.js';
+import { connect, loginInBrowser, signOut } from './session.js';
 
 /**
  * Hand the dashboard the mirrored mailbox, and let it ask for a fresh one.
@@ -72,6 +73,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     const { http, passphrase } = await connect();
     const db = await openDatabase({ path: DATABASE, passphrase });
 
+    // Declared out here because the `finally` below has to see it: a disconnect closes the database
+    // before deleting its files, and closing twice would throw on the way out of a shutdown that
+    // already succeeded.
+    let databaseClosed = false;
+
     try {
         /*
          * Synchronising from the dashboard, and on a timer.
@@ -96,6 +102,26 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          */
         let autoSyncMinutes = 0;
         let autoSync: ReturnType<typeof setInterval> | undefined;
+        /*
+         * Set the moment a disconnect begins, and checked by everything that would otherwise keep
+         * using the account.
+         *
+         * Without it the sharp edge is invisible: the tokens live in `ProtonHttp`'s memory, so a
+         * timer or a queued request would carry on working against a mailbox somebody has just
+         * disconnected from. Refusing with a sentence beats failing with an auth error nobody can
+         * place.
+         */
+        let signedOut = false;
+
+        const refuseWhenSignedOut = (): void => {
+            if (!signedOut) {
+                return;
+            }
+            throw new AppError('SESSION_DISCONNECTED', {
+                message: 'Die Verbindung zu Proton wurde getrennt.',
+                hint: 'Dieser Server beendet sich gleich. Danach über das Dashboard neu verbinden.',
+            });
+        };
 
         const restartAutoSync = (): void => {
             if (autoSync !== undefined) {
@@ -115,6 +141,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
 
         const sync: SyncChannel = new SyncChannel(
             async (report) => {
+                refuseWhenSignedOut();
                 const result = await syncAll(db, http, {
                     window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
                     maxMessages: 20_000,
@@ -219,6 +246,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 };
             },
             async (request) => {
+                refuseWhenSignedOut();
                 const parsed = asChangeRequest(request);
                 if (parsed === undefined) {
                     throw new AppError('APPLY_NOT_CONFIRMED', {
@@ -378,7 +406,8 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          * throwaway profile, and silently making one would produce a window with no password
          * manager in it and no explanation.
          */
-        const login = new LoginChannel(async (report) => {
+        const login: SessionChannel = new SessionChannel(
+            async (report: (phase: 'opening' | 'waiting') => void) => {
             const profileDir = process.env['PMS_BROWSER_PROFILE'];
             if (profileDir === undefined || profileDir === '') {
                 throw new AppError('BROWSER_LOGIN_NOT_CONFIGURED', {
@@ -399,7 +428,52 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     report('waiting');
                 },
             });
-        });
+            },
+            /*
+             * Cutting the connection, in the order that makes it real.
+             *
+             * `signOut` stops the timer, revokes while the tokens still exist, clears the client
+             * and only then removes the file — the reasoning for each step is there. What is added
+             * here is the part Kevin asked for: the local copy goes too, so nothing about the
+             * mailbox is left on this machine for whoever uses it next.
+             *
+             * The database has to be *closed* before its files are removed, and once it is closed
+             * this process has nothing left to serve. So it shuts down rather than staying up in a
+             * state where every request fails for a reason the screen cannot explain.
+             */
+            async (everywhere) => {
+                signedOut = true;
+                const result = await signOut({
+                    http,
+                    everywhere,
+                    stopBackgroundWork: () => {
+                        if (autoSync !== undefined) {
+                            clearInterval(autoSync);
+                            autoSync = undefined;
+                        }
+                    },
+                });
+
+                closeDatabase(db);
+                await deleteLocalCopy(DATABASE);
+                databaseClosed = true;
+
+                // Long enough for the dashboard to read the final state off the stream. Ending the
+                // process in the same tick would close the stream first and leave the screen
+                // showing „wird getrennt" forever.
+                setTimeout(() => {
+                    console.log('\n  Verbindung getrennt, lokale Kopie gelöscht. Server beendet.\n');
+                    void server.close().then(() => {
+                        process.exit(0);
+                    });
+                }, 1_500);
+
+                return result;
+            },
+            // There is a session: `connect()` above established one, or this process would not be
+            // here at all.
+            true
+        );
 
         const server = await serveMailbox({
             db,
@@ -461,7 +535,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             process.once('SIGTERM', stop);
         });
     } finally {
-        closeDatabase(db);
+        // A disconnect closes it before deleting its files; closing twice would throw on the way
+        // out of a shutdown that already succeeded.
+        if (!databaseClosed) {
+            closeDatabase(db);
+        }
     }
 }
 

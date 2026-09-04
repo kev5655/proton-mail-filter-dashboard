@@ -43,6 +43,8 @@ export const ERROR_CODES = [
     'BROWSER_LOGIN_2FA_UNSUPPORTED',
     // A login started from the dashboard that could not even open: no profile, no browser.
     'BROWSER_LOGIN_NOT_CONFIGURED',
+    // Asked to do something at Proton after the connection was cut.
+    'SESSION_DISCONNECTED',
 
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',

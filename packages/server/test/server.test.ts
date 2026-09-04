@@ -8,7 +8,7 @@ import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from '@pms/sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ApplyChannel } from '../src/apply-channel.js';
-import { LoginChannel } from '../src/login-channel.js';
+import { SessionChannel } from '../src/session-channel.js';
 import { route } from '../src/handler.js';
 import { isUsableInterval, SyncChannel } from '../src/sync-channel.js';
 import { serveMailbox } from '../src/serve.js';
@@ -149,15 +149,17 @@ describe('the server refuses to write', () => {
         expect(route('POST', '/api/anything', db).status).toBe(405);
     });
 
-    it('accepts exactly three non-GET paths, and only those', () => {
+    it('accepts exactly four non-GET paths, and only those', () => {
         // If this list ever grows, it should be because someone meant it to — which is why it is a
-        // list rather than a rule. Each of the three is named in CLAUDE.md with its own reason:
+        // list rather than a rule. Each of the four is named in CLAUDE.md with its own reason:
         // `/api/apply` records an offer and writes nothing yet, `/api/sync` only reads at Proton,
-        // and `/api/login` opens a browser window that this process never types into.
+        // `/api/login` opens a browser window that this process never types into, and `/api/logout`
+        // is the one route on the list that only ever takes away.
         const paths = [
             '/api/sync',
             '/api/apply',
             '/api/login',
+            '/api/logout',
             '/api/mailbox',
             '/api/health',
             '/api/anything',
@@ -167,24 +169,36 @@ describe('the server refuses to write', () => {
             (path) =>
                 route('POST', path, db, {
                     sync: new SyncChannel(async () => summary()),
-                    login: new LoginChannel(async () => undefined),
+                    login: new SessionChannel(async () => undefined),
                 }).status !== 405
         );
 
         // All three are *recognised* — `/api/apply` answers 503 here because no apply channel was
         // given, which is a different answer from „this server does not write". Everything else is
         // refused before the path is even looked at.
-        expect(accepted).toEqual(['/api/sync', '/api/apply', '/api/login']);
+        expect(accepted).toEqual(['/api/sync', '/api/apply', '/api/login', '/api/logout']);
     });
 
     it('refuses a login when the server has no way to open one', () => {
         expect(route('POST', '/api/login', db).status).toBe(503);
     });
 
+    it('refuses a disconnect while a login window is open', () => {
+        // The two would fight over the same session file — and somebody with a browser window
+        // waiting for them has not decided to disconnect.
+        const login = new SessionChannel(
+            async () => new Promise(() => undefined),
+            async () => ({ revoked: false })
+        );
+
+        expect(route('POST', '/api/login', db, { login }).status).toBe(202);
+        expect(route('POST', '/api/logout', db, { login }).status).toBe(409);
+    });
+
     it('refuses a second login while a window is already open', () => {
         // One window at a time. Two would race for the same session file — and a second window is
         // also a second attempt, which is the thing `LoginGuard` exists to ration.
-        const login = new LoginChannel(async () => new Promise(() => undefined));
+        const login = new SessionChannel(async () => new Promise(() => undefined));
 
         expect(route('POST', '/api/login', db, { login }).status).toBe(202);
         expect(route('POST', '/api/login', db, { login }).status).toBe(409);

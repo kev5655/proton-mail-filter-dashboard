@@ -22,6 +22,12 @@ export function LoginPanel(): React.JSX.Element | null {
 
     const running = status.state === 'opening' || status.state === 'waiting';
 
+    // Connected already: the sidebar has nothing to offer. Disconnecting lives in the settings,
+    // where a decision that deletes the local copy belongs — not one click from every screen.
+    if (status.signedIn && !running && status.state !== 'failed') {
+        return null;
+    }
+
     return (
         <div className="sync-panel">
             <div className="row">

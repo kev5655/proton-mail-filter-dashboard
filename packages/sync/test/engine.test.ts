@@ -87,11 +87,12 @@ function fakeProton(total: number): { http: ProtonHttp; pages: number[]; begins:
     }) as typeof fetch;
 
     // Pacing is real behaviour, tested in proton-api. Here it would only add minutes.
-    return {
-        http: new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 }),
-        pages,
-        begins,
-    };
+    const http = new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 });
+    // A client with no session refuses anything that is not the login handshake, so a sync test
+    // has to have one — a sync is the thing that most obviously needs to be signed in.
+    http.setSession({ uid: 'u', accessToken: 'a', refreshToken: 'r' });
+
+    return { http, pages, begins };
 }
 
 describe('syncing a mailbox', () => {

@@ -3,12 +3,15 @@ import { join, resolve } from 'node:path';
 
 import { loginByHandInBrowser, loginWithBrowser } from '@pms/browser-auth';
 import { AppError, isAppError } from '@pms/core/errors';
+import { getLogger } from '@pms/core/logger';
 import {
+    deleteSession,
     getFolders,
     loadSession,
     LoginGuard,
     ProtonHttp,
     refreshSession,
+    revokeSession,
     saveSession,
     type LoginAttemptState,
     type ProtonSession,
@@ -20,6 +23,8 @@ import type { CredentialSource } from '@pms/credentials';
 import { credentialConfig, resolveSource } from './credentials.js';
 import { DATA_DIR, REPO_ROOT } from './paths.js';
 import { terminal } from './prompt.js';
+
+const log = getLogger('session');
 
 /**
  * Get an authenticated client, logging in only when there is genuinely no other option.
@@ -402,4 +407,69 @@ export async function loginGuardState(): Promise<{
                 : {}),
         };
     }
+}
+
+export interface SignOutResult {
+    /** True when Proton was asked to end the session and answered. */
+    revoked: boolean;
+    /** Set when the revoke was attempted and failed — reported, never swallowed. */
+    revokeError?: string | undefined;
+}
+
+/**
+ * Sign out, in the order that makes it mean something.
+ *
+ * Deleting the stored file is the obvious step and on its own it does almost nothing: the tokens
+ * live in `ProtonHttp`'s memory from the one `loadSession` at startup, so a running server would
+ * keep syncing on its timer and would keep being able to write. A sign-out that looks like security
+ * and is not would be worse than no button at all.
+ *
+ * So the order is the feature, and each step is where it is for a reason:
+ *
+ *  1. **Stop the timer first** — otherwise an automatic sync can start while this is running, and
+ *     it would hold a session that is about to be revoked out from under it.
+ *  2. **Revoke while the tokens still exist.** It is the only step that needs them, and it is the
+ *     only one that reaches Proton. Its failure is recorded and does not abort the rest: a token
+ *     that stays alive is exactly the state we were in before asking, whereas stopping here would
+ *     leave the file on disk as well.
+ *  3. **Clear the client.** `ProtonHttp` refuses every non-anonymous request without a session, so
+ *     from here the process cannot touch the account at all — not even to be rejected. That refusal
+ *     had to be added: clearing the session used to leave the client sending unauthenticated
+ *     requests that Proton answered 401, which is a pointless request to a service this project is
+ *     deliberately polite to, and made "signed out" a weaker statement than it reads as.
+ *  4. **Delete the file last.** `reuse()` re-persists after a refresh, so removing it while a live
+ *     token still exists can bring it back.
+ *
+ * `LoginGuard` is deliberately untouched. It counts *failed* attempts; signing out on purpose is
+ * not one, and a lockout must not be clearable by pressing a button labelled something else.
+ */
+export async function signOut(options: {
+    http: ProtonHttp;
+    /** Also end the session at Proton, not only forget it here. */
+    everywhere: boolean;
+    /** Stop anything that would keep using the session while this runs. */
+    stopBackgroundWork?: (() => void) | undefined;
+}): Promise<SignOutResult> {
+    options.stopBackgroundWork?.();
+
+    let revoked = false;
+    let revokeError: string | undefined;
+
+    if (options.everywhere) {
+        try {
+            await revokeSession(options.http);
+            revoked = true;
+        } catch (error) {
+            revokeError = error instanceof Error ? error.message : 'Unbekannter Fehler.';
+            log.warn(
+                { code: isAppError(error) ? error.code : undefined },
+                'the session could not be revoked at Proton'
+            );
+        }
+    }
+
+    options.http.setSession(undefined);
+    await deleteSession(SESSION_FILE);
+
+    return { revoked, ...(revokeError === undefined ? {} : { revokeError }) };
 }

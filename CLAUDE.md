@@ -34,10 +34,13 @@ somewhere; the service runs the rules it already has. That is what lets a new ru
 backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
 because for months the terminal announced it and nothing did it.
 
-**There are three non-GET routes, not two, and the third is named here because it was added on
-purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits. It writes
-nothing to Proton's data, but it is the most consequential thing the tool does, so it has its own
-route, its own channel and this paragraph rather than being folded into something that existed.
+**There are four non-GET routes, not two, and the two additions are named here because both were
+made on purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
+writes nothing to Proton's data, but it is the most consequential thing the tool does. `POST
+/api/logout` is the only route on the list that *only ever takes away* — it ends the session, forgets
+it, and deletes the local copy of the mailbox — and a tool that makes connecting easy and
+disconnecting hard has the wrong shape. Both have their own line in `handler.ts` and share one
+`SessionChannel`, because being connected is one piece of state and not two.
 
 What makes it defensible is not the route count. **No password passes through this process:**
 `loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser
@@ -45,6 +48,20 @@ extension fills Proton's own form exactly as it would on any other site, and a p
 the credential lives in that profile's own store. `connect()`'s older path — fetch the credentials
 from 1Password and type them with Playwright — still exists for the CLI, and the two are tested
 apart: `write-isolation.test.ts` asserts that the browser-driven login never reads a password.
+
+**Disconnecting removes the local copy, and the order is the feature.** `signOut`
+(`apps/spike/src/session.ts`) stops the auto-sync timer, revokes at Proton *while the tokens still
+exist*, clears the client, and only then deletes the file — because `reuse()` re-persists after a
+refresh, so removing the file while a live token exists can bring it back. Then the database is
+closed and its four files go (`-wal` and `-shm` too: a `-wal` beside a fresh database is a
+corruption path), along with the filter backups. `login-attempts.json` and `data/logs/` stay — a
+lockout must not be clearable by disconnecting, and the log carries no mail content by construction.
+The server shuts down afterwards, because it has just deleted everything it was serving.
+
+`ProtonHttp` refuses every non-anonymous request without a session. That had to be added for the
+above to mean anything: clearing the session used to leave the client sending unauthenticated
+requests that Proton answered 401 — a pointless request to a service this project is deliberately
+polite to, and a weaker guarantee than "signed out" reads as.
 
 `LoginGuard` is not weakened by any of it. It is consulted before the window opens, a failure is
 recorded, and there is no retry loop — the rule that got this account back. A button in a web
@@ -65,7 +82,7 @@ the module that performs it.
 The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
 parses a request cannot reach the code that performs one. They meet through a channel object handed
 in from outside, and `write-isolation.test.ts` checks that the routing files import neither
-`@pms/apply` nor the write surface. Two non-GET routes exist and both are named in an `if` rather
+`@pms/apply` nor the write surface. Four non-GET routes exist and each is named in an `if` rather
 than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
 records an offer and answers `202` while nothing has happened yet.
 
