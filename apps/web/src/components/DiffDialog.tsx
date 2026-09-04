@@ -54,6 +54,10 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
 
     const { change, moves, clearedFromInbox, returnedToInbox, takenFrom } = staged;
     const rule = change.after ?? change.before;
+    // The one change kind that moves mail rather than the rules about it. Several sentences below
+    // are written for a filter and would be wrong here — a rule "wirkt erst auf künftige Mail", a
+    // move does not.
+    const movesMail = change.kind === 'move-to-category';
 
     return (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="Änderung bestätigen">
@@ -109,8 +113,24 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
 
                 {moves.length === 0 && (
                     <p className="notice notice-warning">
-                        Keine der erfassten Mails wird dadurch anders einsortiert. Die Regel wirkt erst
-                        auf künftige Mail — oder sie greift nicht.
+                        {movesMail
+                            ? 'Keine der ausgewählten Mails ist in der lokalen Kopie auffindbar. Es würde nichts verschoben.'
+                            : 'Keine der erfassten Mails wird dadurch anders einsortiert. Die Regel wirkt erst auf künftige Mail — oder sie greift nicht.'}
+                    </p>
+                )}
+
+                {/*
+                 * Said on the last screen before the offer, not only in the dialog that started it.
+                 * Both are open questions about somebody's mailbox, and this is the placement that
+                 * is between the decision and the account.
+                 */}
+                {movesMail && (
+                    <p className="notice notice-warning">
+                        <strong>Das verschiebt Mail — nicht eine Regel darüber.</strong> Ob die
+                        bisherige Kategorie dabei von selbst wegfällt, ist ungeprüft, und ob Proton
+                        danach künftige Mail dieser Absender gleich einsortiert, zeigt sich erst über
+                        mehrere Synchronisationen. Rückgängig machen legt jede Mail einzeln dorthin
+                        zurück, wo sie vorher war.
                     </p>
                 )}
 
@@ -218,9 +238,11 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                     >
                         {phase.phase === 'waiting'
                             ? 'Warte auf das Terminal …'
-                            : moves.length > 0
-                              ? `Bei Proton speichern und ${moves.length} Mails einsortieren`
-                              : 'Bei Proton speichern'}
+                            : movesMail
+                              ? `${moves.length} Mails verschieben`
+                              : moves.length > 0
+                                ? `Bei Proton speichern und ${moves.length} Mails einsortieren`
+                                : 'Bei Proton speichern'}
                     </button>
                     <button
                         type="button"

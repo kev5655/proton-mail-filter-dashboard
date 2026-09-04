@@ -549,3 +549,142 @@ describe('adopting a rule found at Proton', () => {
         expect(outcome.adoptedFilterIds).toEqual(['f-1']);
     });
 });
+
+/**
+ * The second exception, and the one that moves mail.
+ *
+ * Everything else in this file writes a filter and lets Proton do the sorting. A category cannot be
+ * a filter's destination, so this is the one change kind that moves somebody's messages — and
+ * therefore the one where "nothing without a typed ja" has to hold at every size, not just at the
+ * sizes `weigh` finds impressive.
+ */
+function categoryChange(messageIds = ['m-1', 'm-2']): PendingChange {
+    return {
+        id: 'c-cat',
+        kind: 'move-to-category',
+        summary: `${messageIds.length} Mails nach „Transaktionen" verschieben`,
+        category: { id: '26', messageIds },
+    };
+}
+
+function categoryRequest(over: Partial<ChangeRequest> = {}, messageIds = ['m-1', 'm-2']): ChangeRequest {
+    const change = categoryChange(messageIds);
+    return {
+        ...request({ change }),
+        affectedMessageIds: messageIds,
+        plan: {
+            change,
+            moves: messageIds.map((id) => ({
+                messageId: id,
+                subject: `Betreff ${id}`,
+                sender: 'wer@dort.example',
+                from: undefined,
+                to: 'Transaktionen',
+            })),
+            clearedFromInbox: 0,
+            returnedToInbox: 0,
+            takenFrom: [],
+        },
+        ...over,
+    };
+}
+
+describe('moving mail into one of Protons categories', () => {
+    it('asks the terminal even for a single mail', () => {
+        // Deliberately not subject to the size thresholds. This is the exception to the first
+        // sentence of CLAUDE.md, and it should cost a keystroke every time it is used.
+        const one = categoryRequest({}, ['m-1']);
+
+        expect(weigh(one, 10_000)).toEqual({
+            needsTerminal: true,
+            reason: 'Diese Änderung verschiebt Mail.',
+        });
+    });
+
+    it.each<[string, ConfirmationVerdict, string]>([
+        ['declined', 'declined', 'APPLY_NOT_CONFIRMED'],
+        ['expired', 'expired', 'APPLY_CONFIRMATION_EXPIRED'],
+    ])('moves nothing when the terminal answers %s', async (_name, verdict, code) => {
+        const proton = fakeProton();
+        let asked = 0;
+
+        await expect(
+            applyChange(categoryRequest(), {
+                http: proton.http,
+                backupDir,
+                confirm: always(verdict),
+                moveToCategory: async () => {
+                    asked++;
+                },
+            })
+        ).rejects.toMatchObject({ code });
+
+        expect(proton.writes()).toEqual([]);
+        expect(asked).toBe(0);
+    });
+
+    it('moves exactly the named messages once it is granted', async () => {
+        const proton = fakeProton();
+        const moved: Array<{ ids: string[]; categoryId: string }> = [];
+
+        await applyChange(categoryRequest(), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+            moveToCategory: async (ids, categoryId) => {
+                moved.push({ ids, categoryId });
+            },
+        });
+
+        expect(moved).toEqual([{ ids: ['m-1', 'm-2'], categoryId: '26' }]);
+    });
+
+    it('refuses a change naming a mail the diff did not show', async () => {
+        // The terminal question covers `affectedMessageIds`. If the payload could carry more, the
+        // confirmation would be about one set of mail and the move about another.
+        const proton = fakeProton();
+        let asked = 0;
+
+        await expect(
+            applyChange(
+                {
+                    ...categoryRequest(),
+                    change: categoryChange(['m-1', 'm-2', 'm-heimlich']),
+                },
+                {
+                    http: proton.http,
+                    backupDir,
+                    confirm: always('granted'),
+                    moveToCategory: async () => {
+                        asked++;
+                    },
+                }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_MALFORMED' });
+
+        expect(asked).toBe(0);
+        expect(proton.writes()).toEqual([]);
+    });
+
+    it('refuses a label id that is not one of Protons categories', async () => {
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(
+                { ...categoryRequest(), change: { ...categoryChange(), category: { id: 'l-1', messageIds: ['m-1'] } } },
+                { http: proton.http, backupDir, confirm: always('granted'), moveToCategory: async () => undefined }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_MALFORMED' });
+    });
+
+    it('says so rather than reporting success when nothing is wired up to move mail', async () => {
+        // The failure this switch was rebuilt to prevent: a change that reports done and never made
+        // a request. `moveToCategory` is absent whenever the change did not come through
+        // `pnpm serve`, and that has to be audible.
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(categoryRequest(), { http: proton.http, backupDir, confirm: always('granted') })
+        ).rejects.toMatchObject({ code: 'APPLY_PARTIAL' });
+    });
+});

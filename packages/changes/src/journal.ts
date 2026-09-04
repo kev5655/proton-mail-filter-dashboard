@@ -117,6 +117,27 @@ export function inverseOf(change: PendingChange): PendingChange {
                 before: change.before,
             };
 
+        /*
+         * Undoing a category move is the one inverse that is not in this object.
+         *
+         * Every other kind reverses by description — a create becomes a delete, a rename becomes
+         * the opposite rename — because the description is the whole change. Here it is not: the
+         * change moved twenty messages that came from four different places, and there is no single
+         * destination to name. That is what `entry.moved` is for. Each message carries its own
+         * `previousLabelIds`, observed before the write, and `undoChange` puts each one back where
+         * its own snapshot says it was.
+         *
+         * So the inverse deliberately carries no `category`. Naming one would be picking a
+         * destination for messages that did not share one, and `apply.ts` refuses a category move
+         * without ids rather than acting on it.
+         */
+        case 'move-to-category':
+            return {
+                ...base,
+                kind: 'move-to-category',
+                summary: `${String(change.category?.messageIds.length ?? 0)} Mails dorthin zurücklegen, wo sie waren`,
+            };
+
         case 'rename-folder':
             return {
                 ...base,

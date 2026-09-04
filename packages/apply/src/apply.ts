@@ -1,5 +1,6 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
+import { CATEGORY_LABELS } from '@pms/grouping';
 import { inverseOf, verifyMoves, type JournalEntry, type MovedMessage, type VerificationResult } from '@pms/changes';
 import type { ProtonHttp } from '@pms/proton-api';
 import { fingerprintAccount, getMessages } from '@pms/proton-api';
@@ -81,6 +82,13 @@ export function weigh(
 ): { needsTerminal: boolean; reason: string } {
     const moves = request.plan.moves.length;
 
+    // Before the size rules, and unconditional. This is the change kind that moves mail, the second
+    // exception to the first sentence of CLAUDE.md, and it should cost a keystroke every single
+    // time — including for one message. The thresholds below exist to keep the terminal question
+    // worth reading; exempting the one kind that touches somebody's mail would defeat that.
+    if (request.change.kind === 'move-to-category') {
+        return { needsTerminal: true, reason: 'Diese Änderung verschiebt Mail.' };
+    }
     if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
         return { needsTerminal: true, reason: 'Diese Änderung löscht etwas.' };
     }
@@ -104,6 +112,18 @@ export interface ApplyContext {
     confirm: (offer: ConfirmationOffer) => Promise<ConfirmationVerdict>;
     /** Messages in the local copy, for judging how much of the mailbox a change touches. */
     mailboxSize?: number;
+    /**
+     * Move named messages into one of Proton's categories.
+     *
+     * Injected rather than imported, the same way undo gets its `applyInverse`. `steps.ts` is the
+     * only file allowed to touch the write barrel and the message-moving module is not in it, so
+     * neither this file nor `steps.ts` can reach the code that performs this. It arrives from
+     * `apps/spike/src/serve-command.ts`, outside everything HTTP can address.
+     *
+     * Absent means the capability is not wired up, and a category move is then refused rather than
+     * reported as done.
+     */
+    moveToCategory?: (messageIds: string[], categoryId: string) => Promise<void>;
     now?: () => number;
     /** Injected in tests so a verification does not wait on a real clock. */
     sleep?: (ms: number) => Promise<void>;
@@ -192,7 +212,7 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     const saved = await backup(context.http, context.backupDir, now());
 
     // 6 — write
-    const performed = await perform(request, account, context.http);
+    const performed = await perform(request, account, context.http, context.moveToCategory);
 
     // 7 — journal, opened at once
     const entry: JournalEntry = {
@@ -211,6 +231,12 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
         const folderIds = new Map(performed.folders.map((folder) => [folder.name, folder.id]));
         for (const folder of account.folders) {
             folderIds.set(folder.Name, folder.ID);
+        }
+        // Proton's categories, so a category move can be verified by looking, exactly like a folder
+        // move: the plan says „Transaktionen", Proton answers with label 26, and this is where the
+        // two are allowed to meet. Without it every category move would report itself unconfirmed.
+        for (const [id, name] of Object.entries(CATEGORY_LABELS)) {
+            folderIds.set(name, id);
         }
 
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -314,6 +340,35 @@ function preflight(request: ChangeRequest, account: Account): void {
         }
     }
 
+    if (request.change.kind === 'move-to-category') {
+        const category = request.change.category;
+        if (category === undefined || category.messageIds.length === 0) {
+            throw new AppError('APPLY_MALFORMED', {
+                message: 'Die Änderung sagt nicht, welche Mails wohin verschoben werden sollen.',
+                hint: 'Es wurde nichts geschrieben. Ein Verschieben ohne Kennungen gibt es hier nicht.',
+                context: { kind: request.change.kind },
+            });
+        }
+        if (!(category.id in CATEGORY_LABELS)) {
+            throw new AppError('APPLY_MALFORMED', {
+                message: `„${category.id}" ist keine von Protons Kategorien.`,
+                hint: 'Es wurde nichts geschrieben.',
+                context: { categoryId: category.id },
+            });
+        }
+        // The ids the terminal asked about must be the ids that move. If the two ever came apart,
+        // the confirmation would cover one set of mail and the request would carry another.
+        const asked = new Set(request.affectedMessageIds);
+        const extra = category.messageIds.filter((id) => !asked.has(id));
+        if (extra.length > 0) {
+            throw new AppError('APPLY_MALFORMED', {
+                message: 'Die Änderung nennt Mails, die im Diff nicht standen.',
+                hint: 'Es wurde nichts geschrieben.',
+                context: { kind: request.change.kind, extra: extra.length },
+            });
+        }
+    }
+
     if (target !== undefined && target !== '' && SYSTEM_FOLDERS.has(target.toLowerCase())) {
         throw new AppError('WRITE_FOLDER_FAILED', {
             message: `„${target}" ist der Name eines Proton-Systemordners.`,
@@ -344,7 +399,12 @@ interface Performed {
  * journalled and named instead, and it can be undone through the ordinary route with a diff in
  * front of it.
  */
-async function perform(request: ChangeRequest, account: Account, http: ProtonHttp): Promise<Performed> {
+async function perform(
+    request: ChangeRequest,
+    account: Account,
+    http: ProtonHttp,
+    moveToCategory: ApplyContext['moveToCategory']
+): Promise<Performed> {
     const performed: Performed = { folders: [], filterId: undefined, problem: undefined };
     const change = request.change;
 
@@ -444,6 +504,36 @@ async function perform(request: ChangeRequest, account: Account, http: ProtonHtt
             case 'adopt-rule':
                 performed.adoptedFilterIds = change.before === undefined ? [] : [change.before.id];
                 break;
+
+            /*
+             * The one change that moves mail.
+             *
+             * It is performed through a function handed in from outside rather than imported: this
+             * file may not reach the message-moving module, and neither may `steps.ts`. A missing
+             * one is refused loudly — the alternative is the failure this switch was rebuilt to
+             * prevent, where a change reports success and nothing was ever sent.
+             */
+            case 'move-to-category': {
+                const category = change.category;
+                if (category === undefined) {
+                    throw new AppError('APPLY_MALFORMED', {
+                        message: 'Die Änderung nennt keine Kategorie und keine Mails.',
+                        hint: 'Es wurde nichts geschrieben.',
+                        context: { kind: change.kind },
+                    });
+                }
+                if (moveToCategory === undefined) {
+                    throw new AppError('APPLY_PARTIAL', {
+                        message: 'Das Verschieben in eine Kategorie ist hier nicht verdrahtet.',
+                        hint:
+                            'Es wurde nichts geschrieben. Das passiert, wenn die Änderung nicht über ' +
+                            '`pnpm serve` läuft — nur dort wird der Weg dafür bereitgestellt.',
+                        context: { kind: change.kind },
+                    });
+                }
+                await moveToCategory(category.messageIds, category.id);
+                break;
+            }
 
             default: {
                 // Every kind is handled above. This stays so that adding one to `ChangeKind`

@@ -106,6 +106,15 @@ export interface MailboxData extends MailboxInput {
     /** The verdict for one sender, when there is one. */
     autoRuleFor: (address: string) => AutoRule | undefined;
     /**
+     * Which of Proton's categories one message carries today, if any.
+     *
+     * The „bisher" column of a category move's diff. A message can in principle carry two, and this
+     * answers with the first — the diff shows one destination and one origin, and inventing a
+     * second row for a state we have never observed would be furnishing the screen with a
+     * hypothetical.
+     */
+    categoryOfMessage: (messageId: string) => string | undefined;
+    /**
      * Which of Proton's categories these messages already carry.
      *
      * The answer to "is the rule I am about to write doing work Proton already does". Reads the
@@ -384,6 +393,7 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         inboxMessages,
         autoRules,
         autoRuleFor: (address) => autoRuleBySender.get(address),
+        categoryOfMessage: (messageId) => categoryOf.get(messageId)?.[0],
 
         /*
          * How much of a set of messages Proton already sorts, and how sure we are.

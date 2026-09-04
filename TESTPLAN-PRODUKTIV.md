@@ -484,3 +484,91 @@ Neu dazugekommen und gegengeprüft, indem ich den Fehler wieder eingebaut habe:
 - **Inkrementeller Sync** fragt nach dem richtigen Zeitpunkt, macht die Kopie nie kleiner, und
   behauptet nach einem Teillauf nicht, sie sei vollständig.
 - **Adoption** überlebt den nächsten Sync, damit die Frage genau einmal gestellt wird.
+
+---
+
+## Kategorien: was nur du prüfen kannst
+
+Zwei neue Bildschirme, und beide beruhen auf Annahmen, die sich hier nicht testen lassen. Der Reiter
+**Auto-Regeln** zeigt, was Protons eigene Sortierung beobachtbar tut; **In Kategorie verschieben**
+(in der Auswahlleiste, sobald Mails markiert sind) ist der einzige Weg im Dashboard, der Mail bewegt.
+
+Er geht denselben Weg wie alles andere — Diff, dann Rückfrage im Terminal — und zwar **immer**, auch
+bei einer einzigen Mail. Das ist Absicht: es ist die Ausnahme von der ersten Regel des Projekts.
+
+### K-01 · Bewegt `PUT mail/v4/messages/label` die Mail wirklich?
+
+Nimm eine Wegwerf-Mail. `pnpm serve`, im Dashboard auswählen, „In Kategorie verschieben",
+„Transaktionen", im Terminal `ja`.
+
+Danach in Proton nachsehen und drei Fragen getrennt beantworten:
+
+1. Liegt die Mail in „Transaktionen"?
+2. **Ist sie aus der alten Kategorie verschwunden**, oder trägt sie jetzt beide? Protons eigener
+   Client schickt nur diese eine Anfrage und kein `unlabel` — daraus folgt, dass Kategorien sich
+   serverseitig ausschliessen *dürften*. Nachgesehen hat das niemand. Wenn sie beide trägt, fehlt
+   ein `unlabelMessages` davor, und das ist ein Befund, kein Schönheitsfehler.
+3. **Ist der Posteingang unberührt?** Der Diff behauptet dazu nichts (`clearedFromInbox` bleibt 0),
+   weil es unbekannt ist. Deine Antwort macht daraus eine Zahl.
+
+### K-02 · Bewegt sich nur die eine Mail — oder der ganze Thread?
+
+Der Grund, warum wir die Nachrichten- und nicht die Konversations-Variante nehmen. Nimm eine Mail
+aus einem Thread mit mehreren Nachrichten und verschiebe **nur diese eine**. Danach: liegt der Rest
+des Threads noch, wo er lag? Wenn nicht, ist Protons Nachrichten-Endpunkt in Wahrheit
+konversationsbasiert, und das ändert, was dieses Feature überhaupt anbieten darf.
+
+### K-03 · Stimmen die Kategorien auf dem Reiter mit Proton überein?
+
+„Kategorien" zeigt, was jetzt worin liegt. Vergleich die Zahlen mit den Reitern über deinem
+Posteingang in Proton. Eine als **„unbekannte ID"** markierte Kategorie ist der interessante Fall:
+sag mir, wie sie in Protons Oberfläche heisst — die IDs stammen aus Protons eigenem Bundle, und eine
+neue wäre die einzige Evidenz, die es dafür gibt.
+
+### K-04 · Sagt der Verlauf etwas Wahres?
+
+Eine Mail in Proton von Hand in eine andere Kategorie schieben, dann `pnpm sync`, dann „Auto-Regeln"
+ansehen. Unter **„Was sich geändert hat"** muss genau diese Umsortierung stehen — mit der alten und
+der neuen Kategorie.
+
+Der Verlauf beginnt bei der Migration; vor dem ersten Sync mit den neuen Tabellen gibt es nichts.
+Und ein inkrementeller Sync holt nur neue Mail: sortiert Proton eine **alte** Mail um, sehen wir das
+nicht. „Unverändert" heisst dort **„nicht nachgesehen"**, und der Bildschirm sagt das auch.
+
+### K-05 · Lernt Proton daraus? (Das ist die eigentliche Frage)
+
+Die Prämisse des ganzen Features, und die einzige, die niemand abkürzen kann. Nach K-01: kommt in
+den nächsten Tagen neue Mail **desselben Absenders** von selbst in „Transaktionen"?
+
+Das braucht mehrere Tage und mehrere Synchronisationen. Bis dahin ist es eine Erwartung, keine
+Tatsache — der Dialog sagt das, statt es zu behaupten.
+
+### K-06 · Rückgängig
+
+Nach einem Verschieben im Verlauf zurücknehmen. Jede Mail muss dorthin zurück, wo **sie** war — die
+eine in ihre alte Kategorie, die andere in den Posteingang, wenn sie nur dort war. Nicht alle an
+denselben Ort: das Protokoll hält pro Mail fest, was vorher galt, und genau das ist der Unterschied.
+
+### Was hier schon geprüft ist
+
+Gegengeprüft, indem der Fehler wieder eingebaut wurde:
+
+- **Abgelehnt oder abgelaufen ⇒ null Anfragen.** Gezählt, nicht behauptet.
+- **Die Terminal-Rückfrage ist bei dieser Änderungsart bedingungslos** — auch bei einer Mail. Nimmt
+  man die Regel heraus, scheitert der Test.
+- **Nur die genannten Kennungen.** Eine Änderung, die eine Mail nennt, die nicht im Diff stand, wird
+  abgewiesen, bevor irgendwer gefragt wird.
+- **Nur Kategorien.** Eine Ordner-ID oder die nicht existierende `23` werden abgewiesen, ohne dass
+  eine Anfrage rausgeht.
+- **Genau zwei Importeure** dürfen das Verschiebe-Modul erreichen, als exakte Menge geprüft, und
+  beide Funktionen darin nehmen `messageIds: string[]`.
+- **Der Scrubber** lässt `"26"` unter `LabelID` stehen und ersetzt Nachrichten-Kennungen — vorher
+  war es genau umgekehrt herum falsch, weshalb keine aufgezeichnete Fixture je sagen konnte, welche
+  IDs Protons Kategorien haben.
+
+### Bekanntes Rauschen, nicht neu
+
+`pnpm test` meldet am Ende ein paar „ReferenceError: window is not defined". Das ist ein Abbau-Rennen
+zwischen happy-dom und React, es tritt auch ohne diese Änderungen auf (dort sogar häufiger), die
+Anzahl schwankt von Lauf zu Lauf, und kein Test scheitert daran. Ich habe es nicht angefasst — es
+gehört in einen eigenen Durchgang, nicht in diesen.

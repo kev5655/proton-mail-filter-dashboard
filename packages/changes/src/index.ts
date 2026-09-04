@@ -8,7 +8,9 @@ export {
 export {
     applyChangeToRules,
     describePlan,
+    planCategoryMove,
     planChange,
+    type CategoryMoveInput,
     type ChangeKind,
     type ChangePlan,
     type Move,

@@ -236,3 +236,62 @@ describe('undoing a change', () => {
         expect(record.undoneAt).toBeUndefined();
     });
 });
+
+/**
+ * Undoing a move into one of Proton's categories.
+ *
+ * The second thing that moves mail, so it is the second thing that has to come back. A category is
+ * not a folder — the batch-move endpoint does not put mail into one — so both the destination and
+ * the call have to be read off the snapshot rather than assumed from the change.
+ */
+describe('undoing a category move', () => {
+    function categoryEntry(): JournalEntry {
+        return entry({
+            change: { id: 'c-cat', kind: 'move-to-category', summary: '2 Mails nach „Transaktionen"' },
+            inverse: { id: 'c-cat-undo', kind: 'move-to-category', summary: 'zurücklegen' },
+            moved: [
+                // Was in „Standard" and the inbox. The category is the narrower fact, and the one
+                // being undone: putting it back in the inbox would drop it.
+                { messageId: 'm-1', previousLabelIds: ['0', '24'], movedTo: 'Transaktionen' },
+                // Only the inbox, so the inbox is where it goes.
+                { messageId: 'm-2', previousLabelIds: ['0'], movedTo: 'Transaktionen' },
+            ],
+        });
+    }
+
+    const stillInTransactions = async (ids: string[]): Promise<Array<{ ID: string; LabelIDs: string[] }>> =>
+        ids.map((id) => ({ ID: id, LabelIDs: ['0', '26'] }));
+
+    it('uses the labelling call for a category and the move call for the inbox', async () => {
+        const proton = fakeProton();
+
+        await undoChange(categoryEntry(), {
+            http: proton.http,
+            applyInverse: async () => undefined,
+            readCurrent: stillInTransactions,
+            folderIds: FOLDER_IDS,
+        });
+
+        expect(proton.calls.filter((call) => call.method !== 'GET')).toEqual([
+            { method: 'PUT', path: 'mail/v4/messages/label', body: { LabelID: '24', IDs: ['m-1'] } },
+            { method: 'POST', path: 'mail/v4/messages/batch/move', body: { IDs: ['m-2'], LabelID: '0' } },
+        ]);
+    });
+
+    it('recognises the journals German destination, so a hand-moved mail is still skipped', async () => {
+        // The check that keeps undo from overruling a person. It resolves `movedTo` to a label id;
+        // before categories were a destination that lookup only knew folder names, so every
+        // category move would have looked hand-moved and undo would have done nothing at all.
+        const proton = fakeProton();
+
+        const outcome = await undoChange(categoryEntry(), {
+            http: proton.http,
+            applyInverse: async () => undefined,
+            readCurrent: async (ids) => ids.map((id) => ({ ID: id, LabelIDs: ['l-archiv'] })),
+            folderIds: FOLDER_IDS,
+        });
+
+        expect(outcome.skippedMovedSince).toEqual(['m-1', 'm-2']);
+        expect(proton.calls.filter((call) => call.method !== 'GET')).toEqual([]);
+    });
+});

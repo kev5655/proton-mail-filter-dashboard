@@ -3,7 +3,13 @@ import type { MatchableMessage, OrderedRule } from '@pms/rules';
 import { describe, expect, it } from 'vitest';
 
 import { Journal, inverseOf } from '../src/journal.js';
-import { applyChangeToRules, describePlan, planChange, type PendingChange } from '../src/plan.js';
+import {
+    applyChangeToRules,
+    describePlan,
+    planCategoryMove,
+    planChange,
+    type PendingChange,
+} from '../src/plan.js';
 import { findRulesNotFiring, partialMoveError, verifyMoves } from '../src/verify.js';
 
 /**
@@ -260,5 +266,115 @@ describe('the health check', () => {
         expect(
             findRulesNotFiring([{ id: 'r1', name: 'x', catches: () => false }], [{ ID: 'm9', LabelIDs: ['0'] }])
         ).toEqual([]);
+    });
+});
+
+/**
+ * Planning a category move, which is planned backwards from everything else here.
+ *
+ * `planChange` simulates the rule set and reads the moves out of what changed. A category move has
+ * no rule to simulate: the moves *are* the input, because a person selected them. The failure mode
+ * that matters is therefore the opposite one — not a missed consequence, but a widened one.
+ */
+describe('planning a move into one of Protons categories', () => {
+    const noCategories = (): string | undefined => undefined;
+
+    it('plans a move for each named message and for no other', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm3'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.moves.map((move) => move.messageId)).toEqual(['m1', 'm3']);
+        expect(plan.moves.every((move) => move.to === 'Transaktionen')).toBe(true);
+        // The whole authorisation, carried on the change and not recomputed downstream.
+        expect(plan.change.category).toEqual({ id: '26', messageIds: ['m1', 'm3'] });
+    });
+
+    it('ignores an id that is not in the mailbox rather than inventing a row for it', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'gibt-es-nicht'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.moves.map((move) => move.messageId)).toEqual(['m1']);
+    });
+
+    it('names the category a message is in today', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1'],
+            categoryId: '26',
+            currentCategoryOf: () => '24',
+        });
+
+        // Named, not numbered: „24 → 26" is not a sentence anyone can check against their mailbox.
+        expect(plan.moves[0]?.from).toBe('Standard');
+    });
+
+    it('claims nothing about the inbox, because nothing is known about it', () => {
+        // Proton's client sends one label request and no unlabel, which says something about the
+        // previous category and nothing at all about the inbox. A number here would be a guess with
+        // a count next to it.
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm2'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.clearedFromInbox).toBe(0);
+        expect(plan.returnedToInbox).toBe(0);
+    });
+
+    it('says which of your own rules is already handling this mail', () => {
+        // The duplicate warning, in the last place before a write. Proton is about to sort this
+        // mail and a rule of the user's own already does — that is the thing worth seeing.
+        const plan = planCategoryMove({
+            rules: [rule('r-1', 'Shop', 1, 'news@shop.example', 'Werbung')],
+            messages,
+            messageIds: ['m1', 'm2'],
+            categoryId: '21',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.takenFrom).toEqual([{ ruleName: 'Shop', count: 2 }]);
+    });
+
+    it('leaves the rules untouched', () => {
+        const rules = [rule('r-1', 'Shop', 1, 'news@shop.example', 'Werbung')];
+        const plan = planCategoryMove({
+            rules,
+            messages,
+            messageIds: ['m1'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(applyChangeToRules(rules, plan.change)).toEqual(rules);
+    });
+
+    it('has an inverse that names no destination, because the messages do not share one', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm3'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        const inverse = inverseOf(plan.change);
+        expect(inverse.kind).toBe('move-to-category');
+        // Undo works from the journal's per-message snapshot instead. Naming one category here
+        // would send every message back to the same place, which is only right by accident.
+        expect(inverse.category).toBeUndefined();
     });
 });

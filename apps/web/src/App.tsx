@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { CategoryMoveDialog } from './components/CategoryMoveDialog.js';
 import { DiffDialog } from './components/DiffDialog.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { MailViewer } from './components/MailViewer.js';
@@ -114,6 +115,7 @@ function Shell(): React.JSX.Element {
     const status = useMailboxStatus();
     const { rules, folders, drift, journal } = useStore();
     const [buildingRule, setBuildingRule] = useState(false);
+    const [movingToCategory, setMovingToCategory] = useState(false);
 
     // Only screens other than this one. Saying "aus Regeln" while standing on Regeln is noise.
     const elsewhere = selectedFrom.filter((entry) => entry !== nav.page);
@@ -217,6 +219,19 @@ function Shell(): React.JSX.Element {
                         <button type="button" className="button" onClick={() => setBuildingRule(true)}>
                             Regel daraus bauen
                         </button>
+                        {/*
+                         * The other thing a selection is for. A category cannot be a filter's
+                         * destination, so this is the only route to Proton's own sorting — and it
+                         * is the one action here that moves mail, which is why it goes the full
+                         * way round: diff, then a typed „ja" in the terminal, every time.
+                         */}
+                        <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => setMovingToCategory(true)}
+                        >
+                            In Kategorie verschieben
+                        </button>
                         <button type="button" className="button button-quiet" onClick={clearSelection}>
                             Auswahl aufheben
                         </button>
@@ -234,6 +249,10 @@ function Shell(): React.JSX.Element {
                 itself proposed. A dialog that appears only for hand-written rules teaches people
                 to click through it. */}
             <DiffDialog onOpenMail={setOpen as never} />
+
+            {movingToCategory && (
+                <CategoryMoveDialog selection={selected} onClose={() => setMovingToCategory(false)} />
+            )}
 
             {buildingRule && (
                 <SelectionDialog

@@ -5,12 +5,31 @@ A local dashboard for managing Proton Mail's server-side filters and folders.
 ## The one rule
 
 **This tool never moves mail.** Proton's own filters do the sorting; we only manage the rules that
-tell Proton what to do. The single exception is **undo**, which may move back exactly the message
-IDs a rule moved, recorded in the undo journal — never a message the journal does not name.
+tell Proton what to do. There are exactly **two** exceptions, and each is narrow in the same way —
+it moves only message IDs somebody named, never a folder, a sender or a query:
+
+1. **Undo**, which moves back exactly the message IDs a rule moved, from the undo journal's
+   per-message snapshot — never a message the journal does not name.
+2. **Moving into one of Proton's categories** (`move-to-category`), which moves exactly the IDs the
+   user selected and then saw listed in the diff. It exists because a category cannot be a filter's
+   destination: Proton files mail into „Werbung" or „Transaktionen" itself and offers no endpoint
+   that reads or sets what it has learned, so moving the mail *is* the interface. `weigh()` demands
+   the terminal for it unconditionally — including for one message — because this is the exception,
+   and it should cost a keystroke every time.
 
 The rule is enforced structurally, not by discipline: only `packages/proton-api/src/write/` may
-issue non-GET requests, and the message-moving calls inside it are reachable only from the undo
-service. If you are about to add a write path anywhere else, that is the signal to stop.
+issue non-GET requests, and `write/messages.ts` has exactly two importers, asserted as an exact set
+in `write-isolation.test.ts` rather than as a filter anyone can extend. Every function in that file
+takes `messageIds: string[]` — "only explicit ids" as a signature, not as a promise — and the test
+checks that too. `category-service.ts` has no way to obtain an id: it reads through an injected
+`readCurrent`, and the test checks for the absence. If you are about to add a write path anywhere
+else, that is the signal to stop.
+
+**The second exception created no new HTTP route.** It travels over the existing `POST /api/apply`
+like every other change. The capability itself is handed to `applyChange` as
+`ApplyContext.moveToCategory`, assembled in `apps/spike/src/serve-command.ts` — the process that
+holds the session and owns the terminal — so neither `@pms/apply` nor `packages/server/` can reach
+the module that performs it.
 
 `packages/server/` is the same idea one layer out, and the guarantee there has a precise shape:
 
@@ -26,6 +45,49 @@ records an offer and answers `202` while nothing has happened yet.
 
 `packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
 One file to read when someone asks what this tool can change.
+
+### Where the category ids and the category endpoint come from
+
+The ids in `CATEGORY_LABELS` (`packages/grouping/src/group.ts`) are Proton's own `MAILBOX_LABEL_IDS`,
+read out of `@proton/shared` as it ships minified in the desktop client — proton-mail 1.13.3, Debian
+package, binary dated 2026-06-11, read on 2026-09-04:
+
+```sh
+strings /usr/lib/proton-mail/resources/app.asar | grep -o 'CATEGORY_[A-Z]*="[0-9]*"'
+```
+
+Two things there look like mistakes and are not. **There is no 23** — the sequence has a hole, and
+"completing" it would invent a category Proton does not have. And **a category is not a label type**:
+`LABEL_TYPE` runs 1–4 and none of them means category. These are fixed system label ids riding along
+in every message's `LabelIDs`, exactly like the inbox, so reading them costs no endpoint at all.
+
+The endpoint was captured from Proton's own client moving a mail into „Transaktionen" —
+`PUT mail/v4/conversations/label`, body `{LabelID, IDs}`, answered 200 — and then matched against
+`packages/shared/lib/api/messages.ts` in ProtonMail/WebClients, which defines the message-shaped
+sibling `labelMessages` = `PUT mail/v4/messages/label`. **We send the message variant, not the
+conversation variant**, even though the capture shows the conversation one: labelling a conversation
+moves the whole thread, which is more than the user selected. `SpamAction` is omitted — it steers
+Proton's spam handling and has nothing to do with categories.
+
+Two things remain unverified and are stated as unverified on screen: whether the previous category
+falls away by itself (Proton's client sends no `unlabel`, which suggests it does — suggests), and
+whether a category move takes mail out of the inbox. `clearedFromInbox` stays 0 for this change kind
+until the first real run says otherwise.
+
+### The negative finding that explains the „Auto-Regeln" tab
+
+`applications/mail/src/app/components/categoryView/useRecategorizeElement.ts` in WebClients calls
+`applyLocation({type: MOVE, elements, destinationLabelID: categoryId})` and **nothing else**. There
+is no second request, no "apply to future" flag, no field. `mail/v4/settings/mail-category-view` is
+only a global on/off. **Proton's per-sender learning happens server-side and is invisible from
+outside** — no endpoint reads it and none sets it.
+
+That is why „Auto-Regeln" observes instead of managing. It records which category each message
+carried at each sync (`message_categories`, `category_observations`) and infers from repetition, and
+every verdict on that screen is phrased as an observation — *"every time we looked"* — never as a
+rule. The screen names its own blind spots: an incremental sync only fetches new mail, so
+"unchanged" there means **not looked at**; a change may be the user's own, made in Proton's app, and
+the two cannot be told apart.
 
 Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
 a full JSON backup of all filters and folders.
@@ -106,7 +168,7 @@ packages/grouping/      Subject templates, grouping, and the triage ranking
 packages/demo/          A synthetic mailbox, so the interface can be built without an account
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
-packages/changes/       Diff, undo journal and post-write verification
+packages/changes/       Diff, undo journal, category moves and post-write verification
 packages/store/         The encrypted local database
 packages/sync/          Mirroring Proton into it, and reading it back
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only

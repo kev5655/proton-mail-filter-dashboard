@@ -19,9 +19,10 @@ import { describe, expect, it } from 'vitest';
  *
  *  - **No write outside `src/write/`.** A POST added elsewhere would bypass the diff, the backup and
  *    the confirmation, all of which live above that boundary.
- *  - **Nobody imports `write/messages.ts` except the undo service.** Moving mail is the single
- *    documented exception to the core rule; an exception that anything may reach is not an
- *    exception, it is the new behaviour.
+ *  - **`write/messages.ts` has exactly two importers.** Moving mail is the documented exception to
+ *    the core rule — undo, and moving into one of Proton's categories — and the set is asserted as
+ *    an exact set rather than as a filter, so it cannot be widened by adding a line. An exception
+ *    that anything may reach is not an exception, it is the new behaviour.
  *  - **The browser goes to the login page and nowhere else.** A browser is a second way to reach
  *    Proton, and one that no amount of HTTP-level checking can see: a page can be driven to the
  *    mailbox and told to click things. The rule is about Proton, not about `fetch`, so the check
@@ -108,7 +109,7 @@ describe('only src/write may change anything at Proton', () => {
         expect([...found].filter((url) => !allowed.has(url))).toEqual([]);
     });
 
-    it('lets nothing but the undo service reach the message-moving module', async () => {
+    it('lets exactly two services reach the message-moving module', async () => {
         const importers: string[] = [];
 
         for (const file of await allSources()) {
@@ -123,11 +124,44 @@ describe('only src/write may change anything at Proton', () => {
             }
         }
 
-        // Exactly one file, and it exists now. Undo is the single documented exception to "this
-        // tool never moves mail", and an exception several modules can reach is not one.
-        const allowed = new Set([join('packages', 'changes', 'src', 'undo-service.ts')]);
-        expect(importers.filter((path) => !allowed.has(path))).toEqual([]);
-        expect(importers).toContain(join('packages', 'changes', 'src', 'undo-service.ts'));
+        // An exact set, not a filter with an allowlist beside it. The difference is what happens
+        // six weeks from now: adding a third mover has to change this line, in a file whose whole
+        // subject is why there are only two.
+        expect(importers.sort()).toEqual([
+            join('packages', 'changes', 'src', 'category-service.ts'),
+            join('packages', 'changes', 'src', 'undo-service.ts'),
+        ]);
+    });
+
+    it('gives every mail-moving function an explicit list of ids to move', async () => {
+        // "Only ids the user saw" as a signature rather than as a promise. A function taking a
+        // folder, a sender or a query could sweep up mail nobody named, and no amount of care
+        // further up would see it happen.
+        const source = await readFile(
+            join(REPO, 'packages', 'proton-api', 'src', 'write', 'messages.ts'),
+            'utf8'
+        );
+
+        const exported = [...source.matchAll(/export async function (\w+)\(([^)]*)\)/gs)];
+        expect(exported.map((match) => match[1]).sort()).toEqual([
+            'moveMessagesBack',
+            'moveMessagesToCategory',
+        ]);
+        for (const [, name, parameters] of exported) {
+            expect(parameters, name).toMatch(/messageIds:\s*string\[\]/);
+        }
+    });
+
+    it('leaves the category service no way to find an id for itself', async () => {
+        // It is handed ids and reads their state through an injected function. If it could ask
+        // Proton which messages exist, "only what the user selected" would depend on nobody ever
+        // writing the convenient version.
+        const source = await readFile(
+            join(REPO, 'packages', 'changes', 'src', 'category-service.ts'),
+            'utf8'
+        );
+
+        expect(source).not.toMatch(/getMessages|readMessages|LabelIDs\s*\?*\.|mail\/v[0-9]/);
     });
 
     it('keeps the message-moving module out of the write barrel', async () => {
