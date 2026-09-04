@@ -28,7 +28,7 @@ Status pro Test: `offen` · `ok` · `Fehler` · `behoben`
 
 ```sh
 pnpm install
-pnpm schreibtest # neu: prüft den Schreibweg allein, ohne Dashboard — siehe P-01
+pnpm write-test # neu: prüft den Schreibweg allein, ohne Dashboard — siehe P-01
 pnpm sync        # einmal nötig: die Kopie bekommt dadurch den Konto-Fingerabdruck
 ```
 
@@ -83,7 +83,7 @@ Genau das, worum du gebeten hast — ein Befehl, der einen Ordner anlegt, nachsi
 und wieder nachsieht:
 
 ```sh
-pnpm schreibtest
+pnpm write-test
 ```
 
 Er fragt einmal, bevor er anfängt. Dann:
@@ -95,7 +95,7 @@ Er fragt einmal, bevor er anfängt. Dann:
 
 Schritt 2 und 4 sind der Punkt: eine `200` heisst, dass Proton die Anfrage angenommen hat, nicht
 dass sich etwas geändert hat. Keine Mail wird angefasst; der Ordner ist leer, solange er existiert.
-`pnpm schreibtest --behalten` lässt ihn stehen.
+`pnpm write-test --keep` lässt ihn stehen.
 
 Er benutzt dieselben vier Funktionen wie das Dashboard, nicht eigene. **Wenn er durchläuft und das
 Dashboard trotzdem nichts speichern kann, liegt der Fehler oberhalb des Schreibwegs** — und das ist
@@ -118,13 +118,13 @@ kannst. `PMS_LOG_FILE=` (leer) schaltet die Datei ab.
 
 ```sh
 pnpm install
-pnpm schreibtest       # 1. der Schreibweg allein
+pnpm write-test       # 1. der Schreibweg allein
 pnpm sync              # 2. Kopie auffrischen
 pnpm serve             # 3. Terminal 1
 pnpm dev               # 4. Terminal 2 — neu starten, es gibt neue Pakete
 ```
 
-1. `pnpm schreibtest` → vier Häkchen, Ordner am Ende weg.
+1. `pnpm write-test` → vier Häkchen, Ordner am Ende weg.
 2. Ordner anlegen im Dashboard → in Proton nachsehen. **Der Dialog muss sich von selbst schliessen.**
 3. Danach *sofort* eine Regel anlegen, ohne neu zu synchronisieren → muss auch durchgehen. Das ist
    der Fehler Nr. 3 von oben.
@@ -134,7 +134,14 @@ pnpm dev               # 4. Terminal 2 — neu starten, es gibt neue Pakete
 
 Status: `behoben, bitte nachprüfen`
 
-**Befund:**
+**Befund:** 
+1. Funktioniert
+2. Der ordner wir nach den anlegen nicht direkt in ui von mein tool angezeit. Kein Sync machen nur auch odner lokal hinzufügen. Ausser wir müssen ein id oder so wissen das brauchen wir die daten von Proton und wir müssen ein sync machen. Und ja es wird geschlossen der dialog.
+3. Hat funktioneirt
+4. Hat funktioneirt
+5. Hat funktioniert
+
+
 
 **Fix:**
 
@@ -161,7 +168,7 @@ auf und sag es mir — dann verschiebt Undo Dinge, die es nicht anfassen darf.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ich denke der Veraluf funktioniet nicht richtig und ich habe dir noch weiter features in auftrag gebene sieh ganz unten. Desshabl habe ich das noch nicht getestet.
 
 **Fix:**
 
@@ -177,7 +184,7 @@ einfügt, überschreibt jede neue Regel alle bestehenden, und meine Diff-Rechnun
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Der filter wurde unter dem bestehenden filter hinzugefügt.
 
 **Fix:**
 
@@ -197,7 +204,7 @@ gesehen, was Proton am Ende wirklich speichert.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja das passt.
 
 **Fix:**
 
@@ -215,7 +222,7 @@ in Protons Liste. Geht die Summe nicht auf, fehlt etwas stillschweigend.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja das habe ich kein aufälligkeiten geshen.
 
 **Fix:**
 
@@ -238,6 +245,12 @@ Neu: links die Liste, rechts der Editor mit Name, Bedingungen, Aktionen und Vors
 Status: `offen`
 
 **Befund:**
+- Wen ich die seite weiter bläter und am ende ankomme spring der weiter und zurück element nach oben bitte fixiere es unten.
+- Wen ich auf nur verwante zeigen oder alle übrigen zeige klicke spring das ui auch.
+- Wen ich die regel in proton inaktiv mache wird sie in unseren ui immer noch als aktiv angezeit.
+- Es zeig mir bie jeder regel folgendes an:
+Diese Regel ist als Sieve-Skript geschrieben. Protons eigene Oberfläche kann sie deshalb nicht mehr bearbeiten, und dieser Editor standardmässig auch nicht. Sie liesse sich aber vollständig als klickbarer Filter ausdrücken. Beim Umwandeln siehst du vorher, was sich dadurch an den getroffenen Mails ändert.
+wen ich das jedoch bestätige / umwandel zeigte es es mir trozdem noch an.
 
 **Fix:**
 
@@ -255,7 +268,7 @@ dabei zusammenkommt, und wo eine **eigene** Regel dieselbe Arbeit ein zweites Ma
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Da machen wir aktive gerade was dran teste ich noch nicht.
 
 **Fix:**
 
@@ -273,7 +286,7 @@ Knopf in der Seitenleiste.
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ist okay passt alles
 
 **Fix:**
 
@@ -294,7 +307,7 @@ Status: `offen`
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Bitte die Vorschläge einklapbar machen wie  Nach Absender oder die anderen. Es sind relative viele vorschläge. Bitte auch noch ein such filter damit ich die vorschläge besser filter kann. 
 
 **Fix:**
 
@@ -316,7 +329,7 @@ Jetzt sagt der Viewer, dass es keinen Inhalt gibt, und bietet den Link zu Proton
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Ja das funktioniert aber ich möchte auch die wahl haben das die email per bridge geladen wird fals das möglich ist. Also zwei buttons einer der verlinkt auf das mail und der ander der das mail lädt in ein ui in unsre tool.
 
 **Fix:**
 
@@ -332,7 +345,7 @@ Nach allem Testen in Protons Oberfläche durchsehen:
 
 Status: `offen`
 
-**Befund:**
+**Befund:** Das sollte okay sein.
 
 **Fix:**
 
@@ -433,7 +446,7 @@ Konto zu prüfen. Eine Minute deiner Zeit klärt es:
 3. Nachsehen: liegt sie **im Posteingang und** unter dem Label? Oder ist sie aus dem Posteingang
    verschwunden?
 
-**Befund:**
+**Befund:** Ist alles okey, noch ein weter feature zum label sie ganz unten.
 
 Sobald das feststeht, baue ich es als Schalter in der Regel — „verschieben" gegen „im Posteingang
 lassen und markieren" — mit der richtigen Vorschau. Der Matcher müsste dafür mitlernen, dass ein
@@ -572,3 +585,17 @@ Gegengeprüft, indem der Fehler wieder eingebaut wurde:
 zwischen happy-dom und React, es tritt auch ohne diese Änderungen auf (dort sogar häufiger), die
 Anzahl schwankt von Lauf zu Lauf, und kein Test scheitert daran. Ich habe es nicht angefasst — es
 gehört in einen eigenen Durchgang, nicht in diesen.
+
+Weiter änderungen: 
+- bitte alle commands in english und nicht in detusch: pnpm write-test
+- Wen ich ordner umbennenen will bitte kein alert promt. Direkt über das ui das wir gebaut haben.
+- Das Protokoll ist mir unklare bitte besser meldungen wie Ordner von xy auf xzy umbennant oder Ordner gelöscht. Ich denka auch Protokoll und Verlauf könne kombiniert werden den akteull funktioniert Verlauf nicht! Ich möchte eigentlich bein Protokoll / Verlauf auf ein ststand zurück gehen könne also alle angewnaten commands rückgängig machen wie ein Umbennen eins ordners, oder noch vile wichtiger wen wir eine neue Regel machen und es dan automatisch alle mails verschiben auch die vergangen das wir das rückgängig machen könne den im Proton ui ist das schon realtiv schwirikg
+- Wen es möglich ist füge noch ein passendes log zur webstie hinzu generier ein Proton like logo.
+- Wen ich bei den einstellungen Ollama aktiviern möchte warum ist es augeschaltet? Auschallten sollte ich über die einstllungen machen könne und nicht über eine variable oder env. Und wen es noch witer wichtige einstllunge gibt die hard codiert sind bitte auch in die einstellung hizufügen.
+- In vilelen fällen wen ich was anlegen will zeig es mir an das ich mit ja noch bestätigen muss das stimmt aber meisten nicht. Zeige da nur an wen ich auch wirklich ja sagen muss im terminal.
+- bin mir nicht sicher aber in Proton kann man bei den regeln auf "Filter auf vorhandene E-Mails anwenden" klicken so müssten wir nicht selbst die vergangen emails verschiben verwende dies feature um vergangen emails zu verschiben, evlt müssen wir das in regel ui anpassen.
+- Wen ich eine neue regel in Proton erstelle kommt sie zu änderunge hinzu das ist supper aber sie ist auch schon in den Regeln aktiv alos bearbiet bahr ich denke wir sollten sie dort noch deaktiviern also das wir wirlick zu erste sie bestätigen gehen müssen im änderungs section und dan könnten wir sie auch bearbeiten wen das nötig ist. Bitte gib dir das label nicht bestätig oder so.
+- Wen ich ein änderung an Proton sende bitte loading kreis andzeigen im button, damit ich sehe das was passiert.
+- Wen ich mauell einsync gemcht habe resete die 5min zurück. Ich denke die 5min sollte man auch einstellen sollen über die einstellungen.
+- Es soll auch möglich sein wen wir regelnd definiere das wir labels dazufügen könne. Entweder manuell das ich sie auswählen kann oder mit ein llm button der labels für die regel vorschlägt. Ich denke wir sollte auch die Regen aufteilen in Regen die gebauen wurde für emails in odener zu verschiben und regeln die dafür das sind labels auf mails zu packen. Ich denke wir machen mal ein erste einfach version und dan scahuen wir weiter. Was mein Problme ist ist. Es fählt mir schwer labels zu bestimmen für mails desshabl llm hilfe mit lokalem model. Bitte zeige auch and das es das feature gibt und mit tool tip wo man es aktivieren kann mit link dazu. Das kannst du bei allen sachen machen die irgende welche llm umterstützung haben sollten.
+- Noch ein änderungen zu den vorschlägen: Ich denke ich habe das schon erwäht mit den filter das ich so emails schneller suchen kann. Fals nicht hier: Ich möchte ein globaler filter. Der alle unterkategorien filtert wie: "Nach Absender", "Nach Betreff" oder "Nach Organisation" dan aber auch noch spezifischer filte die direkt die kategorien filter also kann ich global nach post filte und dan auf der kategorie noch mals nach finace oder so und beide werden angewant.

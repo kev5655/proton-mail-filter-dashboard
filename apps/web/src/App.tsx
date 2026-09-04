@@ -43,18 +43,27 @@ export function App(): React.JSX.Element {
  * a history of things that never happened to the account they are now looking at.
  */
 function Sources(): React.JSX.Element {
-    const { source, syncedAt } = useMailboxStatus();
+    const { source, syncedAt, version } = useMailboxStatus();
     const reload = useReloadMailbox();
 
     return (
         <SyncProvider onFinished={reload}>
             <ApplyProvider onApplied={reload}>
             {/*
-             * Keyed on the source *and* the sync time: a finished sync replaces the mailbox under
-             * the store, and rules seeded from the previous copy would otherwise be edited against
-             * data that has moved on.
+             * Keyed on the source, the sync time *and* the account fingerprint.
+             *
+             * The first two cover a finished sync: it replaces the mailbox under the store, and
+             * rules seeded from the previous copy would otherwise be edited against data that has
+             * moved on.
+             *
+             * The fingerprint covers a write, and it had to be added because a folder created from
+             * the dashboard did not appear until the next sync. The reload after an apply does
+             * fetch a fresh snapshot — the server re-reads folders and filters straight after
+             * writing — but `folders` is seeded once with `useState`, and without a remount the
+             * store kept showing the list from before. `syncedAt` cannot stand in for this: a write
+             * is not a sync and leaves it untouched.
              */}
-            <StoreProvider key={`${source}:${String(syncedAt ?? 'none')}`}>
+            <StoreProvider key={`${source}:${String(syncedAt ?? 'none')}:${version ?? 'none'}`}>
                 <Shell />
             </StoreProvider>
             </ApplyProvider>

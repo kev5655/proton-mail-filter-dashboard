@@ -143,9 +143,19 @@ export function RuleEditor({
     const coverage = categoryCoverage(matched.map((message) => message.ID));
     const dominant = coverage[0];
 
-    const sieveOnly = savedRule?.authoredAs === 'sieve';
+    /*
+     * Two different questions, and conflating them kept the notice on screen after the user had
+     * already acted on it.
+     *
+     * `authoredAs` describes the *saved* rule and does not change until a new version is written to
+     * Proton — so deriving the notice from it alone meant "In einen Proton-Filter umwandeln" left
+     * everything exactly as it was, minus the lock. `stillSieve` is the narrower question the
+     * notice is actually about: is this rule still presented as a script *right now*.
+     */
+    const savedAsSieve = savedRule?.authoredAs === 'sieve';
     const verdict = savedRule === undefined ? { expressible: true as const } : isExpressibleAsTree(savedRule.rule);
-    const locked = sieveOnly && !showSieve;
+    const stillSieve = savedAsSieve && !showSieve;
+    const locked = stillSieve;
 
     const linkFor =
         source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
@@ -176,7 +186,32 @@ export function RuleEditor({
                 {isDirty(original, draft) && <span className="badge badge-warning">Nicht gespeichert</span>}
             </header>
 
-            {sieveOnly && (
+            {/*
+             * Converted, but not yet saved. Said plainly, because the rule at Proton is still the
+             * script until somebody stages and confirms the change — and a screen that simply went
+             * quiet here would suggest the conversion had already landed.
+             */}
+            {savedAsSieve && !stillSieve && (
+                <div className="notice notice-info">
+                    <strong>Umgewandelt.</strong> Die Felder unten sind jetzt bearbeitbar. Bei Proton
+                    steht weiterhin das Sieve-Skript — erst <em>Vormerken</em> und die Bestätigung
+                    machen daraus einen klickbaren Filter.
+                </div>
+            )}
+
+            {/*
+             * Switched off at Proton. Worth its own line rather than a badge: every count and every
+             * preview below assumes the rule runs, and none of them does while it is off.
+             */}
+            {savedRule !== undefined && !savedRule.enabled && (
+                <div className="notice notice-warning">
+                    <strong>Diese Regel ist bei Proton deaktiviert.</strong> Sie läuft nicht, und die
+                    Vorschau unten zeigt, was sie <em>täte</em>, wenn sie liefe — nicht, was gerade
+                    passiert.
+                </div>
+            )}
+
+            {stillSieve && (
                 <div className="notice notice-warning">
                     <strong>Diese Regel ist als Sieve-Skript geschrieben.</strong> Protons eigene
                     Oberfläche kann sie deshalb nicht mehr bearbeiten, und dieser Editor
@@ -417,7 +452,7 @@ export function RuleEditor({
                 {/* For a rule that was written as Sieve, what Proton actually stores — and a
                     model's reading of it, labelled and below the derived structure, never instead
                     of it. */}
-                {sieveOnly && savedRule !== undefined && <SieveDetail ruleId={savedRule.id} />}
+                {savedAsSieve && savedRule !== undefined && <SieveDetail ruleId={savedRule.id} />}
             </details>
 
             <div className="row" style={{ marginTop: 16 }}>

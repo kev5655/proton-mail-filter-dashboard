@@ -66,17 +66,21 @@ export function ChangesPage(): React.JSX.Element {
                                 type="button"
                                 className="button"
                                 onClick={() => {
-                                    if (rule === undefined || source === 'demo') {
+                                    if (rule === undefined) {
+                                        // A folder, or a rule the copy no longer has. Nothing to
+                                        // offer, so the decision is only ours to record.
                                         resolveDrift(item.id, 'adopt');
                                         return;
                                     }
-                                    stage({
-                                        id: `adopt-${item.id}`,
-                                        kind: 'adopt-rule',
-                                        summary: `Regel „${item.name}" übernehmen`,
-                                        before: rule,
-                                    });
-                                    resolveDrift(item.id, 'adopt');
+                                    stage(
+                                        {
+                                            id: `adopt-${item.id}`,
+                                            kind: 'adopt-rule',
+                                            summary: `Regel „${item.name}" übernehmen`,
+                                            before: rule,
+                                        },
+                                        { id: item.id, decision: 'adopt' }
+                                    );
                                 }}
                             >
                                 Übernehmen
@@ -92,13 +96,15 @@ export function ChangesPage(): React.JSX.Element {
                                     }
                                     // Disabling keeps the rule. Someone wrote it deliberately, and
                                     // losing it to a click in a review screen is a poor trade.
-                                    stage({
-                                        id: `disable-${item.id}`,
-                                        kind: 'disable-rule',
-                                        summary: `Regel „${item.name}" bei Proton deaktivieren`,
-                                        before: rule,
-                                    });
-                                    resolveDrift(item.id, 'reject');
+                                    stage(
+                                        {
+                                            id: `disable-${item.id}`,
+                                            kind: 'disable-rule',
+                                            summary: `Regel „${item.name}" bei Proton deaktivieren`,
+                                            before: rule,
+                                        },
+                                        { id: item.id, decision: 'reject' }
+                                    );
                                 }}
                             >
                                 Deaktivieren
@@ -115,13 +121,15 @@ export function ChangesPage(): React.JSX.Element {
                                     // Deleting always asks a second time, in the terminal. See
                                     // `weigh` — removals are the one class that never gets waved
                                     // through on the dialog alone.
-                                    stage({
-                                        id: `delete-${item.id}`,
-                                        kind: 'delete-rule',
-                                        summary: `Regel „${item.name}" bei Proton löschen`,
-                                        before: rule,
-                                    });
-                                    resolveDrift(item.id, 'reject');
+                                    stage(
+                                        {
+                                            id: `delete-${item.id}`,
+                                            kind: 'delete-rule',
+                                            summary: `Regel „${item.name}" bei Proton löschen`,
+                                            before: rule,
+                                        },
+                                        { id: item.id, decision: 'reject' }
+                                    );
                                 }}
                             >
                                 Löschen

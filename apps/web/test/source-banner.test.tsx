@@ -27,6 +27,7 @@ function render(status: MailboxStatus & { loading: boolean }): string {
 const DEMO = {
     source: 'demo',
     syncedAt: undefined,
+    version: undefined,
     truncated: false,
     unreadable: [],
     problem: undefined,
@@ -36,6 +37,7 @@ const DEMO = {
 const REAL = {
     source: 'proton',
     syncedAt: 1_700_000_000,
+    version: 'v1',
     truncated: false,
     unreadable: [],
     problem: undefined,

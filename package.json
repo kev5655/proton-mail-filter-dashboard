@@ -12,7 +12,7 @@
     "spike": "pnpm --filter @pms/spike start",
     "sync": "pnpm --filter @pms/spike start --sync",
     "serve": "pnpm --filter @pms/spike start --serve",
-    "schreibtest": "pnpm --filter @pms/spike start --schreibtest",
+    "write-test": "pnpm --filter @pms/spike start --write-test",
     "build:vendor": "pnpm --filter @proton/sieve build",
     "check-types": "pnpm build:vendor && tsc && tsc -p tsconfig.browser.json",
     "test": "pnpm build:vendor && vitest run",

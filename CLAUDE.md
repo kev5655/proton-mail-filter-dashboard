@@ -147,7 +147,7 @@ Consequences that are now load-bearing:
   follow: stored session, then refresh, then login. Proton rotates the refresh token on each use, so
   a refreshed session must be written back.
 - **`LoginGuard` refuses attempts during an escalating cooldown**, and after a 2028 it refuses
-  indefinitely — released only by `pnpm spike --sperre-geklaert`, which the owner runs once they
+  indefinitely — released only by `pnpm spike --lockout-cleared`, which the owner runs once they
   have signed in at mail.proton.me and seen the account is reachable. No timer, deliberately: a
   clock would schedule the next blind attempt. Do not weaken it or wrap it in a retry loop.
 - **Diagnose a rejected login offline.** The last one was a missing request, findable in

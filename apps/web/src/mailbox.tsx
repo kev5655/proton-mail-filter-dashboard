@@ -32,6 +32,15 @@ export interface MailboxStatus {
     source: MailboxSource;
     /** Unix seconds of the last completed sync. Only ever set for the real mailbox. */
     syncedAt: number | undefined;
+    /**
+     * The account's fingerprint — filters and folders as they were when this copy was made.
+     *
+     * Carried into the interface because it answers a question `syncedAt` cannot: *has the account
+     * changed shape?* A write changes it, because the server re-reads the folders and filters
+     * straight afterwards; a sync that finds nothing new leaves it alone. That distinction is what
+     * lets a screen holding derived state know when to start over.
+     */
+    version: string | undefined;
     /** True when the local copy is known to be incomplete because a sync hit its limit. */
     truncated: boolean;
     /** Filters that are in the account but could not be read as rules. */
@@ -57,6 +66,7 @@ const ENDPOINT = '/api/mailbox';
 const DEMO_STATUS: MailboxStatus = {
     source: 'demo',
     syncedAt: undefined,
+    version: undefined,
     truncated: false,
     unreadable: [],
     problem: undefined,
@@ -119,6 +129,7 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                     status: {
                         source: 'proton',
                         syncedAt: snapshot.meta.syncedAt,
+                        version: snapshot.meta.version,
                         truncated: snapshot.meta.truncated,
                         unreadable: snapshot.unreadable,
                         problem: undefined,

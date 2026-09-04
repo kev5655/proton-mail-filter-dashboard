@@ -127,7 +127,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    if (process.argv.includes('--schreibtest')) {
+    if (process.argv.includes('--write-test')) {
         await runWriteProbe(process.argv);
         return;
     }
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    if (process.argv.includes('--sperre-geklaert')) {
+    if (process.argv.includes('--lockout-cleared')) {
         const cleared = await clearLockout();
         if (cleared === undefined) {
             console.log('\nKeine Kontosperre vermerkt — es gibt nichts freizugeben.\n');

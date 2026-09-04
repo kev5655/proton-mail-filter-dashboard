@@ -150,7 +150,7 @@ export function RulesPage(): React.JSX.Element {
                                     </span>
                                 </span>
 
-                                <Verdict verdict={report?.verdict} />
+                                <Verdict verdict={report?.verdict} enabled={entry.enabled} />
                             </button>
                         );
                     })}
@@ -292,8 +292,17 @@ function FilterKind({ kind }: { kind: 'tree' | 'sieve' }): React.JSX.Element {
  *
  * „wirkungslos" is the finding Proton's own filter list cannot show: the rule matches plenty of
  * mail and never decides where any of it goes, because a later rule files it again.
+ *
+ * `enabled` comes first and outranks every verdict, because it is the only one of them that is a
+ * fact about Proton rather than a conclusion of ours. A rule switched off in Proton's own interface
+ * used to read „aktiv" here — the `default:` branch caught it — which is the worst way to be wrong:
+ * confidently, in green, about somebody else's account.
  */
-function Verdict({ verdict }: { verdict: string | undefined }): React.JSX.Element {
+function Verdict({ verdict, enabled }: { verdict: string | undefined; enabled: boolean }): React.JSX.Element {
+    if (!enabled) {
+        return <span className="badge badge-neutral">deaktiviert</span>;
+    }
+
     switch (verdict) {
         case 'never-matches':
             return <span className="badge badge-warning">trifft nichts</span>;

@@ -20,7 +20,7 @@ import { RuleConditions } from './RuleConditions.js';
  * dialog people learn to dismiss.
  */
 export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => void }): React.JSX.Element | null {
-    const { staged, discard, confirm } = useStore();
+    const { staged, discard, confirm, settle } = useStore();
     const { source } = useMailboxStatus();
     const { categoryCoverage } = useMailbox();
     const { phase, offer, reset } = useApply();
@@ -39,6 +39,9 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
         if (!applied) {
             return undefined;
         }
+        // Now, not on the click. Anything the change decided about a drift entry becomes true at
+        // the moment the account says so, and a declined or expired offer settles nothing.
+        settle();
         const timer = setTimeout(() => {
             reset();
             discard();
@@ -46,7 +49,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
         return () => {
             clearTimeout(timer);
         };
-    }, [applied, reset, discard]);
+    }, [applied, reset, discard, settle]);
 
     if (staged === undefined) {
         return null;

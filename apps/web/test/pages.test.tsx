@@ -64,6 +64,15 @@ describe('the rules page', () => {
         expect(text(html)).toContain('Zielordner doppelt');
     });
 
+    it('does not call a switched-off rule active', () => {
+        // The badge used to be a verdict about how well a rule works, and its `default:` branch
+        // said „aktiv" — including for a rule Proton is not running at all. Being confidently wrong
+        // in green about somebody else's account is the worst version of this bug.
+        const body = text(html);
+        expect(body).toContain('Rechnungen ablegen (pausiert)');
+        expect(body).toContain('deaktiviert');
+    });
+
     it('distinguishes a script filter from a clickable Proton filter', () => {
         // The distinction decides what the user can do with the rule: a Proton filter can be edited
         // in their own interface, a script filter appears there only as code.

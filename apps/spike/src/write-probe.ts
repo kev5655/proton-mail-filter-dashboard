@@ -29,19 +29,19 @@ const log = getLogger('write-probe');
  * ending on a success line.
  */
 
-const PREFIX = 'PMS-Schreibtest';
+const PREFIX = 'PMS-Write-Test';
 
 export async function runWriteProbe(argv: readonly string[]): Promise<void> {
-    const keep = argv.includes('--behalten');
+    const keep = argv.includes('--keep');
     const name = `${PREFIX} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
 
-    console.log('\nProton Mail Sorter — Schreibtest\n');
+    console.log('\nProton Mail Sorter — Schreibtest (pnpm write-test)\n');
     console.log('Dieser Befehl verändert dein Konto. Genau zweimal, und beide Male sichtbar:');
     console.log(`  1. Er legt einen leeren Ordner „${name}" an.`);
     console.log('  2. Er liest die Ordnerliste zurück und prüft, ob er wirklich da ist.');
     console.log(
         keep
-            ? '  3. Er lässt ihn stehen (--behalten). Du musst ihn selbst löschen.'
+            ? '  3. Er lässt ihn stehen (--keep). Du musst ihn selbst löschen.'
             : '  3. Er löscht ihn wieder und prüft, ob er wirklich weg ist.'
     );
     console.log('\nEs wird keine Mail angefasst. Der Ordner ist leer, solange er existiert.');

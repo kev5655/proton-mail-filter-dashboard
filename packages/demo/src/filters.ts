@@ -100,4 +100,19 @@ export const DEMO_RULES: DemoRule[] = [
         authoredAs: 'tree',
         rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['newsletter@versandhaus.example'], 'Junk'),
     },
+    {
+        // Switched off in Proton's own interface, which is a state the dashboard has to render
+        // honestly and used to get wrong: the list called it „aktiv", in green, because the only
+        // badge it had was a verdict about how well the rule works. A rule that does not run works
+        // neither well nor badly.
+        //
+        // It is in the demo because a state nothing exercises is a state nobody notices breaking,
+        // and because a switched-off rule is exactly the sort of thing a real mailbox accumulates.
+        id: 'r-abgeschaltet',
+        name: 'Rechnungen ablegen (pausiert)',
+        priority: 7,
+        enabled: false,
+        authoredAs: 'tree',
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['rechnung@'], 'Rechnungen'),
+    },
 ];

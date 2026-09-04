@@ -37,7 +37,15 @@ export interface StoreState {
 
     /** The change awaiting confirmation, with its consequences already computed. */
     staged: ChangePlan | undefined;
-    stage: (change: PendingChange) => void;
+    /**
+     * Offer a change for review.
+     *
+     * `resolves` names a drift entry the change answers. It is applied only once the change has
+     * actually landed — see `settle`. Marking it on the click was wrong in the one direction that
+     * matters: a change declined in the terminal left the entry crossed off anyway, so the screen
+     * whose job is to report what really changed at Proton reported a decision nobody made.
+     */
+    stage: (change: PendingChange, resolves?: { id: string; decision: 'adopt' | 'reject' }) => void;
     /**
      * Stage a move of named messages into one of Proton's categories.
      *
@@ -50,6 +58,14 @@ export interface StoreState {
     discard: () => void;
     /** Apply the staged change. Only reachable from the diff dialog. */
     confirm: () => void;
+    /**
+     * The staged change reached the account.
+     *
+     * Called by the diff dialog when the real write path reports success — the demo path settles
+     * inside `confirm` instead. It exists because the store cannot see the HTTP round trip: the
+     * offer, the terminal question and the answer all happen in `ApplyProvider`.
+     */
+    settle: () => void;
 
     undo: (entryId: string) => void;
     /** Rules and folders that appeared at Proton without the tool doing it. */
@@ -139,17 +155,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     const [journal] = useState(() => new Journal());
     const [version, setVersion] = useState(0);
 
+    const [pendingResolution, setPendingResolution] = useState<
+        { id: string; decision: 'adopt' | 'reject' } | undefined
+    >(undefined);
+
     const stage = useCallback(
-        (change: PendingChange) => {
+        (change: PendingChange, resolves?: { id: string; decision: 'adopt' | 'reject' }) => {
             // The diff is computed before the dialog opens, so the dialog cannot show a change
             // whose consequences were never worked out.
             setStaged(planChange({ rules, messages, change }));
+            setPendingResolution(resolves);
         },
-        [rules]
+        [rules, messages]
     );
+
+    /** Whatever the landed change decided about a drift entry, recorded now that it is true. */
+    const settle = useCallback(() => {
+        setPendingResolution((pending) => {
+            if (pending !== undefined) {
+                setResolutions((current) => ({ ...current, [pending.id]: pending.decision }));
+            }
+            return undefined;
+        });
+    }, []);
 
     const stageCategoryMove = useCallback(
         (categoryId: string, messageIds: string[]) => {
+            setPendingResolution(undefined);
             setStaged(
                 planCategoryMove({
                     rules,
@@ -201,9 +233,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             })
         );
 
+        settle();
         setStaged(undefined);
         setVersion((current) => current + 1);
-    }, [staged, rules, journal]);
+    }, [staged, rules, journal, settle]);
 
     const undo = useCallback(
         (entryId: string) => {
@@ -226,14 +259,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             staged,
             stage,
             stageCategoryMove,
-            discard: () => setStaged(undefined),
+            discard: () => {
+                setStaged(undefined);
+                setPendingResolution(undefined);
+            },
             confirm,
+            settle,
             undo,
             drift,
             resolveDrift,
         }),
         // `version` is in the list because the journal is mutable and does not change identity.
-        [rules, folders, journal, staged, stage, stageCategoryMove, confirm, undo, drift, resolveDrift, version]
+        [rules, folders, journal, staged, stage, stageCategoryMove, confirm, settle, undo, drift, resolveDrift, version]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;

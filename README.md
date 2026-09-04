@@ -182,7 +182,7 @@ second, so a year of mail takes minutes. Ask for more only when you need it.
 ```sh
 pnpm spike --describe-1password    # print the vault item's field names, never their values
 pnpm spike --scrub response.json   # pseudonymise a hand-captured response into a fixture
-pnpm spike --sperre-geklaert       # clear a login block after signing in at mail.proton.me
+pnpm spike --lockout-cleared       # clear a login block after signing in at mail.proton.me
 pnpm serve --auto-sync 0           # serve without the five-minute background refresh
 pnpm serve --port 5175             # serve somewhere else
 ```
@@ -240,14 +240,14 @@ tests can assert that a refused change produced *no* requests.
 Two things need a real Proton account, and both are the account owner's to run.
 
 ```sh
-pnpm schreibtest    # one deliberate round trip: create a folder, check it, delete it, check again
+pnpm write-test      # one deliberate round trip: create a folder, check it, delete it, check again
 ```
 
 This is the smallest thing that exercises the write path end to end. It creates one empty folder
 named `PMS-Schreibtest <date>`, reads the folder list back to confirm Proton really has it, deletes
 it, and reads back again — because a write returning `200` means Proton accepted the request, not
 that anything changed. It asks before it starts, touches no mail, and takes the same backup every
-other write is preceded by. `--behalten` leaves the folder in place.
+other write is preceded by. `--keep` leaves the folder in place.
 
 The other is [TESTPLAN-PRODUKTIV.md](TESTPLAN-PRODUKTIV.md), which lists what only somebody with the
 account can check.

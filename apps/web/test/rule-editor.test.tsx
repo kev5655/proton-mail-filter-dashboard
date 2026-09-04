@@ -184,6 +184,60 @@ describe('a Sieve-authored rule', () => {
 
         expect(field('Name der Regel').disabled).toBe(false);
     });
+
+    it('stops warning once the rule has been converted', () => {
+        // The notice used to be derived from `authoredAs` alone, which describes the *saved* rule
+        // and does not move until a new version reaches Proton. So the warning — and the button
+        // offering the conversion — stayed on screen after the user had already taken it.
+        if (sieveRule === undefined) {
+            return;
+        }
+        render(fromRule(sieveRule), sieveRule);
+
+        act(() => {
+            [...container.querySelectorAll('button')]
+                .find((entry) => (entry.textContent ?? '').includes('In einen Proton-Filter umwandeln'))
+                ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+
+        expect(container.textContent).not.toContain('kann sie deshalb nicht mehr bearbeiten');
+        expect(
+            [...container.querySelectorAll('button')].some((entry) =>
+                (entry.textContent ?? '').includes('In einen Proton-Filter umwandeln')
+            )
+        ).toBe(false);
+    });
+
+    it('says the conversion has not reached Proton yet', () => {
+        // Going quiet would be the other way to be wrong: at this point the account still runs the
+        // script, and only staging and confirming changes that.
+        if (sieveRule === undefined) {
+            return;
+        }
+        render(fromRule(sieveRule), sieveRule);
+
+        act(() => {
+            [...container.querySelectorAll('button')]
+                .find((entry) => (entry.textContent ?? '').includes('In einen Proton-Filter umwandeln'))
+                ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+
+        expect(container.textContent).toContain('Umgewandelt.');
+        expect(container.textContent).toContain('Bei Proton steht weiterhin das Sieve-Skript');
+    });
+});
+
+describe('a rule switched off at Proton', () => {
+    it('says so, because every count below assumes it runs', () => {
+        const rule = DEMO_RULES.find((entry) => entry.authoredAs !== 'sieve');
+        if (rule === undefined) {
+            return;
+        }
+        const disabled = { ...rule, enabled: false };
+        render(fromRule(disabled), disabled);
+
+        expect(container.textContent).toContain('bei Proton deaktiviert');
+    });
 });
 
 describe('unsaved work', () => {
