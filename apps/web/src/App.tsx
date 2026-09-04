@@ -12,6 +12,7 @@ import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { TriagePage } from './pages/TriagePage.js';
+import { ApplyProvider } from './apply.js';
 import { ModelProvider } from './llm.js';
 import { MailboxProvider, useMailbox, useMailboxStatus, useReloadMailbox } from './mailbox.js';
 import { SyncPanel } from './components/SyncPanel.js';
@@ -45,6 +46,7 @@ function Sources(): React.JSX.Element {
 
     return (
         <SyncProvider onFinished={reload}>
+            <ApplyProvider onApplied={reload}>
             {/*
              * Keyed on the source *and* the sync time: a finished sync replaces the mailbox under
              * the store, and rules seeded from the previous copy would otherwise be edited against
@@ -53,6 +55,7 @@ function Sources(): React.JSX.Element {
             <StoreProvider key={`${source}:${String(syncedAt ?? 'none')}`}>
                 <Shell />
             </StoreProvider>
+            </ApplyProvider>
         </SyncProvider>
     );
 }

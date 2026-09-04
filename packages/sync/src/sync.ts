@@ -1,5 +1,12 @@
 import { getLogger } from '@pms/core/logger';
-import { getFilters, getFolders, getLabels, getMessages, type ProtonHttp } from '@pms/proton-api';
+import {
+    fingerprintAccount,
+    getFilters,
+    getFolders,
+    getLabels,
+    getMessages,
+    type ProtonHttp,
+} from '@pms/proton-api';
 import type { Db } from '@pms/store';
 
 import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from './mirror.js';
@@ -70,6 +77,12 @@ export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {
 
     const { messages, truncated } = await syncMessages(db, http, options, report);
 
+    // What the account looked like at this moment.
+    //
+    // A write is refused when the account has moved since the plan was computed, and this is the
+    // "since" — the browser sees only the mirror, so the comparison has to be against what was true
+    // when the mirror was made.
+    setMeta(db, 'accountVersion', fingerprintAccount(filters, folders));
     setMeta(db, 'lastSyncAt', String(Math.floor(Date.now() / 1000)));
     // Recorded, not just returned. Whether the copy is complete outlives the run that made it, and
     // anything reading the database later — the dashboard above all — has to be able to say "these

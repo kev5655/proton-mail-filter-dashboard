@@ -119,9 +119,11 @@ describe('only src/write may change anything at Proton', () => {
             }
         }
 
-        // Nothing imports it yet; when the undo service lands, it and only it belongs on this list.
+        // Exactly one file, and it exists now. Undo is the single documented exception to "this
+        // tool never moves mail", and an exception several modules can reach is not one.
         const allowed = new Set([join('packages', 'changes', 'src', 'undo-service.ts')]);
         expect(importers.filter((path) => !allowed.has(path))).toEqual([]);
+        expect(importers).toContain(join('packages', 'changes', 'src', 'undo-service.ts'));
     });
 
     it('keeps the message-moving module out of the write barrel', async () => {
@@ -142,5 +144,91 @@ describe('only src/write may change anything at Proton', () => {
         );
 
         expect(backup).toContain('backupBeforeWrite');
+    });
+});
+
+
+/**
+ * The write path, once it became real.
+ *
+ * The rules above were written while nothing could write. These are about the arrangement that now
+ * can: one file performs the writes, a different one parses the HTTP that asks for them, and the
+ * two must not be able to reach each other. That is the structural form of "an HTTP request is an
+ * offer, not a trigger" — a sentence in a comment would not survive a hurried afternoon.
+ */
+describe('the write path stays where it was put', () => {
+    it('lets only the executor import the write barrel', async () => {
+        const importers: string[] = [];
+
+        for (const file of await allSources()) {
+            const relativePath = relative(REPO, file);
+            if (relativePath.includes(join('proton-api', 'src', 'write'))) {
+                continue;
+            }
+            const source = await readFile(file, 'utf8');
+            if (/from '@pms\/proton-api\/write'/.test(source)) {
+                importers.push(relativePath);
+            }
+        }
+
+        // One file to read when someone asks what this tool can change.
+        expect(importers).toEqual([join('packages', 'apply', 'src', 'steps.ts')]);
+    });
+
+    it('keeps the routing code away from the code that performs anything', async () => {
+        // The file that parses a request must be incapable of acting on it. They meet through a
+        // channel object handed in from outside, which is what makes the confirmation unskippable.
+        for (const name of ['handler.ts', 'sync-channel.ts', 'serve.ts']) {
+            const source = await readFile(join(REPO, 'packages', 'server', 'src', name), 'utf8');
+
+            expect(source, name).not.toMatch(/@pms\/apply/);
+            expect(source, name).not.toMatch(/@pms\/proton-api\/write/);
+            expect(source, name).not.toMatch(/@pms\/changes\/undo/);
+        }
+    });
+
+    it('never writes without a backup in the same module', async () => {
+        const steps = await readFile(join(REPO, 'packages', 'apply', 'src', 'steps.ts'), 'utf8');
+
+        // If the writes ever move somewhere the backup does not, this fails rather than the backup
+        // quietly becoming optional.
+        expect(steps).toMatch(/backupBeforeWrite/);
+    });
+
+    it('never writes without asking, and asks somewhere HTTP cannot reach', async () => {
+        const apply = await readFile(join(REPO, 'packages', 'apply', 'src', 'apply.ts'), 'utf8');
+
+        // The confirmation is awaited before the first write, and the writes live behind steps.js.
+        const confirmAt = apply.indexOf('context.confirm(');
+        const writeAt = apply.indexOf('await perform(');
+        expect(confirmAt).toBeGreaterThan(-1);
+        expect(writeAt).toBeGreaterThan(confirmAt);
+    });
+
+    it('keeps the undo service out of the changes barrel', async () => {
+        // apps/web imports @pms/changes. Re-exporting undo there would pull a Proton write module
+        // into the browser bundle — reachable by autocomplete, which is how an exception ends.
+        const barrel = await readFile(join(REPO, 'packages', 'changes', 'src', 'index.ts'), 'utf8');
+
+        expect(barrel).not.toMatch(/undo-service/);
+    });
+
+    it('keeps the dashboard away from the Proton client entirely', async () => {
+        const offenders: string[] = [];
+
+        for (const file of await allSources()) {
+            const relativePath = relative(REPO, file);
+            if (!relativePath.startsWith(join('apps', 'web'))) {
+                continue;
+            }
+            const source = await readFile(file, 'utf8');
+            if (/from '@pms\/proton-api/.test(source)) {
+                offenders.push(relativePath);
+            }
+        }
+
+        // Its Proton-shaped types come from @pms/server/types, which is types only. A type import
+        // here would be one keystroke from a value import.
+        expect(offenders).toEqual([]);
     });
 });

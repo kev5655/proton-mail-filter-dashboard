@@ -1,3 +1,4 @@
+import { ApplyProvider } from '../src/apply.js';
 import { ModelProvider } from '../src/llm.js';
 import { MailboxProvider } from '../src/mailbox.js';
 import { AppStateProvider } from '../src/state.js';
@@ -23,7 +24,11 @@ export function Providers({
     return (
         <MailboxProvider>
             <AppStateProvider>
-                <ModelProvider>{withStore ? <StoreProvider>{children}</StoreProvider> : children}</ModelProvider>
+                <ModelProvider>
+                    <ApplyProvider>
+                        {withStore ? <StoreProvider>{children}</StoreProvider> : children}
+                    </ApplyProvider>
+                </ModelProvider>
             </AppStateProvider>
         </MailboxProvider>
     );

@@ -16,3 +16,4 @@ export { LoginGuard, isAccountLockout, formatDuration, type LoginAttemptState } 
 export { loadSession, saveSession, type StoredSession } from './session-store.js';
 export { parseResponse } from './validate.js';
 export * from './schemas.js';
+export { fingerprintAccount } from './fingerprint.js';

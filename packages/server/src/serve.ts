@@ -4,6 +4,7 @@ import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
+import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
 import type { SyncChannel } from './sync-channel.js';
 
@@ -24,6 +25,8 @@ export interface ServeOptions {
     host?: string;
     /** Absent when this server has no way to reach Proton — then no sync can be started. */
     sync?: SyncChannel | undefined;
+    /** Absent when nothing may be written — then a change can be offered but never accepted. */
+    apply?: ApplyChannel | undefined;
 }
 
 export interface RunningServer {
@@ -47,9 +50,29 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
             return;
         }
 
+        // Only the offer route carries a body, and it is small by construction — a change and the
+        // plan the user was shown. The cap is there so a stray upload cannot fill this process's
+        // memory; nothing legitimate comes close to it.
+        readBody(request, 4_000_000)
+            .then((body) => {
+                answer(request, response, options, path, body);
+            })
+            .catch(() => {
+                response.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+                response.end(JSON.stringify({ error: 'Anfrage zu gross.', code: 'SERVER_BODY_TOO_LARGE' }));
+            });
+    });
+
+    function answer(
+        request: IncomingMessage,
+        response: ServerResponse,
+        served: ServeOptions,
+        path: string,
+        body: unknown
+    ): void {
         let reply;
         try {
-            reply = route(request.method, path, options.db, options.sync);
+            reply = route(request.method, path, served.db, { sync: served.sync, apply: served.apply }, body);
         } catch (cause) {
             // One failing request must not take the server with it: the dashboard is meant to stay
             // up while the copy underneath it is being re-synced.
@@ -69,7 +92,7 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
             'Cache-Control': 'no-store',
         });
         response.end(JSON.stringify(reply.body));
-    });
+    }
 
     await new Promise<void>((resolve, reject) => {
         server.once('error', (cause: NodeJS.ErrnoException) => {
@@ -151,4 +174,32 @@ function streamSyncState(request: IncomingMessage, response: ServerResponse, syn
     };
     request.on('close', stop);
     response.on('close', stop);
+}
+
+/** The request body as JSON, or undefined when there is none. Capped, and refused above the cap. */
+async function readBody(request: IncomingMessage, limit: number): Promise<unknown> {
+    if (request.method !== 'POST') {
+        return undefined;
+    }
+
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of request) {
+        const buffer = chunk as Buffer;
+        size += buffer.length;
+        if (size > limit) {
+            throw new Error('body too large');
+        }
+        chunks.push(buffer);
+    }
+
+    if (size === 0) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+        // Unparseable is not the router's problem; it will refuse an unreadable offer itself.
+        return undefined;
+    }
 }

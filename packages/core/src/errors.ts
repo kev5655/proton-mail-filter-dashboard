@@ -52,6 +52,27 @@ export const ERROR_CODES = [
     // The local server that hands the dashboard the mirrored mailbox
     'SERVER_PORT_IN_USE',
     'SERVER_DATABASE_MISSING',
+
+    // Applying a confirmed change to the account. The whole point of these being distinct is that
+    // "it did not happen" and "it half happened" are different situations for the person reading.
+    'APPLY_NOT_CONFIRMED',
+    'APPLY_CONFIRMATION_EXPIRED',
+    'APPLY_STATE_STALE',
+    'APPLY_BACKUP_FAILED',
+    'APPLY_PARTIAL',
+    'APPLY_ORDER_INCOMPLETE',
+    'APPLY_BUSY',
+    'FOLDER_ALREADY_EXISTS',
+    'WRITE_FILTER_FAILED',
+    'WRITE_FOLDER_FAILED',
+
+    // Reading back afterwards, because a write returning 200 means Proton accepted it, not that
+    // any mail moved.
+    'VERIFY_FILTER_NOT_STORED',
+
+    // Undo
+    'UNDO_ENTRY_ALREADY_UNDONE',
+    'UNDO_PARTIAL_RESTORE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

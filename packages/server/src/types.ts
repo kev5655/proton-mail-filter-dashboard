@@ -72,6 +72,14 @@ export interface MailboxMeta {
     messageCount: number;
     /** True when the last sync stopped at its limit, so the copy is known to be partial. */
     truncated: boolean;
+    /**
+     * What the account looked like when this copy was made.
+     *
+     * Sent back with any change the dashboard offers, so a write can be refused when the account
+     * has moved since — the diff the user approved would then describe a mailbox that no longer
+     * exists.
+     */
+    version: string;
 }
 
 export interface MailboxSnapshot {

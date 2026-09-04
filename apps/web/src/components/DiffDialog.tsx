@@ -1,6 +1,8 @@
 import { describePlan } from '@pms/changes';
 
 import { useStore } from '../store.js';
+import { useApply } from '../apply.js';
+import { useMailboxStatus } from '../mailbox.js';
 import { MailList } from './MailList.js';
 import { RuleConditions } from './RuleConditions.js';
 
@@ -17,6 +19,8 @@ import { RuleConditions } from './RuleConditions.js';
  */
 export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => void }): React.JSX.Element | null {
     const { staged, discard, confirm } = useStore();
+    const { source } = useMailboxStatus();
+    const { phase, offer, reset } = useApply();
 
     if (staged === undefined) {
         return null;
@@ -110,21 +114,82 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                     <p className="faint">… und {moves.length - 15} weitere.</p>
                 )}
 
+                {/*
+                 * Waiting, and saying where.
+                 *
+                 * Clicking here does not write. It offers the change to the process holding the
+                 * Proton session, which prints it in its terminal and waits for a typed „ja". The
+                 * six characters shown here are the same ones printed there — if they differ, the
+                 * terminal is asking about something other than what is on this screen.
+                 */}
+                {phase.phase === 'waiting' && (
+                    <div className="notice notice-info">
+                        <strong>Warte auf Bestätigung im Terminal.</strong> Dort, wo{' '}
+                        <code>pnpm serve</code> läuft, steht jetzt eine Rückfrage. Sie zeigt dieselbe
+                        Prüfziffer: <code>{phase.shortDigest}</code>. Ohne getipptes „ja" passiert
+                        nichts.
+                    </div>
+                )}
+
+                {phase.phase === 'applied' && (
+                    <div className="notice notice-info">
+                        <strong>Bei Proton gespeichert.</strong> Sicherung liegt unter{' '}
+                        <code>{phase.backupPath}</code>.
+                        {phase.partial !== undefined && (
+                            <>
+                                <br />
+                                <br />
+                                <strong>Nicht vollständig:</strong> {phase.partial}
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {phase.phase === 'failed' && (
+                    <div className="notice notice-danger">
+                        <strong>Nicht geschrieben{phase.code === undefined ? '' : ` (${phase.code})`}.</strong>{' '}
+                        {phase.error}
+                    </div>
+                )}
+
                 <div className="row" style={{ marginTop: 18 }}>
                     {/* Named after its effect. "OK" is what people click without reading. */}
-                    <button type="button" className="button" onClick={confirm}>
-                        {moves.length > 0
-                            ? `Bei Proton speichern und ${moves.length} Mails einsortieren`
-                            : 'Bei Proton speichern'}
+                    <button
+                        type="button"
+                        className="button"
+                        disabled={phase.phase === 'offering' || phase.phase === 'waiting'}
+                        onClick={() => {
+                            if (source === 'demo') {
+                                // The demo has no account to write to; the local apply is the point.
+                                confirm();
+                                return;
+                            }
+                            offer(staged.change, staged, moves.length > 0);
+                        }}
+                    >
+                        {phase.phase === 'waiting'
+                            ? 'Warte auf das Terminal …'
+                            : moves.length > 0
+                              ? `Bei Proton speichern und ${moves.length} Mails einsortieren`
+                              : 'Bei Proton speichern'}
                     </button>
-                    <button type="button" className="button button-secondary" onClick={discard}>
-                        Abbrechen
+                    <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => {
+                            reset();
+                            discard();
+                        }}
+                    >
+                        {phase.phase === 'applied' ? 'Schliessen' : 'Abbrechen'}
                     </button>
                 </div>
 
                 <p className="faint" style={{ marginTop: 8 }}>
-                    Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner
-                    angelegt. Die Änderung lässt sich im Verlauf einzeln rückgängig machen.
+                    {source === 'demo'
+                        ? 'Demo-Daten: es wird nichts geschrieben, die Änderung wirkt nur hier.'
+                        : 'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Die Rückfrage kommt im Terminal, nicht hier.'}{' '}
+                    Die Änderung lässt sich im Verlauf einzeln rückgängig machen.
                 </p>
             </div>
         </div>

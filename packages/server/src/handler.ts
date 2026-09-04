@@ -2,6 +2,7 @@ import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
 import { buildSnapshot } from './snapshot.js';
+import type { ApplyChannel } from './apply-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
 const log = getLogger('server');
@@ -37,7 +38,48 @@ export const READ_ONLY_MESSAGE =
 /** Paths that stream rather than answer once, so the transport handles them before `route`. */
 export const STREAM_PATHS = new Set(['/api/sync/stream']);
 
-export function route(method: string | undefined, path: string, db: Db, sync?: SyncChannel): Reply {
+export interface Channels {
+    sync?: SyncChannel | undefined;
+    apply?: ApplyChannel | undefined;
+}
+
+export function route(
+    method: string | undefined,
+    path: string,
+    db: Db,
+    channels: Channels = {},
+    body?: unknown
+): Reply {
+    const { sync, apply } = channels;
+
+    /*
+     * Offering a change is not making one.
+     *
+     * This answers `202` and returns a reference. The change is applied only after a word is typed
+     * at the terminal where the server runs — which is why this can answer immediately while
+     * nothing has happened yet, and why a request from anything else on this machine gets no
+     * further than a question somebody has to read.
+     */
+    if (method === 'POST' && path === '/api/apply') {
+        if (apply === undefined) {
+            return {
+                status: 503,
+                body: { error: 'Dieser Server kann nichts schreiben.', code: 'SERVER_APPLY_UNAVAILABLE' },
+            };
+        }
+        const outcome = apply.offer(body);
+        return 'refused' in outcome
+            ? { status: 409, body: { error: outcome.refused, code: outcome.code } }
+            : {
+                  status: 202,
+                  body: {
+                      requestId: outcome.id,
+                      shortDigest: outcome.shortDigest,
+                      waiting: 'Bestätigung im Terminal',
+                  },
+              };
+    }
+
     // The one exception, named explicitly rather than by a table anyone could extend.
     if (method === 'POST' && path === '/api/sync') {
         if (sync === undefined) {
@@ -82,7 +124,15 @@ export function route(method: string | undefined, path: string, db: Db, sync?: S
             return { status: 200, body: snapshot };
         }
 
-        default:
+        default: {
+            const offered = /^\/api\/apply\/([\w-]+)$/.exec(path);
+            if (offered !== null) {
+                const state = apply?.stateOf(offered[1] as string);
+                return state === undefined
+                    ? { status: 404, body: { error: 'Unbekannte Änderung.', code: 'APPLY_UNKNOWN' } }
+                    : { status: 200, body: state };
+            }
             return { status: 404, body: { error: `Unbekannter Pfad: ${path}`, code: 'SERVER_NO_ROUTE' } };
+        }
     }
 }

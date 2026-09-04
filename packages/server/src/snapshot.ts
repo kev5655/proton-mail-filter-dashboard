@@ -85,6 +85,7 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
             syncedAt: Number.isFinite(syncedAt) ? syncedAt : undefined,
             messageCount: messages.length,
             truncated: getMeta(db, 'lastSyncTruncated') === '1',
+            version: getMeta(db, 'accountVersion') ?? '',
         },
         folders,
         labels,

@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { applyChange, confirmAtTerminal, digestOf, shortDigest, type ChangeRequest } from '@pms/apply';
 import { AppError } from '@pms/core/errors';
-import { serveMailbox, SyncChannel } from '@pms/server';
+import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase } from '@pms/store';
 import { getMeta, syncAll } from '@pms/sync';
 
@@ -61,7 +62,51 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             return result;
         });
 
-        const server = await serveMailbox({ db, port: Number.isFinite(port) ? port : 5174, sync });
+        /*
+         * The offer side of writing.
+         *
+         * `describe` turns a request into what the dashboard is told and what the terminal prints,
+         * and it is the only place a malformed offer is rejected — before anybody is asked about
+         * it. `run` performs the change, and it does so only after `confirmAtTerminal` returns.
+         */
+        const confirm = confirmAtTerminal();
+        const apply = new ApplyChannel(
+            (request) => {
+                const parsed = asChangeRequest(request);
+                return parsed === undefined
+                    ? undefined
+                    : {
+                          id: parsed.requestId,
+                          summary: parsed.change.summary,
+                          shortDigest: shortDigest(digestOf(parsed)),
+                      };
+            },
+            async (request) => {
+                const parsed = asChangeRequest(request);
+                if (parsed === undefined) {
+                    throw new AppError('APPLY_NOT_CONFIRMED', {
+                        message: 'Die Änderung war nicht lesbar.',
+                        hint: 'Es wurde nichts geschrieben.',
+                    });
+                }
+                const outcome = await applyChange(parsed, {
+                    http,
+                    backupDir: join(DATA_DIR, 'backups'),
+                    confirm,
+                });
+                return {
+                    backupPath: outcome.backupPath,
+                    ...(outcome.partial === undefined ? {} : { partial: outcome.partial.message }),
+                };
+            }
+        );
+
+        const server = await serveMailbox({
+            db,
+            port: Number.isFinite(port) ? port : 5174,
+            sync,
+            apply,
+        });
 
         const lastSync = getMeta(db, 'lastSyncAt');
         console.log(
@@ -71,6 +116,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         );
         console.log(`  Server: ${server.url} (nur von diesem Rechner erreichbar)`);
         console.log('  Synchronisieren lässt sich aus dem Dashboard heraus — gelesen wird, geschrieben nur lokal.');
+        console.log('  Änderungen am Konto fragen hier im Terminal nach. Ohne getipptes „ja" passiert nichts.');
         console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
         console.log('  Beenden mit Ctrl+C.\n');
 
@@ -90,4 +136,32 @@ export async function runServe(argv: readonly string[]): Promise<void> {
 function value(argv: readonly string[], flag: string): string | undefined {
     const index = argv.indexOf(flag);
     return index >= 0 ? argv[index + 1] : undefined;
+}
+
+
+/**
+ * A request from the dashboard, checked before anything is done with it.
+ *
+ * Shape only. What the change *means* is decided by `applyChange`, which reads the account fresh
+ * and refuses a plan computed against a mailbox that has moved since. This is here so a malformed
+ * body becomes a refusal rather than a question somebody is asked to answer.
+ */
+function asChangeRequest(value: unknown): ChangeRequest | undefined {
+    if (value === null || typeof value !== 'object') {
+        return undefined;
+    }
+    const candidate = value as Partial<ChangeRequest>;
+    const wellFormed =
+        typeof candidate.requestId === 'string' &&
+        candidate.requestId !== '' &&
+        typeof candidate.baseVersion === 'string' &&
+        typeof candidate.change === 'object' &&
+        candidate.change !== null &&
+        typeof candidate.change.summary === 'string' &&
+        typeof candidate.plan === 'object' &&
+        candidate.plan !== null &&
+        Array.isArray(candidate.plan.moves) &&
+        Array.isArray(candidate.affectedMessageIds);
+
+    return wellFormed ? (candidate as ChangeRequest) : undefined;
 }
