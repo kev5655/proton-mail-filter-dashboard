@@ -1026,6 +1026,39 @@
 }
 
 /*
+ * The spinner inside a button that is waiting on something.
+ *
+ * Sized in `em` so it follows the button's text rather than needing its own scale, and drawn from a
+ * border so it costs no image. `currentColor` on one edge means it works on the accent button and
+ * on a quiet one without a second rule.
+ */
+.spinner {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 6px;
+    vertical-align: -0.08em;
+    border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* Still visible as a state, just not moving. Someone who asked for less motion still needs to
+       know the button is busy. */
+    .spinner {
+        animation: none;
+        border-top-color: transparent;
+        opacity: 0.6;
+    }
+}
+
+/*
  * The two preview columns, kept in step.
  *
  * Their search boxes have to start at the same y, and they did not: the right column carries a

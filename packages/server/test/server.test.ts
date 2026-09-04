@@ -7,6 +7,7 @@ import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from '@pms/sync';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ApplyChannel } from '../src/apply-channel.js';
 import { route } from '../src/handler.js';
 import { SyncChannel } from '../src/sync-channel.js';
 import { serveMailbox } from '../src/serve.js';
@@ -268,5 +269,59 @@ describe('the sync channel', () => {
 
         expect(channel.state.state).toBe('failed');
         expect(channel.state).toMatchObject({ error: 'Proton nicht erreichbar' });
+    });
+});
+
+
+/**
+ * What the `202` tells the dashboard, and why one field of it matters.
+ *
+ * Most changes are confirmed once, in the diff dialog. Only the expensive ones — a deletion, a
+ * change that moves mail, one that resorts a large share of the mailbox — are asked about again in
+ * the terminal. The interface used to announce that second question for every change and then not
+ * ask it, which is the fastest way to teach somebody that a sentence on screen is not worth
+ * reading.
+ *
+ * The rule that decides lives in `@pms/apply`, which the dashboard may not import — it drags the
+ * Proton client into the browser bundle, and `write-isolation.test.ts` exists to keep it out. So the
+ * answer travels in the response instead of being worked out twice.
+ */
+describe('the offer answers whether a terminal question is coming', () => {
+    function channel(needsTerminal: boolean, reason = ''): ApplyChannel {
+        return new ApplyChannel(
+            (request) => ({
+                id: (request as { requestId: string }).requestId,
+                summary: 'Eine Änderung',
+                shortDigest: 'ABC-DEF',
+                needsTerminal,
+                reason,
+            }),
+            async () => ({ backupPath: '/tmp/backup.json' })
+        );
+    }
+
+    it('says so, with the reason, when one is', () => {
+        const reply = route(
+            'POST',
+            '/api/apply',
+            db,
+            { apply: channel(true, 'Diese Änderung löscht etwas.') },
+            { requestId: 'req-1' }
+        );
+
+        expect(reply.status).toBe(202);
+        expect(reply.body).toMatchObject({
+            needsTerminal: true,
+            reason: 'Diese Änderung löscht etwas.',
+            waiting: 'Bestätigung im Terminal',
+        });
+    });
+
+    it('says so when one is not, and does not promise a wait', () => {
+        const reply = route('POST', '/api/apply', db, { apply: channel(false) }, { requestId: 'req-2' });
+
+        expect(reply.status).toBe(202);
+        expect(reply.body).toMatchObject({ needsTerminal: false });
+        expect(reply.body).not.toHaveProperty('waiting');
     });
 });

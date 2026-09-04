@@ -26,7 +26,15 @@ export interface ApplyResult {
 export type ApplyPhase =
     | { phase: 'idle' }
     | { phase: 'offering' }
-    | { phase: 'waiting'; requestId: string; shortDigest: string }
+    | {
+          phase: 'waiting';
+          requestId: string;
+          shortDigest: string;
+          /** Whether a typed „ja" is genuinely coming, as decided by `weigh` on the server. */
+          needsTerminal: boolean;
+          /** Why it is, when it is. */
+          reason: string;
+      }
     | { phase: 'applied'; backupPath: string; partial: string | undefined }
     | { phase: 'failed'; error: string; code: string | undefined };
 
@@ -82,6 +90,8 @@ export function ApplyProvider({
                     const body = (await response.json()) as {
                         requestId?: string;
                         shortDigest?: string;
+                        needsTerminal?: boolean;
+                        reason?: string;
                         error?: string;
                         code?: string;
                     };
@@ -100,6 +110,10 @@ export function ApplyProvider({
                         phase: 'waiting',
                         requestId: body.requestId,
                         shortDigest: body.shortDigest ?? '???-???',
+                        // Absent means an older server, and „it will ask" is the safer of the two
+                        // wrong answers: it tells the user to go and look.
+                        needsTerminal: body.needsTerminal ?? true,
+                        reason: body.reason ?? '',
                     });
 
                     await watch(body.requestId, setPhase, onApplied, (applied) => {

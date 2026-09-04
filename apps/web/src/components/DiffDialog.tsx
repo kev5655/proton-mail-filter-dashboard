@@ -194,12 +194,21 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                  * six characters shown here are the same ones printed there — if they differ, the
                  * terminal is asking about something other than what is on this screen.
                  */}
-                {phase.phase === 'waiting' && (
+                {phase.phase === 'waiting' && phase.needsTerminal && (
                     <div className="notice notice-info">
                         <strong>Warte auf Bestätigung im Terminal.</strong> Dort, wo{' '}
-                        <code>pnpm serve</code> läuft, steht jetzt eine Rückfrage. Sie zeigt dieselbe
+                        <code>pnpm serve</code> läuft, steht jetzt eine Rückfrage
+                        {phase.reason === '' ? '' : ` — ${phase.reason}`} Sie zeigt dieselbe
                         Prüfziffer: <code>{phase.shortDigest}</code>. Ohne getipptes „ja" passiert
                         nichts.
+                    </div>
+                )}
+
+                {phase.phase === 'waiting' && !phase.needsTerminal && (
+                    <div className="notice notice-info">
+                        <strong>Wird geschrieben.</strong> Diese Änderung ist klein genug, dass die
+                        Bestätigung von eben reicht — im Terminal steht keine zweite Frage.
+                        Prüfziffer: <code>{phase.shortDigest}</code>.
                     </div>
                 )}
 
@@ -230,6 +239,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                         type="button"
                         className="button"
                         disabled={phase.phase === 'offering' || phase.phase === 'waiting'}
+                        aria-busy={phase.phase === 'offering' || phase.phase === 'waiting'}
                         onClick={() => {
                             if (source === 'demo') {
                                 // The demo has no account to write to; the local apply is the point.
@@ -239,7 +249,18 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                             offer(staged.change, staged, moves.length > 0);
                         }}
                     >
-                        {phase.phase === 'waiting'
+                        {/*
+                         * A moving thing while nothing else moves. The gap between the click and
+                         * the „warte auf das Terminal" notice is two requests long — a fingerprint
+                         * and the offer itself — and the button used to sit there disabled with its
+                         * ordinary label, which reads as a click that did not register.
+                         */}
+                        {(phase.phase === 'offering' || phase.phase === 'waiting') && (
+                            <span className="spinner" aria-hidden="true" />
+                        )}
+                        {phase.phase === 'offering'
+                            ? 'Wird übermittelt …'
+                            : phase.phase === 'waiting'
                             ? 'Warte auf das Terminal …'
                             : movesMail
                               ? `${moves.length} Mails verschieben`
@@ -262,7 +283,15 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                 <p className="faint" style={{ marginTop: 8 }}>
                     {source === 'demo'
                         ? 'Demo-Daten: es wird nichts geschrieben, die Änderung wirkt nur hier.'
-                        : 'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Die Rückfrage kommt im Terminal, nicht hier.'}{' '}
+                        : /*
+                           * No promise about the terminal here. Most changes are confirmed once, in
+                           * this dialog; only the expensive ones — a deletion, a change that moves
+                           * mail, one that resorts a large share of the mailbox — are asked about
+                           * again. Announcing a second question for every change and then not
+                           * asking it teaches people to disbelieve the sentence, which is the one
+                           * thing it cannot afford.
+                           */
+                          'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Bei grösseren Änderungen kommt zusätzlich eine Rückfrage im Terminal.'}{' '}
                     Die Änderung lässt sich im Verlauf einzeln rückgängig machen.
                 </p>
             </div>

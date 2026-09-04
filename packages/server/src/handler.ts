@@ -75,7 +75,13 @@ export function route(
                   body: {
                       requestId: outcome.id,
                       shortDigest: outcome.shortDigest,
-                      waiting: 'Bestätigung im Terminal',
+                      // So the dashboard can say what will actually happen. Most changes are
+                      // confirmed once, in the diff; only the expensive ones are asked about again
+                      // in the terminal, and promising that question for every change taught the
+                      // reader to disbelieve it.
+                      needsTerminal: outcome.needsTerminal,
+                      reason: outcome.reason,
+                      ...(outcome.needsTerminal ? { waiting: 'Bestätigung im Terminal' } : {}),
                   },
               };
     }

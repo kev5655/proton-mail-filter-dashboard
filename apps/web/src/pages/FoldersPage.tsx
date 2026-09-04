@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { MailboxFolder } from '@pms/server/types';
 
+import { FolderRenameDialog } from '../components/FolderRenameDialog.js';
 import { log } from '../log.js';
 import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
@@ -114,6 +115,7 @@ function FolderNode({
     const count = messageCountIn(folder.Name);
     const referencing = rulesTargeting(folder.Name);
     const isHighlighted = highlight === folder.Name || highlight?.endsWith(`/${folder.Name}`) === true;
+    const [renaming, setRenaming] = useState(false);
 
     return (
         <li>
@@ -129,20 +131,7 @@ function FolderNode({
                     type="button"
                     className="button button-quiet"
                     onClick={() => {
-                        const next = window.prompt(`„${folder.Name}" umbenennen in:`, folder.Name);
-                        if (next === null || next.trim() === '' || next === folder.Name) {
-                            return;
-                        }
-                        log('info', 'folder.stage-rename', { rules: referencing.length });
-                        // Renaming rewrites every rule that points at the folder. Leaving them
-                        // behind would be silent breakage: the rule keeps running and files into a
-                        // folder that no longer exists.
-                        stage({
-                            id: `rename-${folder.ID}`,
-                            kind: 'rename-folder',
-                            summary: `Ordner „${folder.Name}" in „${next.trim()}" umbenennen`,
-                            folder: { name: folder.Name, newName: next.trim() },
-                        });
+                        setRenaming(true);
                     }}
                 >
                     Umbenennen
@@ -169,6 +158,28 @@ function FolderNode({
                     Löschen
                 </button>
             </div>
+
+            {renaming && (
+                <FolderRenameDialog
+                    folder={folder}
+                    onClose={() => {
+                        setRenaming(false);
+                    }}
+                    onRename={(nextName) => {
+                        setRenaming(false);
+                        log('info', 'folder.stage-rename', { rules: referencing.length });
+                        // Renaming rewrites every rule that points at the folder. Leaving them
+                        // behind would be silent breakage: the rule keeps running and files into a
+                        // folder that no longer exists.
+                        stage({
+                            id: `rename-${folder.ID}`,
+                            kind: 'rename-folder',
+                            summary: `Ordner „${folder.Name}" in „${nextName}" umbenennen`,
+                            folder: { name: folder.Name, newName: nextName },
+                        });
+                    }}
+                />
+            )}
 
             {/*
              * The rules pointing here, named and clickable. A folder is only safe to delete or

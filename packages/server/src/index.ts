@@ -1,6 +1,6 @@
 export { buildSnapshot } from './snapshot.js';
 export { route, READ_ONLY_MESSAGE, STREAM_PATHS, type Channels, type Reply } from './handler.js';
-export { ApplyChannel, type OfferRunner, type OfferState } from './apply-channel.js';
+export { ApplyChannel, type Described, type Offered, type OfferRunner, type OfferState } from './apply-channel.js';
 export {
     SyncChannel,
     type SyncProgressEvent,

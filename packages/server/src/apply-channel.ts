@@ -23,14 +23,39 @@ export type OfferState =
 /** What the executor does with an offer. Anything Proton-shaped stays on the far side of this. */
 export type OfferRunner = (request: unknown) => Promise<{ backupPath: string; partial?: string | undefined }>;
 
+/**
+ * What the offer step worked out about a change, before anybody was asked about it.
+ *
+ * `needsTerminal` travels back to the dashboard so it can stop claiming a terminal question that is
+ * not coming. The rule that decides it lives in `@pms/apply`, which the browser may not import —
+ * it pulls the Proton client with it — so the answer is computed here, where the decision is made
+ * anyway, and carried in the `202`.
+ */
+export interface Described {
+    id: string;
+    summary: string;
+    shortDigest: string;
+    /** Whether a typed „ja" at the terminal is required for this particular change. */
+    needsTerminal: boolean;
+    /** Why, when it is. Empty otherwise. */
+    reason: string;
+}
+
+export interface Offered {
+    id: string;
+    shortDigest: string;
+    needsTerminal: boolean;
+    reason: string;
+}
+
 export class ApplyChannel {
     #offers = new Map<string, OfferState>();
     #busy = false;
     readonly #run: OfferRunner | undefined;
-    readonly #describe: (request: unknown) => { id: string; summary: string; shortDigest: string } | undefined;
+    readonly #describe: (request: unknown) => Described | undefined;
 
     constructor(
-        describe: (request: unknown) => { id: string; summary: string; shortDigest: string } | undefined,
+        describe: (request: unknown) => Described | undefined,
         run?: OfferRunner
     ) {
         this.#describe = describe;
@@ -52,7 +77,7 @@ export class ApplyChannel {
      * that is the entire point, and the reason this method resolves immediately while the terminal
      * is still asking.
      */
-    offer(request: unknown): { id: string; shortDigest: string } | { refused: string; code: string } {
+    offer(request: unknown): Offered | { refused: string; code: string } {
         if (this.#run === undefined) {
             return {
                 refused: 'Dieser Server kann nichts an Proton schreiben.',
@@ -108,6 +133,11 @@ export class ApplyChannel {
                 this.#busy = false;
             });
 
-        return { id: described.id, shortDigest: described.shortDigest };
+        return {
+            id: described.id,
+            shortDigest: described.shortDigest,
+            needsTerminal: described.needsTerminal,
+            reason: described.reason,
+        };
     }
 }

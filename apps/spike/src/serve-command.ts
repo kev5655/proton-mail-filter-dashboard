@@ -1,13 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { applyChange, confirmAtTerminal, digestOf, shortDigest, type ChangeRequest } from '@pms/apply';
+import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type ChangeRequest } from '@pms/apply';
 import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import { getMessages } from '@pms/proton-api';
 import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
-import { closeDatabase, openDatabase } from '@pms/store';
+import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { getMeta, markAdopted, refreshAccountObjects, syncAll } from '@pms/sync';
 
 import { DATA_DIR, logFilePath } from './paths.js';
@@ -91,13 +91,29 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         const apply = new ApplyChannel(
             (request) => {
                 const parsed = asChangeRequest(request);
-                return parsed === undefined
-                    ? undefined
-                    : {
-                          id: parsed.requestId,
-                          summary: parsed.change.summary,
-                          shortDigest: shortDigest(digestOf(parsed)),
-                      };
+                if (parsed === undefined) {
+                    return undefined;
+                }
+                /*
+                 * Whether this one will be asked about twice, decided here and told to the
+                 * dashboard.
+                 *
+                 * `weigh` is the authority and lives in `@pms/apply`, which the browser cannot
+                 * import — it drags the Proton client along, and `write-isolation.test.ts` exists
+                 * to keep that out of the bundle. Reimplementing the thresholds in the interface
+                 * would be two answers to one question, and they would drift.
+                 *
+                 * `applyChange` calls `weigh` again for real; this is the same function on the same
+                 * request, so the answer shown is the answer that will be acted on.
+                 */
+                const weight = weigh(parsed, mailboxSize(db));
+                return {
+                    id: parsed.requestId,
+                    summary: parsed.change.summary,
+                    shortDigest: shortDigest(digestOf(parsed)),
+                    needsTerminal: weight.needsTerminal,
+                    reason: weight.reason,
+                };
             },
             async (request) => {
                 const parsed = asChangeRequest(request);
@@ -113,7 +129,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     confirm,
                     // Read fresh: the share of the mailbox a change touches decides whether it is
                     // asked about a second time, and the copy grows with every sync.
-                    mailboxSize: (db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
+                    mailboxSize: mailboxSize(db),
                     /*
                      * The one capability that moves mail, handed in here and nowhere else.
                      *
@@ -235,6 +251,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     } finally {
         closeDatabase(db);
     }
+}
+
+/** How much mail the copy holds — the denominator `weigh` judges a change's reach against. */
+function mailboxSize(db: Db): number {
+    return (db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n;
 }
 
 function value(argv: readonly string[], flag: string): string | undefined {
