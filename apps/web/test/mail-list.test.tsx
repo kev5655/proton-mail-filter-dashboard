@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -60,7 +60,13 @@ function type(value: string): void {
     });
 }
 
+/** Rows carrying a message. Blank rows that only hold the list's height are not mail. */
 function rows(): number {
+    return container.querySelectorAll('.mail-list li:not(.mail-row-filler)').length;
+}
+
+/** Every row box, including the blank ones — this is what decides where the pager sits. */
+function rowBoxes(): number {
     return container.querySelectorAll('.mail-list li').length;
 }
 
@@ -97,6 +103,60 @@ describe('paging', () => {
 
         click('Zurück');
         expect(container.textContent).toContain('Seite 2 von 3');
+    });
+
+    it('keeps the last page as tall as the others, so the pager stays put', () => {
+        // The pager sits under the list, so a last page with five of ten rows pulled „Weiter" up
+        // by five rows — out from under the cursor that had just been clicking it.
+        render(<MailList messages={many} onOpen={() => {}} search pageSize={10} />);
+
+        click('Weiter');
+        click('Weiter');
+
+        expect(rows()).toBe(5);
+        expect(rowBoxes()).toBe(10);
+    });
+
+    it('does not pad a list that has only one page', () => {
+        // Nothing to turn to, so nothing to hold still. A short list should end where it ends.
+        render(<MailList messages={many.slice(0, 4)} onOpen={() => {}} search pageSize={10} />);
+
+        expect(rowBoxes()).toBe(4);
+    });
+
+    it('goes back to the first page when the set of mail changes underneath it', () => {
+        // Switching the editor's right column between „nur verwandte" und „alle übrigen" replaces
+        // the list wholesale. Staying on page three of a different two hundred messages is not
+        // continuity — it is a number that outlived its subject.
+        //
+        // The list has to stay mounted for this to mean anything: a fresh render starts at page one
+        // whatever the hook does, which is how the first version of this test passed while the
+        // behaviour it describes was absent.
+        let swap = (): void => {};
+        function Swappable(): React.JSX.Element {
+            const [subset, setSubset] = useState(false);
+            swap = () => {
+                setSubset(true);
+            };
+            return (
+                <MailList
+                    messages={subset ? many.slice(0, 12) : many}
+                    onOpen={() => {}}
+                    search
+                    pageSize={10}
+                />
+            );
+        }
+
+        render(<Swappable />);
+        click('Weiter');
+        expect(container.textContent).toContain('Seite 2 von 3');
+
+        act(() => {
+            swap();
+        });
+
+        expect(container.textContent).toContain('Seite 1 von 2');
     });
 
     it('renders everything when no page size is given', () => {

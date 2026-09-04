@@ -446,6 +446,40 @@
     border-radius: 4px;
 }
 
+/*
+ * A row that holds space and nothing else.
+ *
+ * The pager sits under a list whose height is however many rows it has, so a last page with three
+ * of ten moved „Weiter" up by seven rows — out from under the cursor that had just been clicking
+ * it. Filler rows rather than a min-height in pixels: they reuse the real row's own boxes, so they
+ * are exactly one row tall and stay that way when a row changes.
+ */
+/*
+ * A section heading that is also its own collapse control.
+ *
+ * Styled to stay a heading: the button carries no chrome of its own, so the page still reads as
+ * headings and sections rather than as a row of controls. The caret is the only thing that says it
+ * can be clicked, and `aria-expanded` says it to anything that cannot see the caret.
+ */
+.section-toggle {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.section-toggle:hover {
+    color: var(--accent);
+}
+
+.mail-row-filler {
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .mail-open:hover .mail-subject {
     color: var(--accent);
     text-decoration: underline;

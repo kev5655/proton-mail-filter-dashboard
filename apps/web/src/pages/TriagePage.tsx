@@ -29,6 +29,10 @@ export function TriagePage(): React.JSX.Element {
     const { stage, rules } = useStore();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
+    const [query, setQuery] = useState('');
+    // Sections start open: the page's job is to show what there is. Collapsing is for putting a
+    // section aside once it has been dealt with, not a state to have to undo on arrival.
+    const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
     const open = suggestions.filter((entry) => decisions[entry.group.key] === undefined);
     const grouped = suggestions.reduce((total, entry) => total + entry.group.size, 0);
@@ -44,10 +48,35 @@ export function TriagePage(): React.JSX.Element {
      * promising clustering that does not exist would be a label doing the work the code has not
      * done. It becomes possible once mail bodies are available locally.
      */
-    const sections = SECTIONS.map((section) => ({
-        ...section,
-        entries: open.filter((entry) => entry.group.kind === section.kind),
-    })).filter((section) => section.entries.length > 0);
+    /*
+     * One filter across every section, applied before the sections are cut.
+     *
+     * The list runs to dozens of suggestions and they are grouped by *how* a group was found, not
+     * by what is in it — so looking for everything from one shop means reading all three sections.
+     * Filtering here rather than per section means one query answers the whole page, and each
+     * heading can then say how much of it survived.
+     *
+     * It matches what the card actually shows — the reason, the proposed folder, the sender and
+     * domain behind the group — because a filter that matches on something invisible reads as
+     * broken.
+     */
+    const needle = query.trim().toLowerCase();
+    const matches = (entry: (typeof open)[number]): boolean =>
+        needle === '' ||
+        [
+            entry.group.reason,
+            entry.folder,
+            entry.group.match.sender,
+            entry.group.match.domain,
+            entry.group.match.subjectTemplate,
+        ].some((value) => value !== undefined && value.toLowerCase().includes(needle));
+
+    const sections = SECTIONS.map((section) => {
+        const all = open.filter((entry) => entry.group.kind === section.kind);
+        return { ...section, all, entries: all.filter(matches) };
+    }).filter((section) => section.all.length > 0);
+
+    const shown = sections.reduce((total, section) => total + section.entries.length, 0);
 
     return (
         <>
@@ -62,19 +91,68 @@ export function TriagePage(): React.JSX.Element {
 
             {open.length === 0 && <p className="muted">Alle Vorschläge bearbeitet.</p>}
 
-            {sections.map((section) => (
-                <section key={section.kind} className="suggestion-section">
-                    <h2>
-                        {section.label}{' '}
-                        <span className="faint">
-                            ({section.entries.length}{' '}
-                            {section.entries.length === 1 ? 'Vorschlag' : 'Vorschläge'})
-                        </span>
-                    </h2>
-                    <p className="faint">{section.hint}</p>
-                    {renderEntries(section.entries)}
-                </section>
-            ))}
+            {open.length > 0 && (
+                <div className="mail-list-tools" style={{ marginBottom: 12 }}>
+                    <input
+                        type="search"
+                        className="text-input mail-search"
+                        value={query}
+                        placeholder="Absender, Organisation, Betreff oder Zielordner"
+                        onChange={(event) => setQuery(event.target.value)}
+                        aria-label="Vorschläge filtern"
+                    />
+                    <span className="faint">
+                        {needle === ''
+                            ? `${open.length} ${open.length === 1 ? 'Vorschlag' : 'Vorschläge'}`
+                            : `${shown} von ${open.length}`}
+                    </span>
+                </div>
+            )}
+
+            {open.length > 0 && needle !== '' && shown === 0 && (
+                <p className="muted">
+                    Kein Vorschlag passt auf „{query.trim()}". Gesucht wird in Absender, Organisation,
+                    Betreffmuster und vorgeschlagenem Ordner — nicht im Mailinhalt, den es hier noch
+                    nicht gibt.
+                </p>
+            )}
+
+            {sections.map((section) => {
+                const isCollapsed = collapsed[section.kind] === true;
+                return (
+                    <section key={section.kind} className="suggestion-section">
+                        <h2>
+                            <button
+                                type="button"
+                                className="section-toggle"
+                                aria-expanded={!isCollapsed}
+                                onClick={() =>
+                                    setCollapsed((current) => ({ ...current, [section.kind]: !isCollapsed }))
+                                }
+                            >
+                                <span aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span> {section.label}
+                            </button>{' '}
+                            <span className="faint">
+                                {needle === ''
+                                    ? `(${section.entries.length} ${
+                                          section.entries.length === 1 ? 'Vorschlag' : 'Vorschläge'
+                                      })`
+                                    : `(${section.entries.length} von ${section.all.length})`}
+                            </span>
+                        </h2>
+                        {!isCollapsed && (
+                            <>
+                                <p className="faint">{section.hint}</p>
+                                {section.entries.length === 0 ? (
+                                    <p className="muted">Hier passt nichts auf den Filter.</p>
+                                ) : (
+                                    renderEntries(section.entries)
+                                )}
+                            </>
+                        )}
+                    </section>
+                );
+            })}
 
             {Object.keys(decisions).length > 0 && (
                 <p className="notice notice-info">

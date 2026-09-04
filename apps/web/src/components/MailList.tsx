@@ -66,6 +66,10 @@ export function MailList({
         return <p className="faint">{emptyText}</p>;
     }
 
+    // Only worth doing where there is a page to turn; a short list should end where it ends.
+    const filler =
+        pageSize === undefined || filter.pageCount <= 1 ? 0 : pageSize - filter.visible.length;
+
     const showingRange =
         pageSize === undefined || filter.matches.length <= pageSize
             ? undefined
@@ -155,6 +159,28 @@ export function MailList({
                         </li>
                     );
                 })}
+
+                {/*
+                 * Blank rows, so the last page is as tall as the others.
+                 *
+                 * The pager sits under a list whose height is however many rows it has, so a last
+                 * page with three of ten moved the „Weiter" button up by seven rows — right out
+                 * from under the cursor that had just been clicking it. Filler rows rather than a
+                 * min-height in pixels: they are exactly one row tall by construction, and cannot
+                 * drift the next time a row gains a line.
+                 */}
+                {filler > 0 &&
+                    Array.from({ length: filler }, (_, index) => (
+                        <li key={`filler-${String(index)}`} className="mail-row-filler" aria-hidden="true">
+                            {/* The same boxes a real row uses, holding zero-width spaces. Height
+                                matches by construction rather than by a pixel constant that would
+                                drift the next time a row gains a line. */}
+                            <span className="mail-open">
+                                <span className="mail-subject">{'\u200b'}</span>
+                                <span className="mail-sender">{'\u200b'}</span>
+                            </span>
+                        </li>
+                    ))}
             </ul>
 
             {filter.pageCount > 1 && (
