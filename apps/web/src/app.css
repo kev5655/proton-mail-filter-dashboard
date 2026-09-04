@@ -402,7 +402,12 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    align-items: flex-start;
+    /*
+     * `flex-start` here sized the children to their content instead of to the button, so a long
+     * subject took its full width inside a narrow row and the ellipsis never had anything to clip.
+     * Found by measuring in a browser: 232 pixels of text in a 168 pixel button.
+     */
+    align-items: stretch;
     background: none;
     border: 0;
     padding: 0;
@@ -991,4 +996,39 @@
         width: 100%;
         opacity: 0.4;
     }
+}
+
+/*
+ * The two preview columns, kept in step.
+ *
+ * Their search boxes have to start at the same y, and they did not: the right column carries a
+ * toggle and a longer sentence, which pushed it down by its own height. Fixing it by nudging a
+ * margin would break again the moment either sentence changes length, so the header is a fixed
+ * block of one heading plus one line and the columns are a grid whose rows align.
+ */
+.preview-column {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    align-content: start;
+    min-width: 0;
+}
+
+.preview-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 52px;
+    margin-bottom: 6px;
+}
+
+.preview-head > h4 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0;
+}
+
+.preview-head > p {
+    margin: 0;
 }

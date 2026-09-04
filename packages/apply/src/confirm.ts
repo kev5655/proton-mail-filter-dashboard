@@ -17,6 +17,10 @@ import type { ConfirmationOffer, ConfirmationVerdict } from './apply.js';
  * auf Bestätigung", and so does this.
  *
  * `ja` in full rather than a keypress. Pressing return by reflex should not move anybody's mail.
+ *
+ * This is not asked for every change — see `weigh` in `apply.ts`. A dialog that appears for every
+ * small rule becomes a reflex, and a confirmation people answer without reading protects nothing.
+ * It is asked when the change resorts a large share of the mailbox, or removes something.
  */
 
 export interface TerminalConfirmOptions {
@@ -42,6 +46,8 @@ export function confirmAtTerminal(
             '  Das Dashboard möchte etwas an deinem Proton-Konto ändern.',
             '',
             `  ${request.change.summary}`,
+            '',
+            `  ${offer.reason}`,
             '',
             `  ${describePlan(plan)}`,
             ...(plan.takenFrom.length === 0

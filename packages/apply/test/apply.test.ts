@@ -8,7 +8,7 @@ import { fingerprintAccount, ProtonHttp } from '@pms/proton-api';
 import { ConditionComparator, ConditionType, FilterStatement } from '@proton/sieve/filterModel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { applyChange, type ConfirmationVerdict } from '../src/apply.js';
+import { applyChange, weigh, type ConfirmationVerdict } from '../src/apply.js';
 import { digestOf, shortDigest, type ChangeRequest } from '../src/request.js';
 
 /**
@@ -21,6 +21,12 @@ import { digestOf, shortDigest, type ChangeRequest } from '../src/request.js';
  * So every test below drives a recording `fetch`. The assertion is almost always the same one: how
  * many requests changed anything, and in what order. The order matters as much as the count: a
  * filter written before its folder exists is a rule that files mail into nothing, silently.
+ *
+ * The terminal is asked about big changes, not every change. A dialog that appears for every small
+ * rule becomes a reflex, and a confirmation answered without reading protects nothing — the same
+ * argument CLAUDE.md makes about never skipping the diff, pointed the other way. Every change is
+ * still confirmed once, in the dialog that shows its consequences; this is the second question, and
+ * `weigh` decides who gets it.
  */
 
 const ACCOUNT_FILTERS = [
@@ -169,7 +175,10 @@ const always =
     async (): Promise<ConfirmationVerdict> =>
         verdict;
 
-describe('nothing is written without a confirmation', () => {
+/** A change big enough to be asked about twice: a fifth of a small mailbox. */
+const BIG = { mailboxSize: 8 };
+
+describe('a change that is asked about is not written until it is answered', () => {
     it.each<[string, ConfirmationVerdict, string]>([
         ['declined', 'declined', 'APPLY_NOT_CONFIRMED'],
         ['expired', 'expired', 'APPLY_CONFIRMATION_EXPIRED'],
@@ -177,7 +186,7 @@ describe('nothing is written without a confirmation', () => {
         const proton = fakeProton();
 
         await expect(
-            applyChange(request(), { http: proton.http, backupDir, confirm: always(verdict) })
+            applyChange(request(), { http: proton.http, backupDir, confirm: always(verdict), ...BIG })
         ).rejects.toMatchObject({ code });
 
         // The whole promise, counted.
@@ -190,7 +199,7 @@ describe('nothing is written without a confirmation', () => {
         const proton = fakeProton();
 
         await expect(
-            applyChange(request(), { http: proton.http, backupDir, confirm: always('declined') })
+            applyChange(request(), { http: proton.http, backupDir, confirm: always('declined'), ...BIG })
         ).rejects.toThrow();
 
         const order = proton.calls.map((call) => call.path);
@@ -205,6 +214,7 @@ describe('nothing is written without a confirmation', () => {
             applyChange(request({ baseVersion: 'etwas-anderes' }), {
                 http: proton.http,
                 backupDir,
+                ...BIG,
                 confirm: async () => {
                     asked = true;
                     return 'granted';
@@ -215,6 +225,76 @@ describe('nothing is written without a confirmation', () => {
         expect(proton.writes()).toEqual([]);
         // And nobody was asked to approve a diff that no longer describes anything.
         expect(asked).toBe(false);
+    });
+});
+
+describe('a copy that predates the check', () => {
+    it('says what is missing rather than blaming the account', async () => {
+        // This refused every single change for anyone whose mirror was made before the fingerprint
+        // existed, and the message pointed at Proton — which was both wrong and unfixable.
+        const proton = fakeProton();
+
+        const failure = await applyChange(request({ baseVersion: '' }), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        }).catch((error: unknown) => error);
+
+        expect(isAppError(failure) && failure.code).toBe('APPLY_STATE_STALE');
+        expect(isAppError(failure) && failure.hint).toContain('synchronisieren');
+        expect(proton.writes()).toEqual([]);
+    });
+});
+
+describe('which changes are asked about twice', () => {
+    it('lets a small rule through on the dialog’s confirmation alone', async () => {
+        // Two mails out of a thousand. Asking again in a terminal would train the reflex.
+        expect(weigh(request(), 1_000).needsTerminal).toBe(false);
+    });
+
+    it('asks about anything that deletes', async () => {
+        const removal = request();
+        removal.change = { id: 'c', kind: 'delete-rule', summary: 'Regel löschen' };
+
+        expect(weigh(removal, 1_000)).toMatchObject({ needsTerminal: true });
+        expect(weigh(removal, 1_000).reason).toContain('löscht');
+    });
+
+    it('asks about a change touching a large share of the mailbox', () => {
+        const verdict = weigh(request(), 8);
+
+        expect(verdict.needsTerminal).toBe(true);
+        expect(verdict.reason).toContain('%');
+    });
+
+    it('asks about a large change even in a mailbox of unknown size', () => {
+        const many = request();
+        many.plan = { ...plan(), moves: Array.from({ length: 600 }, () => plan().moves[0] as never) };
+
+        expect(weigh(many, 0).needsTerminal).toBe(true);
+    });
+
+    it('does not ask when nothing is known and the change is small', () => {
+        expect(weigh(request(), 0).needsTerminal).toBe(false);
+    });
+
+    it('writes a small change without ever calling the terminal', async () => {
+        const proton = fakeProton({ movedIds: ['m-1', 'm-2'] });
+        let asked = false;
+
+        await applyChange(request(), {
+            http: proton.http,
+            backupDir,
+            mailboxSize: 1_000,
+            confirm: async () => {
+                asked = true;
+                return 'granted';
+            },
+            sleep: async () => undefined,
+        });
+
+        expect(asked).toBe(false);
+        expect(proton.writes().map((call) => `${call.method} ${call.path}`)).toContain('POST mail/v4/filters');
     });
 });
 

@@ -93,6 +93,9 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     http,
                     backupDir: join(DATA_DIR, 'backups'),
                     confirm,
+                    // Read fresh: the share of the mailbox a change touches decides whether it is
+                    // asked about a second time, and the copy grows with every sync.
+                    mailboxSize: (db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
                 });
                 return {
                     backupPath: outcome.backupPath,
@@ -116,7 +119,10 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         );
         console.log(`  Server: ${server.url} (nur von diesem Rechner erreichbar)`);
         console.log('  Synchronisieren lässt sich aus dem Dashboard heraus — gelesen wird, geschrieben nur lokal.');
-        console.log('  Änderungen am Konto fragen hier im Terminal nach. Ohne getipptes „ja" passiert nichts.');
+        console.log(
+            '  Grosse Änderungen fragen hier im Terminal nach — alles, was löscht oder einen\n' +
+                '  grossen Teil des Postfachs umsortiert. Kleine gelten mit der Bestätigung im Dashboard.'
+        );
         console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
         console.log('  Beenden mit Ctrl+C.\n');
 

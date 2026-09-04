@@ -327,8 +327,11 @@ export function RuleEditor({
                 </p>
 
                 <div className="split">
-                    <div>
-                        <h4>Wird getroffen ({matched.length})</h4>
+                    <div className="preview-column">
+                        <div className="preview-head">
+                            <h4>Wird getroffen ({matched.length})</h4>
+                            <p className="faint">Alles, was diese Regel im erfassten Zeitraum einsammelt.</p>
+                        </div>
                         <MailList
                             messages={matched}
                             onOpen={onOpenMail as (message: { ID: string }) => void}
@@ -340,20 +343,29 @@ export function RuleEditor({
                             {...(linkFor === undefined ? {} : { linkFor })}
                         />
                     </div>
-                    <div>
-                        <h4>Wird nicht getroffen ({others.length})</h4>
-                        <p className="faint">
-                            {showAllOthers
-                                ? 'Alle übrigen Mails im erfassten Zeitraum.'
-                                : 'Nur Mail von denselben Absendern und Domänen — dort sitzt eine zu enge Regel.'}{' '}
-                            <button
-                                type="button"
-                                className="value-chip value-chip-link"
-                                onClick={() => setShowAllOthers(!showAllOthers)}
-                            >
-                                {showAllOthers ? 'nur verwandte zeigen' : 'alle übrigen zeigen'}
-                            </button>
-                        </p>
+                    <div className="preview-column">
+                        {/*
+                         * Same structure as the left column — heading, one line, then the list — so
+                         * the two search boxes line up. They did not: the toggle and a two-line
+                         * explanation pushed this one down by exactly its own height.
+                         */}
+                        <div className="preview-head">
+                            <h4>
+                                Wird nicht getroffen ({others.length})
+                                <button
+                                    type="button"
+                                    className="value-chip value-chip-link"
+                                    onClick={() => setShowAllOthers(!showAllOthers)}
+                                >
+                                    {showAllOthers ? 'nur verwandte zeigen' : 'alle übrigen zeigen'}
+                                </button>
+                            </h4>
+                            <p className="faint">
+                                {showAllOthers
+                                    ? 'Alle übrigen Mails im erfassten Zeitraum.'
+                                    : 'Nur dieselben Absender und Domänen — dort sitzt eine zu enge Regel.'}
+                            </p>
+                        </div>
                         <MailList
                             messages={others}
                             onOpen={onOpenMail as (message: { ID: string }) => void}

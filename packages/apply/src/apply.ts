@@ -42,12 +42,55 @@ export interface ConfirmationOffer {
     request: ChangeRequest;
     /** The six characters the dashboard shows, for comparison. */
     shortDigest: string;
+    /** Why this one is being asked about when most are not. */
+    reason: string;
+}
+
+/**
+ * Which changes are asked about twice.
+ *
+ * Every change is already confirmed once: the diff dialog shows the consequences and the user
+ * clicks a button naming them. Asking again in a terminal for every small rule turns that second
+ * question into a reflex, and a confirmation people answer without reading protects nothing — which
+ * is the same argument CLAUDE.md makes for never skipping the diff.
+ *
+ * So the second question is kept for the changes where being wrong is expensive: one that resorts a
+ * large share of the mailbox, and one that removes something. A rule catching a handful of mails is
+ * visible, checkable and undoable; a rule catching a fifth of the account, or a deletion, is not so
+ * easily walked back.
+ */
+export const IMPACT_SHARE = 0.2;
+export const IMPACT_COUNT = 500;
+
+export function weigh(
+    request: ChangeRequest,
+    mailboxSize: number
+): { needsTerminal: boolean; reason: string } {
+    const moves = request.plan.moves.length;
+
+    if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
+        return { needsTerminal: true, reason: 'Diese Änderung löscht etwas.' };
+    }
+    if (moves >= IMPACT_COUNT) {
+        return { needsTerminal: true, reason: `Diese Änderung sortiert ${String(moves)} Mails um.` };
+    }
+    if (mailboxSize > 0 && moves / mailboxSize >= IMPACT_SHARE) {
+        const percent = Math.round((moves / mailboxSize) * 100);
+        return {
+            needsTerminal: true,
+            reason: `Diese Änderung betrifft ${String(percent)} % der erfassten Mails.`,
+        };
+    }
+
+    return { needsTerminal: false, reason: '' };
 }
 
 export interface ApplyContext {
     http: ProtonHttp;
     backupDir: string;
     confirm: (offer: ConfirmationOffer) => Promise<ConfirmationVerdict>;
+    /** Messages in the local copy, for judging how much of the mailbox a change touches. */
+    mailboxSize?: number;
     now?: () => number;
     /** Injected in tests so a verification does not wait on a real clock. */
     sleep?: (ms: number) => Promise<void>;
@@ -69,6 +112,20 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     // 1 — freshness
     const account = await readAccount(context.http);
     const current = fingerprintAccount(account.filters, account.folders);
+
+    if (request.baseVersion === '') {
+        // A copy made before this check existed carries no fingerprint at all. Refusing with "the
+        // account changed" was a lie and, worse, an unfixable one — every rule was rejected and the
+        // message pointed nowhere. Say what is actually missing.
+        throw new AppError('APPLY_STATE_STALE', {
+            message: 'Die lokale Kopie weiss nicht, wie das Konto aussah, als sie gemacht wurde.',
+            hint:
+                'Einmal synchronisieren — danach ist der Vergleich möglich und die Änderung geht ' +
+                'durch. Geschrieben wurde nichts.',
+            context: { change: request.change.kind },
+        });
+    }
+
     if (current !== request.baseVersion) {
         throw new AppError('APPLY_STATE_STALE', {
             message: 'Bei Proton hat sich etwas geändert, seit dieser Diff berechnet wurde.',
@@ -82,21 +139,28 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     // 2 — refuse before asking
     preflight(request, account);
 
-    // 3 — the grant, which is not an HTTP request
-    const verdict = await context.confirm({ request, shortDigest: shortDigest(digestOf(request)) });
-    if (verdict === 'expired') {
-        throw new AppError('APPLY_CONFIRMATION_EXPIRED', {
-            message: 'Die Rückfrage im Terminal ist abgelaufen.',
-            hint: 'Es wurde nichts geschrieben. Die Änderung im Dashboard erneut bestätigen.',
-            context: { change: request.change.kind },
+    // 3 — the grant, when the change is big enough to deserve a second one
+    const weight = weigh(request, context.mailboxSize ?? 0);
+    if (weight.needsTerminal) {
+        const verdict = await context.confirm({
+            request,
+            shortDigest: shortDigest(digestOf(request)),
+            reason: weight.reason,
         });
-    }
-    if (verdict !== 'granted') {
-        throw new AppError('APPLY_NOT_CONFIRMED', {
-            message: 'Die Änderung wurde im Terminal abgelehnt.',
-            hint: 'Es wurde nichts geschrieben.',
-            context: { change: request.change.kind },
-        });
+        if (verdict === 'expired') {
+            throw new AppError('APPLY_CONFIRMATION_EXPIRED', {
+                message: 'Die Rückfrage im Terminal ist abgelaufen.',
+                hint: 'Es wurde nichts geschrieben. Die Änderung im Dashboard erneut bestätigen.',
+                context: { change: request.change.kind },
+            });
+        }
+        if (verdict !== 'granted') {
+            throw new AppError('APPLY_NOT_CONFIRMED', {
+                message: 'Die Änderung wurde im Terminal abgelehnt.',
+                hint: 'Es wurde nichts geschrieben.',
+                context: { change: request.change.kind },
+            });
+        }
     }
 
     // 4 — the before-picture, observed
@@ -164,7 +228,12 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     }
 
     log.info(
-        { change: request.change.kind, confirmed: verification.confirmed, partial: partial !== undefined },
+        {
+            change: request.change.kind,
+            confirmed: verification.confirmed,
+            partial: partial !== undefined,
+            askedTwice: weight.needsTerminal,
+        },
         'change applied'
     );
 

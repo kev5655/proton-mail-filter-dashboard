@@ -38,3 +38,5 @@ fixtures/
 
 # Screenshots aus dem Testen. Bleiben lokal.
 image*.png
+
+*.png

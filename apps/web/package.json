@@ -18,12 +18,18 @@
     "@pms/rules": "workspace:*",
     "@proton/sieve": "workspace:*",
     "react": "^19.2.0",
-    "@pms/server": "workspace:*"
+    "@pms/server": "workspace:*",
+    "@pms/store": "workspace:*",
+    "@pms/sync": "workspace:*",
+    "@pms/proton-api": "workspace:*",
+    "@pms/apply": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "playwright": "^1.62.1",
+    "vite": "^8.2.2"
   }
 }

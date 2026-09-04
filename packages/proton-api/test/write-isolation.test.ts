@@ -13,6 +13,10 @@ import { describe, expect, it } from 'vitest';
  *
  * So this walks the source and checks it. The two things it protects:
  *
+ * Directories named `test` and `e2e` are skipped. Those rules are about what ships: an end-to-end
+ * harness has to stand a server up and seed a database, which means importing the very modules the
+ * application is forbidden from touching. Testing the rule requires being able to break it.
+ *
  *  - **No write outside `src/write/`.** A POST added elsewhere would bypass the diff, the backup and
  *    the confirmation, all of which live above that boundary.
  *  - **Nobody imports `write/messages.ts` except the undo service.** Moving mail is the single
@@ -48,7 +52,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
         entries.map(async (entry) => {
             const full = join(directory, entry.name);
             if (entry.isDirectory()) {
-                if (['node_modules', 'dist', 'vendor', 'test'].includes(entry.name)) {
+                if (['node_modules', 'dist', 'vendor', 'test', 'e2e'].includes(entry.name)) {
                     return [];
                 }
                 return sourceFiles(full);

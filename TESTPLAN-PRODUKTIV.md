@@ -8,7 +8,8 @@ Der alte `TESTPLAN.md` ist weg. T-04 und T-05 sind erledigt oder abgeräumt, **T
 (dein Lauf zeigte `cookieMode:true`, `session refreshed` und danach „Gespeicherte Sitzung
 wiederverwendet" — der blind gemachte Fix stimmt), T-12 bleibt zurückgestellt.
 
-**Was ich seit dem letzten Mal selbst geprüft habe** und deshalb nicht hier steht: 562 Tests,
+**Was ich seit dem letzten Mal selbst geprüft habe** und deshalb nicht hier steht: 569 Tests plus
+24 E2E-Tests im echten Browser (`pnpm test:e2e`),
 nichts übersprungen; der Protokoll-Absturz (mit einem Test, der ihn wieder findet, wenn er
 zurückkommt); das seitliche Scrollen; Blättern und Suchen in allen Listen; die Live-Vorschau des
 Regeleditors gegen den geprüften Matcher über elf Regelformen; der Round-Trip „Regel öffnen und
@@ -27,6 +28,7 @@ Status pro Test: `offen` · `ok` · `Fehler` · `behoben`
 
 ```sh
 pnpm install     # neue Pakete: @pms/apply
+pnpm sync        # einmal nötig: die Kopie bekommt dadurch den Konto-Fingerabdruck
 ```
 
 **Läuft `pnpm dev` noch? Einmal beenden und neu starten** — ein laufender Vite-Server kennt die
@@ -48,34 +50,63 @@ nötig, damit Sync und Schreiben aus dem Dashboard überhaupt gehen.
 
 Das Wichtigste. Bitte in dieser Reihenfolge.
 
-## P-01 · Ohne „ja" passiert nichts
+## P-01 · Eine Regel anlegen — und was dabei gefragt wird
 
-Der Test der zentralen Zusage. **Bitte wirklich machen** — alles andere hängt daran.
+**Behoben. Zwei Fehler, beide von mir, und der zweite war eine Fehlentscheidung.**
 
-1. Im Dashboard eine harmlose Regel bauen (Zielordner: ein Wegwerf-Name wie `Test-Sortierung`).
-2. Auf „Bei Proton speichern" klicken.
-3. Im Dashboard steht jetzt eine Prüfziffer, im Terminal die Rückfrage mit derselben.
-4. **Weggehen.** Nichts tippen.
+**1 — `APPLY_STATE_STALE` bei jeder Regel.** Der Schreibweg vergleicht einen Fingerabdruck des
+Kontos gegen den, auf dem der Diff beruht. Deine lokale Kopie stammt aus einem Sync von *vor* dieser
+Prüfung und trägt gar keinen — verglichen wurde also ein leerer String gegen einen echten, und das
+schlug immer fehl. Eine Wache, die alles abweist, ist keine Wache.
 
-**Erwartet:** Nach zwei Minuten läuft die Rückfrage ab. In Protons Oberfläche existiert weder die
-Regel noch der Ordner. Danach dasselbe mit `nein` statt `ja`.
+Jetzt wird der Fall benannt statt Proton die Schuld zu geben: *„Die lokale Kopie weiss nicht, wie
+das Konto aussah, als sie gemacht wurde — einmal synchronisieren."* Ein Sync genügt.
 
-Und einmal von aussen, ohne Dashboard:
+**2 — Du hattest recht mit der Rückfrage.** Ich hatte für *jede* Änderung ein getipptes `ja`
+verlangt. Das ist genau der Fehler, den CLAUDE.md über den Diff-Dialog beschreibt: eine Rückfrage,
+die jedes Mal kommt, wird zur Reflexbewegung, und eine Bestätigung, die niemand liest, schützt
+nichts.
+
+Bestätigt wird weiterhin **einmal** — im Diff-Dialog, der die Folgen zeigt. Das Terminal fragt nur
+noch, wenn es teuer wäre, sich zu irren:
+
+- die Änderung **löscht** etwas (Regel oder Ordner), oder
+- sie sortiert **mindestens 20 %** der erfassten Mails um, oder
+- sie betrifft **500 Mails oder mehr**.
+
+Die Schwellen stehen als `IMPACT_SHARE` und `IMPACT_COUNT` in `packages/apply/src/apply.ts`. Wenn
+sich das falsch anfühlt, sind es zwei Zahlen.
+
+**Und der E2E-Test, den du wolltest.** `pnpm test:e2e` fährt jetzt einen echten Browser gegen einen
+echten Server. `apps/web/e2e/flow.e2e.ts` enthält genau deinen Fall: Regel anlegen, klicken,
+gespeichert — ohne Terminal. Dazu einer, der prüft, dass `APPLY_STATE_STALE` bei frischer Kopie
+gar nicht mehr auftaucht, und zwei für die grossen Änderungen, die weiterhin fragen.
+
+**Bitte erneut prüfen:**
+
+```sh
+pnpm sync        # einmal, damit die Kopie den Fingerabdruck bekommt
+pnpm serve
+```
+
+1. Eine kleine Regel anlegen → muss ohne Terminal-Rückfrage durchgehen.
+2. Eine Regel löschen → **muss** im Terminal nachfragen. Weggehen: nichts darf passieren.
+3. Das `curl` von unten → muss weiterhin `202` liefern und ohne Antwort nichts tun.
 
 ```sh
 curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"requestId":"x","createdAt":1,"change":{"id":"c","kind":"create-rule","summary":"Test"},"plan":{"moves":[],"clearedFromInbox":0,"returnedToInbox":0,"takenFrom":[]},"affectedMessageIds":[],"applyToExisting":false,"baseVersion":"egal"}' \
+  -d '{"requestId":"x","createdAt":1,"change":{"id":"c","kind":"delete-rule","summary":"Test"},"plan":{"moves":[],"clearedFromInbox":0,"returnedToInbox":0,"takenFrom":[]},"affectedMessageIds":[],"applyToExisting":false,"baseVersion":"egal"}' \
   http://127.0.0.1:5174/api/apply
 ```
 
-Das muss `202` antworten, im Terminal eine Rückfrage auslösen — und wenn du nichts tippst, darf sich
-am Konto nichts ändern.
+(`delete-rule`, damit es die Rückfrage auslöst. `baseVersion: "egal"` wird jetzt korrekt als
+veraltet abgewiesen — auch das ist ein gültiges Ergebnis.)
 
-Status: `offen`
+Status: `behoben, bitte nachprüfen`
 
 **Befund:**
 
-**Fix:**
+**Fix:** siehe oben.
 
 ---
 
@@ -297,3 +328,41 @@ Status: `offen`
   erfundener Einträge. Was fehlt, ist der Vergleich mit dem, was beim letzten Sync bekannt war.
 - **Reihenfolge der Regeln ändern.** Bei Filtern ist die Reihenfolge das Ergebnis — das verdient
   einen eigenen Diff und kommt separat.
+
+---
+
+## Deine weiteren Befunde
+
+**Die Suchfelder standen nicht auf gleicher Höhe.** Behoben. Die rechte Spalte trug einen
+Umschalter und einen längeren Satz über ihrem Feld und war dadurch um genau dessen Höhe nach unten
+verschoben. Beide Spalten haben jetzt denselben Aufbau — Überschrift, eine Zeile, dann die Liste —
+und der Umschalter sitzt in der Überschrift. Ein Rand-Abstand hätte es auch geradegerückt und wäre
+beim nächsten Satz wieder krumm gewesen.
+
+Status: `behoben, bitte nachprüfen`
+
+**Befund:**
+
+---
+
+## Neu: E2E-Tests
+
+```sh
+pnpm test:e2e
+```
+
+24 Tests, echter Browser gegen echten Server durch den echten Proxy. Sie decken drei Dinge ab, die
+die anderen 569 Tests nicht können:
+
+- **Layout.** Nicht die Stylesheet-Regel, sondern ob wirklich etwas seitlich scrollt — bei fünf
+  Breiten, auf allen acht Bildschirmen und in den Dialogen. Beim Schreiben hat der Test sofort einen
+  echten Fehler gefunden: `.mail-open` liess den Betreff seine volle Breite nehmen (232 px in einem
+  168-px-Knopf), die Ellipse griff nie.
+- **Der Durchstich.** Alle bisherigen Serverprüfungen liefen per `curl` direkt auf den Port. Ob der
+  Browser durch den Vite-Proxy dorthin kommt — und ob der SSE-Strom nicht gepuffert wird, was
+  Proxies gerne tun — war nie geprüft.
+- **Die Mail-Ansicht.** Dass ein Mailinhalt nichts nachladen kann, war bisher eine Aussage über
+  Zeichenketten. `sandbox=""` und die CSP setzt nur ein Browser durch. Die erste Fassung dieser
+  Tests ging durch, ohne je eine Mail zu öffnen — jetzt scheitern sie laut, wenn das passiert.
+
+Jeder dieser Tests wurde gegengeprüft, indem ich den Fehler wieder eingebaut habe: er schlägt an.
