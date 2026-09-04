@@ -1,5 +1,3 @@
-import { getLogger } from '@pms/core/logger';
-
 import { buildLabelPrompt, validateLabelProposal } from './labels.js';
 import { buildProposalPrompt, validateProposal, type RuleProposal, type SelectionSummary } from './propose.js';
 import type {
@@ -10,8 +8,6 @@ import type {
     SieveExplanation,
     Suggestion,
 } from './provider.js';
-
-const log = getLogger('llm-cloud');
 
 /**
  * A model somebody else runs, reached with an API key.
@@ -27,6 +23,11 @@ const log = getLogger('llm-cloud');
  * `/chat/completions` — OpenAI itself, Mistral, Groq, DeepSeek, OpenRouter, and anything else that
  * copied it — and Anthropic speaks its own `/v1/messages`. Rather than pretending one adapter
  * covers both, there are two, and a preset says which a given product needs.
+ *
+ * There is no logger in this file, and that is not an oversight. This module is bundled into the
+ * dashboard, and `@pms/core/logger` builds a pino instance around `process.stderr` at import time —
+ * which in a browser is a `ReferenceError` before React renders, leaving a blank page. It happened;
+ * `apps/web/test/browser-bundle.test.ts` walks the import graph so it cannot happen again.
  *
  * What comes back goes through exactly the same validation as a local model's answer. A model that
  * costs money is not a model that gets believed: `validateProposal` and `validateLabelProposal` are
@@ -250,9 +251,7 @@ export function createCloudProvider(config: CloudConfig): LlmProvider {
         },
 
         async proposeLabels(input: LabelRequest): Promise<LabelProposal> {
-            const result = validateLabelProposal(extractJson(await ask(buildLabelPrompt(input))), input);
-            log.info({ chosen: result.chosen.length, proposed: result.proposedNew.length }, 'labels proposed');
-            return result;
+            return validateLabelProposal(extractJson(await ask(buildLabelPrompt(input))), input);
         },
     };
 }
