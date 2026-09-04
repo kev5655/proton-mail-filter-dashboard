@@ -10,6 +10,34 @@
     min-height: 100vh;
 }
 
+/*
+ * The navigation stays put; only the content beside it scrolls.
+ *
+ * Above the breakpoint the two columns sit side by side, and letting the *page* scroll moved both —
+ * so reading down a long rule list carried the navigation off the top of the screen. Making the
+ * shell exactly one viewport tall and giving each column its own scrollport fixes that.
+ *
+ * Only above the breakpoint, and that matters: below it the grid collapses to one column with the
+ * bar *above* the content, where a fixed bar would eat half a narrow screen. 780px is one of the
+ * five widths `layout.e2e.ts` checks, so this case is exercised rather than assumed.
+ *
+ * The sidebar gets a scrollport of its own as well. It carries the brand, nine entries, the source
+ * banner and the login and sync panels — on a short window that is taller than the screen, and
+ * "fixed" must not come to mean "unreachable".
+ */
+@media (min-width: 861px) {
+    .shell {
+        height: 100vh;
+        /* The window itself has nothing left to scroll, which is what keeps the bar still. */
+        overflow: hidden;
+    }
+
+    .sidebar,
+    .main {
+        overflow-y: auto;
+    }
+}
+
 /* ---------------------------------------------------------------- sidebar */
 
 .sidebar {

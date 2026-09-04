@@ -156,3 +156,56 @@ describe('the lists use the width they are given', () => {
         expect(await sidewaysScrollers()).toEqual([]);
     });
 });
+
+/**
+ * The navigation stays where it is.
+ *
+ * Reading down a long rule list used to carry the sidebar off the top of the screen, because the
+ * *page* scrolled and both grid columns went with it. Measured rather than reasoned about: scroll
+ * the content and see whether the bar moved.
+ *
+ * And the opposite case at 780px, which is the more interesting half. Below the breakpoint the grid
+ * collapses to one column with the bar *above* the content, where pinning it would eat half a
+ * narrow screen — so there it has to scroll away like anything else.
+ */
+describe('the navigation while the content scrolls', () => {
+    async function scrollAndMeasure(width: number): Promise<{ before: number; after: number; scrolled: number }> {
+        // „Vorschläge" and a short window, because the test needs something that genuinely
+        // overflows — measuring whether a bar moved while nothing scrolled proves nothing.
+        await harness.page.setViewportSize({ width, height: 600 });
+        await harness.page.goto(harness.url, { waitUntil: 'networkidle' });
+        await harness.page.getByRole('button', { name: 'Vorschläge', exact: false }).first().click();
+        await harness.page.waitForTimeout(250);
+
+        const before = (await harness.page.locator('.sidebar').boundingBox())?.y ?? 0;
+
+        const scrolled = await harness.page.evaluate(() => {
+            const main = document.querySelector('.main');
+            // Whichever of the two actually scrolls in this layout — that is the thing under test.
+            const target = main !== null && main.scrollHeight > main.clientHeight ? main : document.scrollingElement;
+            target?.scrollBy(0, 400);
+            return target === main ? (main?.scrollTop ?? 0) : (document.scrollingElement?.scrollTop ?? 0);
+        });
+        await harness.page.waitForTimeout(120);
+
+        const after = (await harness.page.locator('.sidebar').boundingBox())?.y ?? 0;
+        return { before, after, scrolled };
+    }
+
+    it('stays put on a wide screen', async () => {
+        const { before, after, scrolled } = await scrollAndMeasure(1440);
+
+        // Something has to have scrolled, or the test proves nothing about staying still.
+        expect(scrolled).toBeGreaterThan(0);
+        expect(after).toBe(before);
+    });
+
+    it('scrolls away with everything else on a narrow one', async () => {
+        // Below 860 the bar sits above the content. Pinning it there would take a fixed slice out
+        // of a screen that has none to spare.
+        const { before, after, scrolled } = await scrollAndMeasure(780);
+
+        expect(scrolled).toBeGreaterThan(0);
+        expect(after).toBeLessThan(before);
+    });
+});
