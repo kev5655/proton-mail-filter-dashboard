@@ -12,11 +12,20 @@ The rule is enforced structurally, not by discipline: only `packages/proton-api/
 issue non-GET requests, and the message-moving calls inside it are reachable only from the undo
 service. If you are about to add a write path anywhere else, that is the signal to stop.
 
-`packages/server/` is the same idea one layer out. It hands the dashboard the mirrored mailbox and
-has no Proton client in reach at all, so nothing it does can become a request to the account. It
-refuses every method that is not `GET` *before* it looks at the path, which means there is no route
-table a write could be added to — "there are no write routes" is true of any server until someone
-adds one, and that is not a guarantee.
+`packages/server/` is the same idea one layer out, and the guarantee there has a precise shape:
+
+> **HTTP is an offer, not a trigger. No change reaches Proton without a `ja` typed at the terminal
+> where `pnpm serve` runs.**
+
+The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
+parses a request cannot reach the code that performs one. They meet through a channel object handed
+in from outside, and `write-isolation.test.ts` checks that the routing files import neither
+`@pms/apply` nor the write surface. Two non-GET routes exist and both are named in an `if` rather
+than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
+records an offer and answers `202` while nothing has happened yet.
+
+`packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
+One file to read when someone asks what this tool can change.
 
 Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
 a full JSON backup of all filters and folders.
@@ -100,7 +109,8 @@ packages/mail-view/     Sanitising a mail body so it is safe to display
 packages/changes/       Diff, undo journal and post-write verification
 packages/store/         The encrypted local database
 packages/sync/          Mirroring Proton into it, and reading it back
-packages/server/        Serving that mirror to the dashboard — read-only, loopback only
+packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
+packages/apply/         The one path that writes to Proton, behind a terminal confirmation
 apps/spike/             M0 read-only probe, plus `--sync` and `--serve`
 apps/web/               The dashboard. Reads the real mirror when the server runs, else the demo.
 ```
@@ -118,7 +128,8 @@ pnpm check-types        # builds vendor declarations, then tsc over everything
 pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
 pnpm sync               # mirror the account into the local encrypted database
-pnpm serve              # serve that mirror on 127.0.0.1:5174 — reads locally, never calls Proton
+pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
+                        # and for confirming changes — it asks in *this* terminal
 pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
 ```
 
@@ -194,6 +205,13 @@ per rule, not hidden in a default.
 queues them so a burst becomes a sequence. Proton runs this service for its users and gets nothing
 from us for it, and nothing this tool asks is urgent by the second. Only tests may set it to 0. The
 jitter is not decoration: a request exactly every 900 ms is a machine signature.
+
+**The write path, in order.** `apply.ts` does freshness → refuse → confirm → read the before-picture
+→ back up → write (folder before filter) → journal → verify → report, and every position was chosen
+against a specific failure. The journal records what verification *observed*, never what the plan
+intended: undo works from that record, so a journal built from intentions would move back mail that
+never moved. Nothing is rolled back automatically — deleting a folder moves the mail inside it, and
+an error path is the worst place to do that unwatched.
 
 **Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
 `ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the

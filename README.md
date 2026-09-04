@@ -145,10 +145,26 @@ The dashboard now reads your mirror instead of the demo, and says so — includi
 and whether the last sync was cut short. Stop the server and reload, and it falls back to the demo
 without an error: no server running is the ordinary case, not a failure.
 
-**The server never talks to Proton.** It has no Proton client in reach; it opens `data/mailbox.db`,
-serves it on the loopback interface, and refuses every HTTP method that is not `GET` before it looks
-at the path — so there is no route table a write could be added to. Refreshing the copy is
-`pnpm sync`, which is the only part of the system that knows the account exists.
+The dashboard can now start a sync itself — there is a button and a progress bar — and it can offer
+a change to your filters. Both need the serving process to hold a Proton session, and the guarantee
+that replaces "the server never talks to Proton" is a sharper one:
+
+> **HTTP is an offer, not a trigger. Nothing reaches your account without a `ja` typed in the
+> terminal where `pnpm serve` is running.**
+
+Clicking "Bei Proton speichern" sends the change and gets back a reference and six characters.
+Nothing has been written at that point. The terminal prints what was asked for — derived from the
+request itself, not from a label the browser chose — shows the same six characters, and waits. If
+you walk away, nothing happens. If you type anything but `ja`, nothing happens.
+
+A sync needs no confirmation because it changes nothing at the account: it reads, and writes only
+into the local copy.
+
+Before any write, a complete backup of every filter and folder is saved to `data/backups/`. After
+it, the affected messages are read back from Proton — a write returning success means Proton
+accepted the filter, not that any mail moved — and a partial result is reported as one. Every change
+can be undone from the history, and undo moves back exactly the messages the journal recorded,
+never everything in a folder.
 
 There is no authentication on that port, deliberately. The database is open in the process, so
 anything that can reach the port can read the mailbox; the answer to that is that nothing remote can
