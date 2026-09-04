@@ -76,7 +76,6 @@ export function ChangesPage(): React.JSX.Element {
                                         {
                                             id: `adopt-${item.id}`,
                                             kind: 'adopt-rule',
-                                            summary: `Regel „${item.name}" übernehmen`,
                                             before: rule,
                                         },
                                         { id: item.id, decision: 'adopt' }
@@ -100,7 +99,6 @@ export function ChangesPage(): React.JSX.Element {
                                         {
                                             id: `disable-${item.id}`,
                                             kind: 'disable-rule',
-                                            summary: `Regel „${item.name}" bei Proton deaktivieren`,
                                             before: rule,
                                         },
                                         { id: item.id, decision: 'reject' }
@@ -125,7 +123,6 @@ export function ChangesPage(): React.JSX.Element {
                                         {
                                             id: `delete-${item.id}`,
                                             kind: 'delete-rule',
-                                            summary: `Regel „${item.name}" bei Proton löschen`,
                                             before: rule,
                                         },
                                         { id: item.id, decision: 'reject' }

@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 
-import { describePlan } from '@pms/changes';
+import { describeChange, describePlan } from '@pms/changes';
 
 import type { ConfirmationOffer, ConfirmationVerdict } from './apply.js';
 
@@ -45,7 +45,7 @@ export function confirmAtTerminal(
             '─────────────────────────────────────────────────────────────',
             '  Das Dashboard möchte etwas an deinem Proton-Konto ändern.',
             '',
-            `  ${request.change.summary}`,
+            `  ${describeChange(request.change)}`,
             '',
             `  ${offer.reason}`,
             '',

@@ -44,7 +44,6 @@ beforeEach(() => {
         store.stage({
             id: 'c-1',
             kind: 'create-folder',
-            summary: 'Ordner „Ablage" anlegen',
             folder: { name: 'Ablage' },
         });
     });

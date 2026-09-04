@@ -10,7 +10,6 @@ import { CategoriesPage } from './pages/CategoriesPage.js';
 import { ChangesPage } from './pages/ChangesPage.js';
 import { FoldersPage } from './pages/FoldersPage.js';
 import { HistoryPage } from './pages/HistoryPage.js';
-import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { TriagePage } from './pages/TriagePage.js';
@@ -114,7 +113,6 @@ const PAGE_LABELS: Record<Page, string> = {
     folders: 'Ordner',
     changes: 'Änderungen',
     history: 'Verlauf',
-    log: 'Protokoll',
     settings: 'Einstellungen',
 };
 
@@ -123,6 +121,8 @@ function Shell(): React.JSX.Element {
     const { groups, categories, autoRules } = useMailbox();
     const status = useMailboxStatus();
     const { rules, folders, drift, journal } = useStore();
+    // What actually reached the account, or the demo's local record when there is no account.
+    const historyCount = status.source === 'demo' ? journal.length : status.history.length;
     const [buildingRule, setBuildingRule] = useState(false);
     const [movingToCategory, setMovingToCategory] = useState(false);
 
@@ -144,8 +144,9 @@ function Shell(): React.JSX.Element {
         },
         { id: 'folders', label: PAGE_LABELS.folders, count: folders.length },
         { id: 'changes', label: PAGE_LABELS.changes, count: drift.filter((item) => item.resolved === undefined).length },
-        { id: 'history', label: PAGE_LABELS.history, count: journal.length },
-        { id: 'log', label: PAGE_LABELS.log, count: 0 },
+        // „Protokoll" is gone as a tab: it is now the lower half of „Verlauf", where the two
+        // questions it kept being confused with sit next to each other and say how they differ.
+        { id: 'history', label: PAGE_LABELS.history, count: historyCount },
         { id: 'settings', label: PAGE_LABELS.settings, count: 0 },
     ];
 
@@ -199,7 +200,6 @@ function Shell(): React.JSX.Element {
                     {nav.page === 'folders' && <FoldersPage />}
                     {nav.page === 'changes' && <ChangesPage />}
                     {nav.page === 'history' && <HistoryPage />}
-                    {nav.page === 'log' && <LogPage />}
                     {nav.page === 'settings' && <SettingsPage />}
                 </ErrorBoundary>
 

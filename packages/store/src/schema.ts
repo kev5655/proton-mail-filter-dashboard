@@ -142,4 +142,47 @@ export const MIGRATIONS: readonly Migration[] = [
                 ON category_observations (sender_domain, observed_at);
         `,
     },
+    {
+        summary: 'the record of what was changed at Proton, and how to take it back',
+        sql: `
+            -- What this tool did to the account, and the means to undo it.
+            --
+            -- It existed before this table, and only in a browser tab. \`applyChange\` built a
+            -- correct entry — from what verification *observed*, not from what the plan intended —
+            -- and the process that called it dropped the value on the floor. So „Verlauf" was
+            -- permanently empty against a real account, and \`undoChange\` had no caller anywhere in
+            -- the project.
+            --
+            -- Two things are kept per entry and both are needed. The **inverse change** puts the
+            -- rules back; the **per-message snapshot** puts the mail back. Neither alone is enough:
+            -- deleting a rule does not return the mail it filed, and moving mail back while the
+            -- rule still runs means it is filed again within the hour.
+            --
+            -- \`moved_json\` holds message ids and label ids and nothing else — no subjects, no
+            -- senders. The diff had those and did not need to keep them; what is not stored cannot
+            -- leak out of a backup or an error report.
+            CREATE TABLE journal_entries (
+                id            TEXT PRIMARY KEY,
+                -- Unix seconds, when the change was applied.
+                at            INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                summary       TEXT NOT NULL,
+                change_json   TEXT NOT NULL,
+                inverse_json  TEXT NOT NULL,
+                -- MovedMessage[]: id, the labels it carried before, where it went.
+                moved_json    TEXT NOT NULL,
+                -- What the check afterwards actually saw. Absent when nothing was expected to move.
+                verification_json TEXT,
+                -- The full backup taken before the write. The one file that can rebuild the rest.
+                backup_path   TEXT NOT NULL,
+                -- Set when this entry has been taken back, so it is not offered twice.
+                undone_at     INTEGER,
+                -- Set when this entry *is* an undo, naming what it took back. A rewind is a chain
+                -- of these, and reading the chain is how a half-finished rewind stays explicable.
+                undoes_id     TEXT
+            ) STRICT;
+
+            CREATE INDEX journal_entries_at ON journal_entries (at);
+        `,
+    },
 ];

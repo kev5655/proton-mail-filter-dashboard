@@ -43,13 +43,30 @@ export type ChangeKind =
      * It names message ids and nothing else — never a sender, never a folder, never "the rest of
      * these". The diff lists them, the terminal asks about them, and exactly those move.
      */
-    | 'move-to-category';
+    | 'move-to-category'
+    /**
+     * Taking one recorded change back — the rule *and* the mail it moved.
+     *
+     * It names a journal entry and nothing else. Everything about what will happen comes from that
+     * entry's own record: the inverse change puts the rules back, and the per-message snapshot puts
+     * each message where *it* was, which is not necessarily where any of the others were. A
+     * description of the change could not do that, which is why the snapshot exists.
+     */
+    | 'undo-entry';
 
 export interface PendingChange {
     id: string;
     kind: ChangeKind;
-    /** One line, for the confirmation dialog and the history. */
-    summary: string;
+    /*
+     * There is deliberately no `summary` here.
+     *
+     * There was, and it was written by hand at ten call sites — which produced two wordings for the
+     * same act depending on which screen staged it, and „Regel „X" ändern" for an edit that moved
+     * mail to a different folder. The history then inherited whichever phrasing happened to be
+     * used. A change is named in three places that have to agree — the diff, the terminal question
+     * and the history — so the name is derived from the change itself, by `describeChange`, and
+     * there is no field to get out of step.
+     */
     /** For rule changes: the rule as it is now, absent when creating. */
     before?: OrderedRule | undefined;
     /** For rule changes: the rule as it would be, absent when deleting. */
@@ -63,6 +80,8 @@ export interface PendingChange {
      * from a sender or a folder — that is what keeps this narrow enough to be an exception.
      */
     category?: { id: string; messageIds: string[] } | undefined;
+    /** For an undo: which recorded change is being taken back. */
+    undo?: { entryId: string } | undefined;
 }
 
 /** One message whose destination the change alters. */
@@ -129,6 +148,17 @@ export function applyChangeToRules(rules: OrderedRule[], change: PendingChange):
         // Moving mail into a category changes where some mail is, not which rule matches what.
         // Proton may draw a conclusion from it, but that conclusion is not a rule we hold.
         case 'move-to-category':
+            return rules;
+
+        /*
+         * An undo does change the rules, and this function cannot say how.
+         *
+         * The change it reverses is in the journal, not in this object — deliberately, so that the
+         * dashboard can offer an undo without carrying a copy of the original around. The rule set
+         * is put back by applying the *recorded inverse* through the ordinary write path, which is
+         * a step later and in a place that can read the record.
+         */
+        case 'undo-entry':
             return rules;
 
         // Folder changes do not alter which rule matches what, only where the mail is put. A rename
@@ -258,7 +288,6 @@ export function planCategoryMove(input: CategoryMoveInput): ChangePlan {
     const change: PendingChange = {
         id: `cat-${input.categoryId}-${String(input.messageIds.length)}`,
         kind: 'move-to-category',
-        summary: `${input.messageIds.length} ${input.messageIds.length === 1 ? 'Mail' : 'Mails'} nach „${to}" verschieben`,
         category: { id: input.categoryId, messageIds: [...input.messageIds] },
     };
 
@@ -292,4 +321,73 @@ export function planCategoryMove(input: CategoryMoveInput): ChangePlan {
         returnedToInbox: 0,
         takenFrom: [...takenFrom].map(([ruleName, count]) => ({ ruleName, count })).sort((a, b) => b.count - a.count),
     };
+}
+
+/** What a recorded change did, as much of it as an undo needs to describe itself. */
+export interface UndoableEntry {
+    id: string;
+    summary: string;
+    moved: Array<{ messageId: string; previousLabelIds: string[]; movedTo: string | undefined }>;
+}
+
+/**
+ * The plan for taking one recorded change back.
+ *
+ * Built from the journal's snapshot rather than by simulating anything, and that is the whole
+ * point: it shows the messages that *actually* moved, as observed after the write, and where each
+ * one individually came from. A simulation would show what the change was expected to do, which is
+ * the thing an undo must not act on — a message that never moved would be "moved back" to somewhere
+ * it had never left.
+ *
+ * `resolveLabel` turns the recorded label ids into names, because the snapshot speaks Proton's ids
+ * and a person reads folder names. An id it cannot place comes back as-is rather than being hidden:
+ * an unrecognised destination is a thing to see before confirming, not after.
+ */
+export function planUndo(
+    entry: UndoableEntry,
+    resolveLabel: (labelId: string) => string | undefined
+): ChangePlan {
+    const change: PendingChange = {
+        id: `undo-${entry.id}`,
+        kind: 'undo-entry',
+        undo: { entryId: entry.id },
+    };
+
+    const moves: Move[] = entry.moved.map((moved) => ({
+        messageId: moved.messageId,
+        // The journal keeps no subjects or senders — it did not need them and what is not stored
+        // cannot leak. The id is what the row can honestly show.
+        subject: moved.messageId,
+        sender: '',
+        from: moved.movedTo,
+        to: previousName(moved.previousLabelIds, resolveLabel),
+    }));
+
+    return {
+        change,
+        moves,
+        clearedFromInbox: 0,
+        returnedToInbox: moves.filter((move) => move.to === undefined).length,
+        takenFrom: [],
+    };
+}
+
+/**
+ * Where one message was before, by the same rule the undo itself will follow.
+ *
+ * A folder first, then whatever else can be named, then the inbox — the order of specificity. A
+ * message moved into a category was in the inbox *and* in another category beforehand, and undoing
+ * it to the inbox would silently drop the thing being restored.
+ */
+function previousName(
+    previousLabelIds: readonly string[],
+    resolveLabel: (labelId: string) => string | undefined
+): string | undefined {
+    for (const labelId of previousLabelIds) {
+        const name = resolveLabel(labelId);
+        if (name !== undefined) {
+            return name;
+        }
+    }
+    return undefined;
 }

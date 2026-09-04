@@ -4,6 +4,7 @@ import type { ProtonHttp } from '@pms/proton-api';
 import { getFilters, getFolders } from '@pms/proton-api';
 import type { ProtonFilter, ProtonLabel } from '@pms/proton-api/schemas';
 import {
+    applyFiltersToExisting,
     backupBeforeWrite,
     createFilter,
     createFolder,
@@ -253,4 +254,25 @@ export async function reorder(http: ProtonHttp, account: Account, ids: readonly 
 
     await reorderFilters(http, [...ids]);
     log.info({ count: ids.length }, 'filters reordered');
+}
+
+/**
+ * Ask Proton to run its own filters over mail that already arrived.
+ *
+ * The reason a new rule can tidy up the backlog instead of only affecting future mail — and the
+ * reason the project's core rule survives it: **Proton does the moving.** We do not select messages
+ * and put them somewhere; we hand over the ids the diff listed and ask the service to apply the
+ * rules it already has. The distinction is the whole design, not a wording preference.
+ *
+ * It was implemented and exported for months and called by nobody, while the terminal told the user
+ * „Bestehende Mail wird mit einbezogen" and nothing included it. The verification step then waited
+ * three times for movements that could not happen and reported a partial result.
+ */
+export async function applyToBacklog(http: ProtonHttp, messageIds: readonly string[]): Promise<number> {
+    if (messageIds.length === 0) {
+        return 0;
+    }
+    await applyFiltersToExisting(http, [...messageIds]);
+    log.info({ count: messageIds.length }, 'asked Proton to file existing mail');
+    return messageIds.length;
 }

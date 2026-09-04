@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ErrorBoundary } from '../src/components/ErrorBoundary.js';
 import { log } from '../src/log.js';
-import { LogPage } from '../src/pages/LogPage.js';
+import { ActivityLog } from '../src/components/ActivityLog.js';
 
 /**
  * „Protokoll", rendered the way a browser renders it.
@@ -40,14 +40,14 @@ function mount(element: React.JSX.Element): void {
 
 describe('the log page', () => {
     it('renders without looping, on an empty log', () => {
-        mount(<LogPage />);
+        mount(<ActivityLog />);
 
-        expect(container.textContent).toContain('Protokoll');
+        expect(container.textContent).toContain('Ereignisse, Fehlercodes und Zahlen');
     });
 
     it('renders the entries and survives new ones arriving', () => {
         log('warn', 'sync.truncated', { count: 2000 });
-        mount(<LogPage />);
+        mount(<ActivityLog />);
 
         expect(container.textContent).toContain('sync.truncated');
 
@@ -63,7 +63,7 @@ describe('the log page', () => {
         // so catching it here means catching the loop before it becomes a blank screen.
         const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-        mount(<LogPage />);
+        mount(<ActivityLog />);
 
         const said = errors.mock.calls.map((call) => String(call[0] ?? '')).join(' ');
         expect(said).not.toContain('getSnapshot should be cached');

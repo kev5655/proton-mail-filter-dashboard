@@ -9,10 +9,11 @@
     "./types": "./src/types.ts"
   },
   "dependencies": {
+    "@pms/changes": "workspace:*",
     "@pms/core": "workspace:*",
+    "@pms/proton-api": "workspace:*",
     "@pms/store": "workspace:*",
     "@pms/sync": "workspace:*",
-    "@proton/sieve": "workspace:*",
-    "@pms/proton-api": "workspace:*"
+    "@proton/sieve": "workspace:*"
   }
 }

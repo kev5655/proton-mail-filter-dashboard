@@ -12,7 +12,7 @@ import { DEMO_RULES as rules } from '@pms/demo';
 import { Providers } from './harness.js';
 import { ChangesPage } from '../src/pages/ChangesPage.js';
 import { HistoryPage } from '../src/pages/HistoryPage.js';
-import { LogPage } from '../src/pages/LogPage.js';
+import { ActivityLog } from '../src/components/ActivityLog.js';
 import { StoreProvider } from '../src/store.js';
 
 /**
@@ -231,7 +231,7 @@ describe('changes made in Proton itself', () => {
 });
 
 describe('the log', () => {
-    const html = render(<LogPage />);
+    const html = render(<ActivityLog />);
 
     it('offers an export and says what it does not contain', () => {
         expect(text(html)).toContain('Bericht kopieren');

@@ -38,7 +38,6 @@ const PAGES = [
     'Ordner',
     'Änderungen',
     'Verlauf',
-    'Protokoll',
     'Einstellungen',
 ];
 const WIDTHS = [1440, 1280, 1024, 900, 780];

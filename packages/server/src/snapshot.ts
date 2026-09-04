@@ -1,3 +1,4 @@
+import { describeChange } from '@pms/changes';
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 import {
@@ -6,6 +7,7 @@ import {
     readCategoryObservations,
     readFilters,
     readFolderTree,
+    readJournal,
     readMessages,
     type StoredFolder,
 } from '@pms/sync';
@@ -103,6 +105,33 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
         messages,
         categoryObservations: readCategoryObservations(db),
         categoryChanges: readCategoryChanges(db),
+        /*
+         * The record of what was changed, travelling in the snapshot rather than on a route of its
+         * own. It is read-only data about this mailbox, exactly like the rest of it.
+         *
+         * Mapped rather than passed through: `stragglers` becomes a count. The ids are in the
+         * database for undo to work from and have no business in a browser tab, where they would
+         * end up in a copied bug report.
+         */
+        history: readJournal(db).map((entry) => ({
+            id: entry.id,
+            at: entry.at,
+            kind: entry.change.kind,
+            summary: describeChange(entry.change),
+            moved: entry.moved,
+            ...(entry.verification === undefined
+                ? {}
+                : {
+                      verification: {
+                          confirmed: entry.verification.confirmed,
+                          stragglers: entry.verification.stragglers.length,
+                          checkedAt: entry.verification.checkedAt,
+                      },
+                  }),
+            backupPath: entry.backupPath,
+            ...(entry.undoneAt === undefined ? {} : { undoneAt: entry.undoneAt }),
+            ...(entry.undoesId === undefined ? {} : { undoesId: entry.undoesId }),
+        })),
     };
 }
 

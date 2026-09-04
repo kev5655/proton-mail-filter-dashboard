@@ -134,6 +134,37 @@ export interface MailboxSnapshot {
      */
     categoryObservations: CategoryObservationDto[];
     categoryChanges: CategoryChangeDto[];
+    /**
+     * What this tool changed at the account, newest first.
+     *
+     * Read from the local database rather than held in the browser, which is where it used to live
+     * — and why it was empty against every real mailbox: the entry was built correctly by the write
+     * path and then dropped, so „Verlauf" only ever filled up in the demo.
+     *
+     * `moved` carries message ids and label ids and nothing else. The diff had subjects and senders
+     * and did not need to keep them.
+     */
+    history: JournalEntryDto[];
+}
+
+/** One applied change, as the dashboard reads it back. */
+export interface JournalEntryDto {
+    id: string;
+    /** Unix seconds. */
+    at: number;
+    kind: string;
+    /** The wording as it stood when the change was made. */
+    summary: string;
+    /** The messages this change moved, and where each one was before. */
+    moved: Array<{ messageId: string; previousLabelIds: string[]; movedTo: string | undefined }>;
+    /** What the check afterwards saw. Absent when nothing was expected to move. */
+    verification?: { confirmed: number; stragglers: number; checkedAt: number } | undefined;
+    /** The full backup taken before the write. */
+    backupPath: string;
+    /** Set once this entry has been taken back. */
+    undoneAt?: number | undefined;
+    /** Set when this entry is itself an undo, naming what it took back. */
+    undoesId?: string | undefined;
 }
 
 /**

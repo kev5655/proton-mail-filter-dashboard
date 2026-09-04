@@ -51,7 +51,6 @@ afterEach(() => {
 const change = {
     id: 'disable-d-1',
     kind: 'disable-rule' as const,
-    summary: 'Regel „Zahnarzt" bei Proton deaktivieren',
 };
 
 describe('answering a rule that appeared at Proton', () => {

@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
-import { describePlan } from '@pms/changes';
+import { describeChange, describePlan } from '@pms/changes';
 
 import { useStore } from '../store.js';
 import { useApply } from '../apply.js';
@@ -34,6 +34,17 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
      * backup path and any partial result move to the banner in the shell, which stays until it is
      * dismissed.
      */
+    /*
+     * Whether Proton should also re-file the mail that is already there.
+     *
+     * It used to be derived — `moves.length > 0` — and then read by nothing: the terminal printed
+     * „Bestehende Mail wird mit einbezogen" and no request ever included it. Now it does something,
+     * so it has to be a choice rather than an inference. On by default when there is a backlog,
+     * because that is what somebody writing a rule about mail they can see in the list below
+     * expects; off is a legitimate answer and means „nur für künftige Mail".
+     */
+    const [applyToExisting, setApplyToExisting] = useState(true);
+
     const applied = phase.phase === 'applied';
     useEffect(() => {
         if (!applied) {
@@ -67,7 +78,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
             <div className="viewer">
                 <header className="viewer-head">
                     <div className="stack">
-                        <h2>{change.summary}</h2>
+                        <h2>{describeChange(change)}</h2>
                         <span className="faint">{describePlan(staged)}</span>
                     </div>
                     <button type="button" className="button button-quiet" onClick={discard}>
@@ -233,6 +244,27 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                     </div>
                 )}
 
+                {/*
+                 * Offered only when there is a backlog to act on, and only for a change that has a
+                 * filter behind it. Proton applies *its own* rules to the named mail — this tool
+                 * still never moves a message itself, which is what keeps the core rule intact
+                 * while the backlog gets sorted.
+                 */}
+                {moves.length > 0 && !movesMail && source !== 'demo' && (
+                    <label className="row" style={{ marginTop: 16, gap: 8 }}>
+                        <input
+                            type="checkbox"
+                            checked={applyToExisting}
+                            onChange={(event) => setApplyToExisting(event.target.checked)}
+                        />
+                        <span>
+                            Auch die {moves.length} vorhandenen Mails einsortieren lassen. Das macht
+                            Proton selbst — wir bitten es nur, seine Filter auf genau diese Mails
+                            anzuwenden. Ohne Haken gilt die Regel nur für künftige Mail.
+                        </span>
+                    </label>
+                )}
+
                 <div className="row" style={{ marginTop: 18 }}>
                     {/* Named after its effect. "OK" is what people click without reading. */}
                     <button
@@ -246,7 +278,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                                 confirm();
                                 return;
                             }
-                            offer(staged.change, staged, moves.length > 0);
+                            offer(staged.change, staged, moves.length > 0 && applyToExisting);
                         }}
                     >
                         {/*

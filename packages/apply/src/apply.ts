@@ -10,6 +10,7 @@ import type { SimpleObject } from '@proton/sieve/filterModel';
 
 import { digestOf, shortDigest, type ChangeRequest } from './request.js';
 import {
+    applyToBacklog,
     backup,
     ensureFolder,
     readAccount,
@@ -89,6 +90,11 @@ export function weigh(
     if (request.change.kind === 'move-to-category') {
         return { needsTerminal: true, reason: 'Diese Änderung verschiebt Mail.' };
     }
+    // Likewise unconditional, and for the same reason: an undo moves mail back and removes a rule.
+    // It is also the change most likely to be reached for in a hurry.
+    if (request.change.kind === 'undo-entry') {
+        return { needsTerminal: true, reason: 'Diese Änderung nimmt eine frühere zurück und verschiebt Mail.' };
+    }
     if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
         return { needsTerminal: true, reason: 'Diese Änderung löscht etwas.' };
     }
@@ -124,6 +130,21 @@ export interface ApplyContext {
      * reported as done.
      */
     moveToCategory?: (messageIds: string[], categoryId: string) => Promise<void>;
+    /**
+     * Take one recorded change back.
+     *
+     * Injected for the same reason as `moveToCategory`, plus one of its own: undoing needs the
+     * *journal*, and neither this package nor `steps.ts` can reach the database. What arrives here
+     * is a function that knows the record; what it gets back is `performInverse`, which is this
+     * file's own write path applied to whatever the record says the inverse is.
+     *
+     * The split is the point. This file decides *how a change is written*; the caller decides
+     * *what was done and what has to move back*. Neither can do the other's half.
+     */
+    undoEntry?: (
+        entryId: string,
+        performInverse: (inverse: PendingChange) => Promise<void>
+    ) => Promise<{ restored: number; skipped: number; unrestorable: number }>;
     now?: () => number;
     /** Injected in tests so a verification does not wait on a real clock. */
     sleep?: (ms: number) => Promise<void>;
@@ -212,7 +233,34 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     const saved = await backup(context.http, context.backupDir, now());
 
     // 6 — write
-    const performed = await perform(request, account, context.http, context.moveToCategory);
+    const performed = await perform(request, account, context.http, context);
+
+    /*
+     * 6b — the backlog, if the user asked for it.
+     *
+     * After the filter exists and before verification looks, because that is the order the two
+     * steps mean anything in: Proton cannot apply a rule it does not have yet, and checking for
+     * movement before asking for it would report every backlog change as a failure.
+     *
+     * A failure here is reported and not thrown. The filter is written and correct; what did not
+     * happen is the tidy-up of old mail, and losing the journal entry for a successful write over
+     * that would be the worse trade.
+     */
+    let backlogProblem: AppError | undefined;
+    if (request.applyToExisting && request.affectedMessageIds.length > 0 && performed.problem === undefined) {
+        try {
+            await applyToBacklog(context.http, request.affectedMessageIds);
+        } catch (cause) {
+            backlogProblem = new AppError('APPLY_PARTIAL', {
+                message: 'Die Regel steht, aber der Bestand konnte nicht neu einsortiert werden.',
+                hint:
+                    'Neue Mail wird ab jetzt einsortiert. Für die vorhandene lässt sich der Vorgang ' +
+                    'wiederholen — geschrieben wurde nichts Zusätzliches.',
+                context: { messages: request.affectedMessageIds.length },
+                cause,
+            });
+        }
+    }
 
     // 7 — journal, opened at once
     const entry: JournalEntry = {
@@ -274,6 +322,9 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     if (performed.problem !== undefined) {
         partial = performed.problem;
     }
+    // Last, because a folder that was not created is a bigger finding than a backlog that was not
+    // re-sorted, and only one of them can be the headline.
+    partial ??= backlogProblem;
 
     if (performed.rewrittenRules !== undefined && performed.rewrittenRules.length > 0) {
         log.info(
@@ -387,6 +438,8 @@ interface Performed {
     rewrittenRules?: Array<{ id: string; name: string }>;
     /** Rules the user just took responsibility for. Nothing was written for these. */
     adoptedFilterIds?: string[];
+    /** What an undo actually put back, as observed rather than as intended. */
+    undo?: { restored: number; skipped: number; unrestorable: number };
     /** Set when some steps landed and a later one did not. Deliberately not rolled back. */
     problem: AppError | undefined;
 }
@@ -403,10 +456,11 @@ async function perform(
     request: ChangeRequest,
     account: Account,
     http: ProtonHttp,
-    moveToCategory: ApplyContext['moveToCategory']
+    context: ApplyContext
 ): Promise<Performed> {
     const performed: Performed = { folders: [], filterId: undefined, problem: undefined };
     const change = request.change;
+    const moveToCategory = context.moveToCategory;
 
     // A rule's target folder, created first if it is not there yet. This is also the only path by
     // which a folder typed into the rule editor comes into existence, which is deliberate: naming a
@@ -535,6 +589,51 @@ async function perform(
                 break;
             }
 
+            /*
+             * Taking a recorded change back — the rules here, the mail through the injected
+             * service.
+             *
+             * The order inside `undoChange` is the one that matters and it is not ours to change:
+             * the rule comes back first, because the filter is still running and mail moved back
+             * under a live rule is re-filed within the hour. `performInverse` is this file's own
+             * write path, handed over so the record's inverse goes through exactly the same
+             * refusals, the same folder-before-filter ordering and the same reporting as any other
+             * change.
+             */
+            case 'undo-entry': {
+                const entryId = change.undo?.entryId;
+                if (entryId === undefined) {
+                    throw new AppError('APPLY_MALFORMED', {
+                        message: 'Die Änderung sagt nicht, welcher Eintrag zurückgenommen werden soll.',
+                        hint:
+                            'Es wurde nichts geschrieben. Ein Rückgängig eines Rückgängig gibt es ' +
+                            'nicht — die ursprüngliche Änderung lässt sich stattdessen neu machen.',
+                        context: { kind: change.kind },
+                    });
+                }
+                if (context.undoEntry === undefined) {
+                    throw new AppError('APPLY_PARTIAL', {
+                        message: 'Das Zurücknehmen ist hier nicht verdrahtet.',
+                        hint:
+                            'Es wurde nichts geschrieben. Das passiert, wenn die Änderung nicht über ' +
+                            '`pnpm serve` läuft — nur dort liegt der Verlauf, aus dem ein Undo liest.',
+                        context: { kind: change.kind },
+                    });
+                }
+                const result = await context.undoEntry(entryId, async (inverse) => {
+                    await perform(
+                        { ...request, change: inverse },
+                        account,
+                        http,
+                        // No nesting: an inverse is an ordinary change, and an inverse that is
+                        // itself an undo is refused above rather than recursed into.
+                        withoutUndo(context)
+                    );
+                });
+                performed.undo = result;
+                break;
+            }
+
             default: {
                 // Every kind is handled above. This stays so that adding one to `ChangeKind`
                 // without adding it here fails loudly instead of reporting a success nobody made.
@@ -562,6 +661,12 @@ async function perform(
     }
 
     return performed;
+}
+
+/** The same capabilities minus the undo one, so an inverse cannot recurse into another undo. */
+function withoutUndo(context: ApplyContext): ApplyContext {
+    const { undoEntry: _undoEntry, ...rest } = context;
+    return rest;
 }
 
 /** The folder a folder-change names, or a refusal rather than a request against `undefined`. */

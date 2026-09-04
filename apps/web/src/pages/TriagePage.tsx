@@ -270,7 +270,6 @@ export function TriagePage(): React.JSX.Element {
                                     stage({
                                         id: `create-${entry.group.key}`,
                                         kind: 'create-rule',
-                                        summary: `Regel für „${entry.group.reason}" anlegen`,
                                         after: created,
                                     });
                                     setDecisions((current) => ({

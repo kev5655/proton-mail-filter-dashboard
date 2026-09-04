@@ -55,7 +55,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'delete-rule',
-                summary: `Regel „${change.after?.name ?? '?'}" wieder entfernen`,
                 before: change.after,
             };
 
@@ -63,7 +62,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'create-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wiederherstellen`,
                 after: change.before,
             };
 
@@ -71,7 +69,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'update-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" zurücksetzen`,
                 before: change.after,
                 after: change.before,
             };
@@ -80,7 +77,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'disable-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wieder deaktivieren`,
                 before: change.before,
             };
 
@@ -88,7 +84,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'enable-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wieder aktivieren`,
                 before: change.before,
             };
 
@@ -96,7 +91,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'delete-folder',
-                summary: `Ordner „${change.folder?.name ?? '?'}" wieder entfernen`,
                 folder: change.folder,
             };
 
@@ -104,7 +98,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'create-folder',
-                summary: `Ordner „${change.folder?.name ?? '?'}" wiederherstellen`,
                 folder: change.folder,
             };
 
@@ -113,7 +106,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'adopt-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" doch nicht übernehmen`,
                 before: change.before,
             };
 
@@ -135,20 +127,30 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'move-to-category',
-                summary: `${String(change.category?.messageIds.length ?? 0)} Mails dorthin zurücklegen, wo sie waren`,
             };
 
         case 'rename-folder':
             return {
                 ...base,
                 kind: 'rename-folder',
-                summary: `Ordner „${change.folder?.newName ?? '?'}" zurück in „${change.folder?.name ?? '?'}" umbenennen`,
                 folder: {
                     name: change.folder?.newName ?? '',
                     newName: change.folder?.name ?? '',
                     parent: change.folder?.parent,
                 },
             };
+
+        /*
+         * Undoing an undo is not offered, and this is where that is decided.
+         *
+         * A redo would have to re-apply the original change — which is a different act from
+         * reversing this one, needs its own diff, and would let two entries in the record disagree
+         * about what the account looks like. The inverse therefore names no entry, `apply.ts`
+         * refuses an undo without one, and the history offers no button. Rewinding *past* an undo
+         * is likewise excluded, in the query that builds the chain.
+         */
+        case 'undo-entry':
+            return { ...base, kind: 'undo-entry' };
 
         default: {
             // Exhaustiveness: a new kind must decide how it is undone before it compiles.

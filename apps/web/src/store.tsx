@@ -5,11 +5,14 @@ import {
     applyChangeToRules,
     planCategoryMove,
     planChange,
+    planUndo,
     verifyMoves,
     type ChangePlan,
     type JournalEntry,
     type PendingChange,
+    type UndoableEntry,
 } from '@pms/changes';
+import { CATEGORY_LABELS, INBOX_LABEL } from '@pms/grouping';
 import type { MailboxFolder, MailboxRule } from '@pms/server/types';
 
 import { matchesRule } from '@pms/rules';
@@ -55,6 +58,15 @@ export interface StoreState {
      * say about it — an empty one, most likely, for a change that moves mail.
      */
     stageCategoryMove: (categoryId: string, messageIds: string[]) => void;
+    /**
+     * Stage the taking-back of one recorded change.
+     *
+     * Planned from the journal's own snapshot rather than by simulating anything: it shows the
+     * messages that actually moved, as observed after the write, and where each one individually
+     * came from. A simulation would show what the change was expected to do — and an undo acting on
+     * expectations would move a message back to somewhere it had never left.
+     */
+    stageUndo: (entry: UndoableEntry) => void;
     discard: () => void;
     /** Apply the staged change. Only reachable from the diff dialog. */
     confirm: () => void;
@@ -195,6 +207,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
         [rules, messages, categoryOfMessage]
     );
 
+    const stageUndo = useCallback(
+        (entry: UndoableEntry) => {
+            setPendingResolution(undefined);
+            /*
+             * Folders and Proton's categories, because a message moved into a category was in one
+             * before and the undo has to be able to name it.
+             *
+             * The account's own *labels* are not here yet — the snapshot carries them and the
+             * dashboard still discards them. An id none of these lists knows therefore comes
+             * through unchanged rather than being hidden, so an unrecognised destination is
+             * something to see before confirming instead of a blank afterwards.
+             */
+            const names = new Map<string, string>([
+                ...folders.map((folder) => [folder.ID, folder.Name] as const),
+                ...Object.entries(CATEGORY_LABELS),
+                [INBOX_LABEL, 'Posteingang'],
+            ]);
+            setStaged(planUndo(entry, (labelId) => names.get(labelId)));
+        },
+        [folders]
+    );
+
     const confirm = useCallback(() => {
         if (staged === undefined) {
             return;
@@ -259,6 +293,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             staged,
             stage,
             stageCategoryMove,
+            stageUndo,
             discard: () => {
                 setStaged(undefined);
                 setPendingResolution(undefined);
@@ -270,7 +305,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             resolveDrift,
         }),
         // `version` is in the list because the journal is mutable and does not change identity.
-        [rules, folders, journal, staged, stage, stageCategoryMove, confirm, settle, undo, drift, resolveDrift, version]
+        [
+            rules,
+            folders,
+            journal,
+            staged,
+            stage,
+            stageCategoryMove,
+            stageUndo,
+            confirm,
+            settle,
+            undo,
+            drift,
+            resolveDrift,
+            version,
+        ]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;

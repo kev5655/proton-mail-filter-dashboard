@@ -92,13 +92,11 @@ export function RulesPage(): React.JSX.Element {
                 ? {
                       id: `create-${rule.id}`,
                       kind: 'create-rule',
-                      summary: `Regel „${rule.name}" anlegen`,
                       after: rule,
                   }
                 : {
                       id: `update-${rule.id}`,
                       kind: 'update-rule',
-                      summary: `Regel „${rule.name}" ändern`,
                       before: selected,
                       after: rule,
                   }
@@ -194,7 +192,6 @@ export function RulesPage(): React.JSX.Element {
                                             stage({
                                                 id: `disable-${selected.id}`,
                                                 kind: 'disable-rule',
-                                                summary: `Regel „${selected.name}" deaktivieren`,
                                                 before: selected,
                                             });
                                         }}
@@ -209,7 +206,6 @@ export function RulesPage(): React.JSX.Element {
                                             stage({
                                                 id: `delete-${selected.id}`,
                                                 kind: 'delete-rule',
-                                                summary: `Regel „${selected.name}" löschen`,
                                                 before: selected,
                                             });
                                         }}

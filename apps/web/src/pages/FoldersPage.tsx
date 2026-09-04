@@ -71,7 +71,6 @@ export function FoldersPage(): React.JSX.Element {
                             stage({
                                 id: `create-folder-${newName}`,
                                 kind: 'create-folder',
-                                summary: `Ordner „${newName.trim()}" anlegen`,
                                 folder: {
                                     name: newName.trim(),
                                     parent: newParent === '' ? undefined : newParent,
@@ -147,10 +146,6 @@ function FolderNode({
                         stage({
                             id: `delete-${folder.ID}`,
                             kind: 'delete-folder',
-                            summary:
-                                referencing.length > 0
-                                    ? `Ordner „${folder.Name}" löschen — ${referencing.length} Regel(n) zeigen darauf`
-                                    : `Ordner „${folder.Name}" löschen`,
                             folder: { name: folder.Name },
                         });
                     }}
@@ -174,7 +169,6 @@ function FolderNode({
                         stage({
                             id: `rename-${folder.ID}`,
                             kind: 'rename-folder',
-                            summary: `Ordner „${folder.Name}" in „${nextName}" umbenennen`,
                             folder: { name: folder.Name, newName: nextName },
                         });
                     }}

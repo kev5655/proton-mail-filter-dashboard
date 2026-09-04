@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
-import type { ChangePlan, PendingChange } from '@pms/changes';
+import { describeChange, type ChangePlan, type PendingChange } from '@pms/changes';
 
 import { log } from './log.js';
 
@@ -117,7 +117,7 @@ export function ApplyProvider({
                     });
 
                     await watch(body.requestId, setPhase, onApplied, (applied) => {
-                        setResult({ ...applied, summary: change.summary, at: Date.now() });
+                        setResult({ ...applied, summary: describeChange(change), at: Date.now() });
                     });
                 } catch {
                     setPhase({

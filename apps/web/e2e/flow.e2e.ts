@@ -203,10 +203,10 @@ describe('the log page', () => {
     it('does not take the application down with it', async () => {
         // It used to: a snapshot that changed identity every call made React loop and throw, and
         // with no boundary the whole root unmounted. The sidebar surviving is the assertion.
-        await open('Protokoll');
+        await open('Verlauf');
 
         expect(await harness.page.locator('.sidebar').count()).toBe(1);
-        expect(await harness.page.locator('.main').innerText()).toContain('Protokoll');
+        expect(await harness.page.locator('.main').innerText()).toContain('Was das Werkzeug getan hat');
 
         // And it is still possible to leave, which was the part that made it unrecoverable.
         await harness.page.getByRole('button', { name: 'Regeln', exact: false }).first().click();

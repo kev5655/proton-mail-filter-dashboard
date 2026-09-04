@@ -228,6 +228,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@pms/changes':
+        specifier: workspace:*
+        version: link:../changes
       '@pms/core':
         specifier: workspace:*
         version: link:../core
@@ -261,6 +264,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@pms/changes':
+        specifier: workspace:*
+        version: link:../changes
       '@pms/core':
         specifier: workspace:*
         version: link:../core

@@ -2,13 +2,23 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type ChangeRequest } from '@pms/apply';
+import { describeChange } from '@pms/changes';
+import { undoChange } from '@pms/changes/undo';
 import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
-import { getMessages } from '@pms/proton-api';
+import { getFolders, getMessages } from '@pms/proton-api';
 import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
-import { getMeta, markAdopted, refreshAccountObjects, syncAll } from '@pms/sync';
+import {
+    getMeta,
+    markAdopted,
+    markUndone,
+    readJournalEntry,
+    recordJournalEntry,
+    refreshAccountObjects,
+    syncAll,
+} from '@pms/sync';
 
 import { DATA_DIR, logFilePath } from './paths.js';
 import { connect } from './session.js';
@@ -149,7 +159,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 const weight = weigh(parsed, mailboxSize(db));
                 return {
                     id: parsed.requestId,
-                    summary: parsed.change.summary,
+                    summary: describeChange(parsed.change),
                     shortDigest: shortDigest(digestOf(parsed)),
                     needsTerminal: weight.needsTerminal,
                     reason: weight.reason,
@@ -180,6 +190,61 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                      * the same shape the guarantee has everywhere else in this file: HTTP can ask,
                      * and only this process can act.
                      */
+                    /*
+                     * Taking a recorded change back.
+                     *
+                     * Assembled here because undo needs three things that live in three different
+                     * places and must not be brought together anywhere else: the journal (this
+                     * database), the write path (`@pms/apply`, which cannot read a database), and
+                     * the message-moving module (`@pms/changes/undo`, which nothing else may
+                     * import). This function is where they meet, once.
+                     *
+                     * `undoChange` keeps its own order — rule first, then mail — and its own
+                     * refusals: a message somebody has moved by hand since is skipped and named
+                     * rather than overruled, and one with no recorded previous folder is reported
+                     * as unrestorable instead of guessed at.
+                     */
+                    undoEntry: async (entryId, performInverse) => {
+                        const entry = readJournalEntry(db, entryId);
+                        if (entry === undefined) {
+                            throw new AppError('APPLY_MALFORMED', {
+                                message: 'Diesen Eintrag gibt es im Verlauf nicht.',
+                                hint: 'Es wurde nichts geschrieben.',
+                                context: { entryId },
+                            });
+                        }
+                        if (entry.undoneAt !== undefined) {
+                            throw new AppError('UNDO_ENTRY_ALREADY_UNDONE', {
+                                message: 'Diese Änderung wurde bereits zurückgenommen.',
+                                hint: 'Ein zweites Zurücknehmen wäre etwas anderes als das erste.',
+                                context: { entryId },
+                            });
+                        }
+
+                        const folders = await getFolders(http);
+                        const outcome = await undoChange(entry, {
+                            http,
+                            applyInverse: async () => {
+                                await performInverse(entry.inverse);
+                            },
+                            readCurrent: async (ids) => {
+                                const wanted = new Set(ids);
+                                const page = await getMessages(http, { pageSize: 150 });
+                                return page.messages
+                                    .filter((message) => wanted.has(message.ID))
+                                    .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
+                            },
+                            folderIds: new Map(folders.map((folder) => [folder.Name, folder.ID])),
+                        });
+
+                        markUndone(db, entryId, Math.floor(Date.now() / 1000));
+
+                        return {
+                            restored: outcome.restored.reduce((total, group) => total + group.messageIds.length, 0),
+                            skipped: outcome.skippedMovedSince.length,
+                            unrestorable: outcome.unrestorable.length,
+                        };
+                    },
                     moveToCategory: async (messageIds, categoryId) => {
                         await moveIntoCategory(messageIds, categoryId, {
                             http,
@@ -212,6 +277,33 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     markAdopted(db, outcome.adoptedFilterIds);
                 } catch (cause) {
                     log.warn({ cause }, 'the change landed but the local copy could not be refreshed');
+                }
+
+                /*
+                 * The record of what was done, kept.
+                 *
+                 * `applyChange` builds this from what verification *observed* — never from what the
+                 * plan intended — and until now this function dropped it. That is why „Verlauf" was
+                 * empty against every real account and why `undoChange` had no caller: the entry
+                 * that undo works from was computed correctly and then discarded, every time.
+                 *
+                 * Recorded after the refresh, and never allowed to fail the change. The write
+                 * already succeeded; losing the journal line is bad, and throwing over the top of a
+                 * successful write would be worse — the backup on disk can still rebuild the rest.
+                 */
+                try {
+                    recordJournalEntry(db, {
+                        ...outcome.entry,
+                        backupPath: outcome.backupPath,
+                        // An undo gets its own line in the record, naming what it took back. That
+                        // is what keeps a half-finished rewind explicable afterwards — and what
+                        // stops a rewind walking back over its own steps.
+                        ...(parsed.change.kind === 'undo-entry' && parsed.change.undo !== undefined
+                            ? { undoesId: parsed.change.undo.entryId }
+                            : {}),
+                    });
+                } catch (cause) {
+                    log.warn({ cause }, 'the change landed but could not be journalled');
                 }
 
                 return {
@@ -313,7 +405,7 @@ function asChangeRequest(value: unknown): ChangeRequest | undefined {
         typeof candidate.baseVersion === 'string' &&
         typeof candidate.change === 'object' &&
         candidate.change !== null &&
-        typeof candidate.change.summary === 'string' &&
+        typeof candidate.change.kind === 'string' &&
         typeof candidate.plan === 'object' &&
         candidate.plan !== null &&
         Array.isArray(candidate.plan.moves) &&

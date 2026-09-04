@@ -7,7 +7,7 @@ import {
     DEMO_RULES,
     generateMailbox,
 } from '@pms/demo';
-import type { MailboxSnapshot, UnreadableRule } from '@pms/server/types';
+import type { JournalEntryDto, MailboxSnapshot, UnreadableRule } from '@pms/server/types';
 
 import { buildMailbox, type MailboxData } from './data.js';
 
@@ -47,6 +47,14 @@ export interface MailboxStatus {
     unreadable: UnreadableRule[];
     /** Set when a server answered but its reply could not be used. */
     problem: string | undefined;
+    /**
+     * What this tool changed at the account, newest first.
+     *
+     * Part of the status rather than of `MailboxData`, because it is not a fact about the mailbox —
+     * it is a fact about what we did to it, and it comes from a different table for a different
+     * reason. The demo has none: nothing there ever reached an account.
+     */
+    history: JournalEntryDto[];
 }
 
 interface MailboxContext {
@@ -70,6 +78,7 @@ const DEMO_STATUS: MailboxStatus = {
     truncated: false,
     unreadable: [],
     problem: undefined,
+    history: [],
 };
 
 export function MailboxProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -133,6 +142,7 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                         truncated: snapshot.meta.truncated,
                         unreadable: snapshot.unreadable,
                         problem: undefined,
+                        history: snapshot.history ?? [],
                     },
                 });
             } catch (cause) {

@@ -31,6 +31,7 @@ const DEMO = {
     truncated: false,
     unreadable: [],
     problem: undefined,
+    history: [],
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 
@@ -41,6 +42,7 @@ const REAL = {
     truncated: false,
     unreadable: [],
     problem: undefined,
+    history: [],
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 

@@ -317,8 +317,14 @@ describe('when it is confirmed', () => {
         });
 
         const writes = proton.writes().map((call) => `${call.method} ${call.path}`);
-        // A filter naming a folder that does not exist files mail into nothing, silently.
-        expect(writes).toEqual(['POST core/v4/labels', 'POST mail/v4/filters']);
+        // The whole sequence, in the one order each step means anything in: a filter naming a
+        // folder that does not exist files mail into nothing, silently — and Proton cannot apply a
+        // rule to the backlog before that rule exists.
+        expect(writes).toEqual([
+            'POST core/v4/labels',
+            'POST mail/v4/filters',
+            'POST mail/v4/messages/apply-filters',
+        ]);
     });
 
     it('takes a backup, and it lands on disk', async () => {
@@ -685,6 +691,181 @@ describe('moving mail into one of Protons categories', () => {
 
         await expect(
             applyChange(categoryRequest(), { http: proton.http, backupDir, confirm: always('granted') })
+        ).rejects.toMatchObject({ code: 'APPLY_PARTIAL' });
+    });
+});
+
+
+/**
+ * Sorting the mail that is already there.
+ *
+ * The terminal told the user „Bestehende Mail wird mit einbezogen" and nothing included it:
+ * `applyFiltersToExisting` was implemented, exported and called by nobody, so the flag changed a
+ * sentence and a hash. Verification then waited three times for movements that could not happen
+ * and reported a partial result — which is how a missing call looked like a flaky account.
+ *
+ * The important property is not that the call happens. It is *who moves the mail*: we hand Proton
+ * the ids the diff listed and ask it to apply its own rules. This tool still never moves a message
+ * itself, which is what lets the backlog be sorted without touching the project's first rule.
+ */
+describe('applying a new rule to mail that already arrived', () => {
+    const backlogCalls = (proton: ReturnType<typeof fakeProton>): Call[] =>
+        proton.calls.filter((call) => call.path === 'mail/v4/messages/apply-filters');
+
+    it('asks Proton to file exactly the messages the diff named', async () => {
+        const proton = fakeProton();
+
+        await applyChange(request({ applyToExisting: true }), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(backlogCalls(proton)).toEqual([
+            { method: 'POST', path: 'mail/v4/messages/apply-filters', body: { IDs: ['m-1', 'm-2'] } },
+        ]);
+    });
+
+    it('asks for nothing when the user said future mail only', async () => {
+        // A legitimate answer, and one the interface now actually carries.
+        const proton = fakeProton();
+
+        await applyChange(request({ applyToExisting: false }), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(backlogCalls(proton)).toEqual([]);
+    });
+
+    it('asks only after the filter exists', async () => {
+        // Proton cannot apply a rule it does not have yet, so the order is the whole point.
+        const proton = fakeProton();
+
+        await applyChange(request({ applyToExisting: true }), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        const writes = proton.writes().map((call) => call.path);
+        expect(writes.indexOf('mail/v4/messages/apply-filters')).toBeGreaterThan(
+            writes.indexOf('mail/v4/filters')
+        );
+    });
+
+    it('does not ask when the change was declined', async () => {
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(request({ applyToExisting: true }), {
+                http: proton.http,
+                backupDir,
+                confirm: always('declined'),
+                ...BIG,
+            })
+        ).rejects.toMatchObject({ code: 'APPLY_NOT_CONFIRMED' });
+
+        expect(proton.writes()).toEqual([]);
+    });
+});
+
+
+/**
+ * Taking a recorded change back.
+ *
+ * The machinery for this existed and was unreachable: `undoChange` had no caller in the project,
+ * and the journal entry it works from was built correctly by this file and then discarded by the
+ * process that called it. What is tested here is the half that lives in `apply.ts` — that the undo
+ * is asked about at the terminal every time, that a refusal writes nothing, and that the rules are
+ * put back through the *ordinary* write path rather than a second one written for the occasion.
+ */
+describe('undoing a recorded change', () => {
+    function undoRequest(entryId = 'j-1'): ChangeRequest {
+        const change: PendingChange = { id: 'u-1', kind: 'undo-entry', undo: { entryId } };
+        return {
+            ...request({ change }),
+            affectedMessageIds: [],
+            plan: { change, moves: [], clearedFromInbox: 0, returnedToInbox: 0, takenFrom: [] },
+        };
+    }
+
+    it('always asks the terminal, whatever its size', () => {
+        // It moves mail and removes a rule, and it is the change most likely to be reached for in
+        // a hurry — which is the argument for the question, not against it.
+        expect(weigh(undoRequest(), 10_000)).toMatchObject({ needsTerminal: true });
+    });
+
+    it.each<[string, ConfirmationVerdict, string]>([
+        ['declined', 'declined', 'APPLY_NOT_CONFIRMED'],
+        ['expired', 'expired', 'APPLY_CONFIRMATION_EXPIRED'],
+    ])('takes nothing back when the terminal answers %s', async (_name, verdict, code) => {
+        const proton = fakeProton();
+        let asked = 0;
+
+        await expect(
+            applyChange(undoRequest(), {
+                http: proton.http,
+                backupDir,
+                confirm: always(verdict),
+                undoEntry: async () => {
+                    asked++;
+                    return { restored: 0, skipped: 0, unrestorable: 0 };
+                },
+            })
+        ).rejects.toMatchObject({ code });
+
+        expect(asked).toBe(0);
+        expect(proton.writes()).toEqual([]);
+    });
+
+    it('hands the recorded inverse back through the ordinary write path', async () => {
+        // Not a second write path written for undo. The inverse goes through the same switch, the
+        // same folder-before-filter ordering and the same refusals as any other change — which is
+        // why an undo cannot do something a normal change could not.
+        const proton = fakeProton();
+
+        await applyChange(undoRequest(), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+            undoEntry: async (entryId, performInverse) => {
+                expect(entryId).toBe('j-1');
+                await performInverse({ id: 'inv', kind: 'delete-rule', before: change().after });
+                return { restored: 2, skipped: 0, unrestorable: 0 };
+            },
+        });
+
+        expect(proton.writes().map((call) => `${call.method} ${call.path}`)).toContain(
+            'DELETE mail/v4/filters/r-neu'
+        );
+    });
+
+    it('refuses an undo of an undo rather than pretending to redo', async () => {
+        // Re-applying the original is a different act from reversing this one: it needs its own
+        // diff, and offering it here would let two entries in the record disagree about the
+        // account. `inverseOf` produces an undo naming nothing, and this is where that is caught.
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(
+                { ...undoRequest(), change: { id: 'u-2', kind: 'undo-entry' } },
+                {
+                    http: proton.http,
+                    backupDir,
+                    confirm: always('granted'),
+                    undoEntry: async () => ({ restored: 0, skipped: 0, unrestorable: 0 }),
+                }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_MALFORMED' });
+    });
+
+    it('says so rather than reporting success when the history is out of reach', async () => {
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(undoRequest(), { http: proton.http, backupDir, confirm: always('granted') })
         ).rejects.toMatchObject({ code: 'APPLY_PARTIAL' });
     });
 });

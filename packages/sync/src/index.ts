@@ -20,3 +20,11 @@ export {
     type StoredFolder,
     type StoredMessage,
 } from './query.js';
+export {
+    markUndone,
+    readJournal,
+    readJournalEntry,
+    readJournalSince,
+    recordJournalEntry,
+    type StoredEntry,
+} from './journal-store.js';

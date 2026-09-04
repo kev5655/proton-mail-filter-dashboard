@@ -24,7 +24,6 @@ export type Page =
     | 'folders'
     | 'changes'
     | 'history'
-    | 'log'
     | 'settings';
 
 export interface Navigation {
