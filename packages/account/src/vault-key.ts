@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { argon2id } from '@noble/hashes/argon2.js';
 import { AppError } from '@pms/core/errors';
@@ -71,15 +71,23 @@ export function newKdfParams(): KdfParams {
     return { salt: randomBytes(SALT_BYTES).toString('base64'), ...PARAMS };
 }
 
-/** A fresh master key. The only place one is created. */
-export function newMasterKey(): Buffer {
-    return randomBytes(KEY_BYTES);
+/**
+ * A fresh master secret. The only place one is created.
+ *
+ * A string rather than raw bytes, and that is not cosmetic: `openDatabase` and the session store
+ * both take a passphrase, and an installation that already has data was opened with one that came
+ * from 1Password or a prompt. Registering must be able to **adopt** that existing secret rather
+ * than mint a new one — a new key would leave the database and the stored session encrypted with
+ * something nobody holds any more, which is a mailbox lost to a registration form.
+ */
+export function newMasterSecret(): string {
+    return randomBytes(KEY_BYTES).toString('hex');
 }
 
-export function wrapMasterKey(masterKey: Buffer, kek: Uint8Array): WrappedKey {
+export function wrapMasterKey(secret: string, kek: Uint8Array): WrappedKey {
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv('aes-256-gcm', kek, iv);
-    const ciphertext = Buffer.concat([cipher.update(masterKey), cipher.final()]);
+    const ciphertext = Buffer.concat([cipher.update(Buffer.from(secret, 'utf8')), cipher.final()]);
     return {
         iv: iv.toString('base64'),
         tag: cipher.getAuthTag().toString('base64'),
@@ -94,14 +102,14 @@ export function wrapMasterKey(masterKey: Buffer, kek: Uint8Array): WrappedKey {
  * noise that would go on to fail somewhere far away — the database refusing to open, a session file
  * that will not parse. The failure belongs here, where it can be named.
  */
-export function unwrapMasterKey(wrapped: WrappedKey, kek: Uint8Array): Buffer {
+export function unwrapMasterKey(wrapped: WrappedKey, kek: Uint8Array): string {
     try {
         const decipher = createDecipheriv('aes-256-gcm', kek, Buffer.from(wrapped.iv, 'base64'));
         decipher.setAuthTag(Buffer.from(wrapped.tag, 'base64'));
         return Buffer.concat([
             decipher.update(Buffer.from(wrapped.ciphertext, 'base64')),
             decipher.final(),
-        ]);
+        ]).toString('utf8');
     } catch (cause) {
         throw new AppError('ACCOUNT_PASSWORD_WRONG', {
             message: 'Passwort falsch.',
@@ -120,22 +128,22 @@ export function unwrapMasterKey(wrapped: WrappedKey, kek: Uint8Array): Buffer {
  * the password — otherwise somebody with the account file could generate valid codes and would have
  * defeated the second factor without touching the first.
  */
-export function sealWithMasterKey(plaintext: string, masterKey: Buffer): WrappedKey {
-    return wrapMasterKey(Buffer.from(plaintext, 'utf8'), masterKey);
-}
-
-export function openWithMasterKey(sealed: WrappedKey, masterKey: Buffer): string {
-    return unwrapMasterKey(sealed, masterKey).toString('utf8');
-}
-
 /**
- * The passphrase everything else on this machine already speaks.
+ * Encrypt something small with the master secret.
  *
- * `openDatabase` and the session store both take a string. Handing them the master key as hex keeps
- * this the only file that knows what a master key is, and means neither of them had to change.
+ * The secret is an arbitrary-length string, so it is hashed to 32 bytes before being used as a key
+ * — AES-256 needs exactly that, and an adopted passphrase is whatever somebody typed.
  */
-export function passphraseFrom(masterKey: Buffer): string {
-    return masterKey.toString('hex');
+export function sealWithMasterKey(plaintext: string, secret: string): WrappedKey {
+    return wrapMasterKey(plaintext, keyFromSecret(secret));
+}
+
+export function openWithMasterKey(sealed: WrappedKey, secret: string): string {
+    return unwrapMasterKey(sealed, keyFromSecret(secret));
+}
+
+function keyFromSecret(secret: string): Uint8Array {
+    return createHash('sha256').update(secret, 'utf8').digest();
 }
 
 /** Constant-time comparison, for anything that is compared rather than decrypted. */

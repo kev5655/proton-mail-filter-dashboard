@@ -9,4 +9,3 @@ export {
     startPasskeyRegistration,
     type PasskeyChallenge,
 } from './passkey.js';
-export { passphraseFrom } from './vault-key.js';

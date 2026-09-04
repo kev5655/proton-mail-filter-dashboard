@@ -239,3 +239,41 @@ describe('registering', SLOW, () => {
         expect(vault.state.unlocked).toBe(true);
     });
 });
+
+describe('adopting an installation that already has data', SLOW, () => {
+    it('keeps the existing passphrase instead of minting a new key', async () => {
+        // The failure this prevents: an installation whose database and Proton session were
+        // encrypted with a passphrase from 1Password, registering an account, and getting a fresh
+        // random key — leaving both encrypted with something nobody holds any more. A mailbox lost
+        // to a form.
+        const vault = new Vault(path);
+        await vault.load();
+
+        await vault.register({
+            username: 'kevin',
+            password: PASSWORD,
+            adoptPassphrase: 'die-alte-passphrase-aus-1password',
+        });
+
+        expect(vault.passphrase()).toBe('die-alte-passphrase-aus-1password');
+    });
+
+    it('survives a restart with the adopted one intact', async () => {
+        const vault = new Vault(path);
+        await vault.load();
+        await vault.register({ username: 'kevin', password: PASSWORD, adoptPassphrase: 'alt' });
+
+        const again = new Vault(path);
+        await again.load();
+        await again.unlock({ password: PASSWORD });
+
+        expect(again.passphrase()).toBe('alt');
+    });
+
+    it('mints one when there is nothing to adopt', async () => {
+        const vault = await registered();
+
+        // 32 random bytes as hex — long enough that nobody is going to guess the database open.
+        expect(vault.passphrase()).toMatch(/^[0-9a-f]{64}$/);
+    });
+});

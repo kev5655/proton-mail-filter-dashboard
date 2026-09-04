@@ -7,9 +7,8 @@ import { verifyTotp } from './totp.js';
 import {
     deriveKek,
     newKdfParams,
-    newMasterKey,
+    newMasterSecret,
     openWithMasterKey,
-    passphraseFrom,
     sealWithMasterKey,
     unwrapMasterKey,
     wrapMasterKey,
@@ -58,7 +57,7 @@ export interface UnlockInput {
 export class Vault {
     readonly #path: string;
     #record: AccountRecord | undefined;
-    #masterKey: Buffer | undefined;
+    #masterSecret: string | undefined;
     #graceUntil: number | undefined;
     #graceTimer: ReturnType<typeof setTimeout> | undefined;
     readonly #now: () => number;
@@ -76,7 +75,7 @@ export class Vault {
     get state(): VaultState {
         return {
             registered: this.#record !== undefined,
-            unlocked: this.#masterKey !== undefined,
+            unlocked: this.#masterSecret !== undefined,
             username: this.#record?.username,
             requiresTotp: this.#record?.totp !== undefined,
             passkeys: (this.#record?.passkeys ?? []).map((passkey) => ({
@@ -96,13 +95,13 @@ export class Vault {
      * bytes — and so "locked" is enforced at the one place it can be.
      */
     passphrase(): string {
-        if (this.#masterKey === undefined) {
+        if (this.#masterSecret === undefined) {
             throw new AppError('ACCOUNT_LOCKED', {
                 message: 'Dieses Werkzeug ist gesperrt.',
                 hint: 'Im Dashboard anmelden. Ohne Passwort sind die lokalen Daten nicht lesbar.',
             });
         }
-        return passphraseFrom(this.#masterKey);
+        return this.#masterSecret;
     }
 
     /**
@@ -112,7 +111,19 @@ export class Vault {
      * and orphan every byte the old one encrypted — a database and a Proton session lost to a form
      * somebody submitted twice.
      */
-    async register(input: { username: string; password: string }): Promise<void> {
+    async register(input: {
+        username: string;
+        password: string;
+        /**
+         * An existing passphrase to take over instead of minting a new secret.
+         *
+         * This is how an installation that already has data keeps it. The database and the stored
+         * Proton session were encrypted with whatever came from 1Password or a prompt; generating a
+         * fresh key at registration would leave both encrypted with something nobody holds any
+         * more — a mailbox lost to a form.
+         */
+        adoptPassphrase?: string | undefined;
+    }): Promise<void> {
         if (this.#record !== undefined) {
             throw new AppError('ACCOUNT_EXISTS', {
                 message: 'Für diese Installation gibt es bereits ein Konto.',
@@ -129,20 +140,23 @@ export class Vault {
         }
 
         const kdf = newKdfParams();
-        const masterKey = newMasterKey();
+        const secret =
+            input.adoptPassphrase === undefined || input.adoptPassphrase === ''
+                ? newMasterSecret()
+                : input.adoptPassphrase;
         const record: AccountRecord = {
             version: 1,
             username: input.username.trim(),
             createdAt: Math.floor(this.#now() / 1000),
             kdf,
-            wrapped: wrapMasterKey(masterKey, deriveKek(input.password, kdf)),
+            wrapped: wrapMasterKey(secret, deriveKek(input.password, kdf)),
             passkeys: [],
             graceMinutes: 30,
         };
 
         await saveAccount(this.#path, record);
         this.#record = record;
-        this.#hold(masterKey);
+        this.#hold(secret);
         log.info({ username: record.username }, 'account created');
     }
 
@@ -159,17 +173,17 @@ export class Vault {
 
         // Throws `ACCOUNT_PASSWORD_WRONG` when the wrapping does not authenticate. There is no
         // separate password check to get out of step with this one.
-        const masterKey = unwrapMasterKey(record.wrapped, deriveKek(input.password, record.kdf));
+        const secret = unwrapMasterKey(record.wrapped, deriveKek(input.password, record.kdf));
 
         if (record.totp !== undefined) {
-            const secret = openWithMasterKey(record.totp, masterKey);
+            const totpSecret = openWithMasterKey(record.totp, secret);
             if (input.totp === undefined || input.totp === '') {
                 throw new AppError('ACCOUNT_SECOND_FACTOR_REQUIRED', {
                     message: 'Für dieses Konto ist ein Code aus der Authenticator-App nötig.',
                     hint: 'Es wurde nichts aufgeschlossen.',
                 });
             }
-            if (!verifyTotp(secret, input.totp, Math.floor(this.#now() / 1000))) {
+            if (!verifyTotp(totpSecret, input.totp, Math.floor(this.#now() / 1000))) {
                 throw new AppError('ACCOUNT_SECOND_FACTOR_WRONG', {
                     message: 'Der Code stimmt nicht.',
                     hint: 'Er gilt dreissig Sekunden. Stimmt die Uhr des Geräts?',
@@ -193,7 +207,7 @@ export class Vault {
             });
         }
 
-        this.#hold(masterKey);
+        this.#hold(secret);
         log.info({ username: record.username }, 'unlocked');
     }
 
@@ -208,8 +222,8 @@ export class Vault {
         const grace = this.#record?.graceMinutes ?? 0;
         this.#clearTimer();
 
-        if (immediate || grace <= 0 || this.#masterKey === undefined) {
-            this.#masterKey = undefined;
+        if (immediate || grace <= 0 || this.#masterSecret === undefined) {
+            this.#masterSecret = undefined;
             this.#graceUntil = undefined;
             log.info({ immediate }, 'locked');
             return;
@@ -218,7 +232,7 @@ export class Vault {
         this.#graceUntil = Math.floor(this.#now() / 1000) + grace * 60;
         this.#graceTimer = setTimeout(
             () => {
-                this.#masterKey = undefined;
+                this.#masterSecret = undefined;
                 this.#graceUntil = undefined;
                 log.info('grace period elapsed, key dropped');
             },
@@ -232,26 +246,25 @@ export class Vault {
 
     /** True while the key is still held after a lock — a re-login then needs no password. */
     get withinGrace(): boolean {
-        return this.#graceUntil !== undefined && this.#masterKey !== undefined;
+        return this.#graceUntil !== undefined && this.#masterSecret !== undefined;
     }
 
     /** Change the password: the master key stays, only its wrapping is redone. */
     async changePassword(current: string, next: string): Promise<void> {
         const record = this.#requireRecord();
-        const masterKey = unwrapMasterKey(record.wrapped, deriveKek(current, record.kdf));
+        const secret = unwrapMasterKey(record.wrapped, deriveKek(current, record.kdf));
         const kdf = newKdfParams();
 
         // Nothing is re-encrypted. A password change that rewrote a database of somebody's mail
         // would have a dozen ways to be interrupted halfway, and this has none.
-        await this.#update({ kdf, wrapped: wrapMasterKey(masterKey, deriveKek(next, kdf)) });
-        this.#hold(masterKey);
+        await this.#update({ kdf, wrapped: wrapMasterKey(secret, deriveKek(next, kdf)) });
+        this.#hold(secret);
         log.info('password changed');
     }
 
     /** Turn on TOTP. The secret is sealed with the master key, so it needs the password to read. */
-    async enableTotp(secret: string): Promise<void> {
-        const masterKey = this.#requireKey();
-        await this.#update({ totp: sealWithMasterKey(secret, masterKey) });
+    async enableTotp(totpSecret: string): Promise<void> {
+        await this.#update({ totp: sealWithMasterKey(totpSecret, this.#requireKey()) });
     }
 
     async disableTotp(): Promise<void> {
@@ -284,9 +297,9 @@ export class Vault {
         return this.#record?.passkeys ?? [];
     }
 
-    #hold(masterKey: Buffer): void {
+    #hold(secret: string): void {
         this.#clearTimer();
-        this.#masterKey = masterKey;
+        this.#masterSecret = secret;
         this.#graceUntil = undefined;
     }
 
@@ -307,14 +320,14 @@ export class Vault {
         return this.#record;
     }
 
-    #requireKey(): Buffer {
-        if (this.#masterKey === undefined) {
+    #requireKey(): string {
+        if (this.#masterSecret === undefined) {
             throw new AppError('ACCOUNT_LOCKED', {
                 message: 'Dieses Werkzeug ist gesperrt.',
                 hint: 'Erst anmelden — eine Einstellung am Konto zu ändern braucht den Schlüssel.',
             });
         }
-        return this.#masterKey;
+        return this.#masterSecret;
     }
 
     async #update(changes: Partial<AccountRecord>): Promise<void> {
