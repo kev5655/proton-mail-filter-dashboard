@@ -34,6 +34,23 @@ somewhere; the service runs the rules it already has. That is what lets a new ru
 backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
 because for months the terminal announced it and nothing did it.
 
+**There are three non-GET routes, not two, and the third is named here because it was added on
+purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits. It writes
+nothing to Proton's data, but it is the most consequential thing the tool does, so it has its own
+route, its own channel and this paragraph rather than being folded into something that existed.
+
+What makes it defensible is not the route count. **No password passes through this process:**
+`loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser
+extension fills Proton's own form exactly as it would on any other site, and a passkey works because
+the credential lives in that profile's own store. `connect()`'s older path — fetch the credentials
+from 1Password and type them with Playwright — still exists for the CLI, and the two are tested
+apart: `write-isolation.test.ts` asserts that the browser-driven login never reads a password.
+
+`LoginGuard` is not weakened by any of it. It is consulted before the window opens, a failure is
+recorded, and there is no retry loop — the rule that got this account back. A button in a web
+interface makes a login easy to hammer, which is exactly how the lockout happened, so a refusal is
+shown as a refusal with no button beside it.
+
 **The second exception created no new HTTP route.** It travels over the existing `POST /api/apply`
 like every other change. The capability itself is handed to `applyChange` as
 `ApplyContext.moveToCategory`, assembled in `apps/spike/src/serve-command.ts` — the process that

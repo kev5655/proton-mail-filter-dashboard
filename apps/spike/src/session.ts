@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { loginWithBrowser } from '@pms/browser-auth';
+import { loginByHandInBrowser, loginWithBrowser } from '@pms/browser-auth';
 import { AppError, isAppError } from '@pms/core/errors';
 import {
     getFolders,
@@ -334,4 +334,72 @@ async function persist(session: ProtonSession, userId: string, passphrase: strin
         { session, userId, createdAt: Math.floor(Date.now() / 1000) },
         passphrase
     );
+}
+
+/**
+ * Sign in through a browser window the user drives themselves.
+ *
+ * The whole point is what this does not touch. `connect()` fetches the username and password out of
+ * 1Password and hands them to Playwright to type; this fetches nothing and types nothing. It opens
+ * Proton's own login page in a real browser profile and waits — so a password manager's browser
+ * extension can fill the form exactly as it would on any other site, and a passkey works because
+ * the credential lives in that profile's own store.
+ *
+ * It is therefore the only mode in which the 1Password extension exists at all, and it needs what
+ * an extension needs: a visible window and a persistent profile. Both are refused up front rather
+ * than left to fail obscurely after several minutes of waiting.
+ *
+ * `LoginGuard` is asked first and is not weakened. A button in a web interface makes a login easy
+ * to hammer, which is exactly how this account earned a lockout — so a refusal comes back as a
+ * refusal, with its reason, and nothing here retries.
+ */
+export async function loginInBrowser(options: {
+    passphrase: string;
+    profileDir: string;
+    channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
+    onOpen?: () => void;
+}): Promise<void> {
+    const guard = new LoginGuard({ path: GUARD_FILE });
+    await guard.assertMayAttempt();
+
+    const resolved = resolve(REPO_ROOT, options.profileDir.replace(/^~(?=\/|$)/, homedir()));
+    warnAboutLiveProfile(resolved);
+
+    let session: ProtonSession;
+    let userId: string;
+    try {
+        const result = await loginByHandInBrowser({
+            profileDir: resolved,
+            ...(options.channel === undefined ? {} : { channel: options.channel }),
+            ...(options.onOpen === undefined ? {} : { onOpen: options.onOpen }),
+        });
+        session = result.session;
+        userId = result.userId;
+    } catch (error) {
+        await guard.recordFailure(error);
+        throw error;
+    }
+
+    await guard.recordSuccess();
+    await persist(session, userId, options.passphrase);
+}
+
+/** What the guard currently allows, so a dashboard can say why rather than offer a refused button. */
+export async function loginGuardState(): Promise<{
+    mayAttempt: boolean;
+    reason?: string | undefined;
+    code?: string | undefined;
+}> {
+    try {
+        await new LoginGuard({ path: GUARD_FILE }).assertMayAttempt();
+        return { mayAttempt: true };
+    } catch (error) {
+        return {
+            mayAttempt: false,
+            reason: error instanceof Error ? error.message : 'Unbekannt.',
+            ...(error !== null && typeof error === 'object' && 'code' in error
+                ? { code: String((error as { code: unknown }).code) }
+                : {}),
+        };
+    }
 }

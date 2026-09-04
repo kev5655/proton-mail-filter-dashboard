@@ -41,6 +41,8 @@ export const ERROR_CODES = [
     'BROWSER_LOGIN_UI_CHANGED',
     'BROWSER_LOGIN_TIMEOUT',
     'BROWSER_LOGIN_2FA_UNSUPPORTED',
+    // A login started from the dashboard that could not even open: no profile, no browser.
+    'BROWSER_LOGIN_NOT_CONFIGURED',
 
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',

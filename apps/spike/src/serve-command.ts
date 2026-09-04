@@ -8,7 +8,7 @@ import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import { getFolders, getMessages } from '@pms/proton-api';
-import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
+import { ApplyChannel, LoginChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import {
     getMeta,
@@ -23,7 +23,7 @@ import {
 } from '@pms/sync';
 
 import { DATA_DIR, logFilePath } from './paths.js';
-import { connect } from './session.js';
+import { connect, loginInBrowser } from './session.js';
 
 /**
  * Hand the dashboard the mirrored mailbox, and let it ask for a fresh one.
@@ -366,11 +366,47 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             }
         );
 
+        /*
+         * Signing in from the dashboard, without a password passing through this process.
+         *
+         * It opens Proton's own login page in a real browser profile and waits. The person types,
+         * or their password manager's extension fills the form the way it would on any other site,
+         * or they touch a passkey — and none of that is visible from here. That is what makes it
+         * defensible: we are not participating in the login, we are opening a window.
+         *
+         * A profile is required and asked for rather than defaulted. An extension cannot exist in a
+         * throwaway profile, and silently making one would produce a window with no password
+         * manager in it and no explanation.
+         */
+        const login = new LoginChannel(async (report) => {
+            const profileDir = process.env['PMS_BROWSER_PROFILE'];
+            if (profileDir === undefined || profileDir === '') {
+                throw new AppError('BROWSER_LOGIN_NOT_CONFIGURED', {
+                    message: 'Für die Anmeldung im Browser fehlt ein Profil.',
+                    hint:
+                        'PMS_BROWSER_PROFILE setzen — dorthin gehört das Chrome-Profil, in dem deine ' +
+                        '1Password-Erweiterung installiert ist. Ohne Profil gibt es kein Fenster mit ' +
+                        'Passwort-Manager darin.',
+                });
+            }
+            await loginInBrowser({
+                passphrase,
+                profileDir,
+                ...(process.env['PMS_BROWSER_CHANNEL'] === undefined
+                    ? {}
+                    : { channel: process.env['PMS_BROWSER_CHANNEL'] as 'chrome' | 'msedge' | 'chromium' }),
+                onOpen: () => {
+                    report('waiting');
+                },
+            });
+        });
+
         const server = await serveMailbox({
             db,
             port: Number.isFinite(port) ? port : 5174,
             sync,
             apply,
+            login,
         });
 
         /*

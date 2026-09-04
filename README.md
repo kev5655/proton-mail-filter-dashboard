@@ -141,6 +141,30 @@ The second is the dashboard as before:
 pnpm dev                             # http://localhost:5173
 ```
 
+### Signing in from the dashboard
+
+There is a **Bei Proton anmelden** button in the sidebar, and what it opens is a browser window at
+Proton's own login page. **No password passes through the dashboard, the local server, or the
+process behind it** — you type in that window, or your password manager's browser extension fills
+the form the way it would on any other site.
+
+That is also why the extension only exists in one of the three modes: it lives in *your* browser
+profile, not in a fresh one Playwright made. For 1Password, and for a passkey, use your own Chrome:
+
+```sh
+PMS_BROWSER_CHANNEL=chrome
+PMS_BROWSER_PROFILE=~/.config/pms-chrome    # or your everyday profile, see the warning below
+```
+
+Those two are read by `pnpm serve` at startup, before the dashboard exists, so they belong in `.env`
+rather than in the settings page — which lists them with their current values instead of offering a
+field that would do nothing. The trade-off is stated there too: with a persistent profile the Proton
+cookies end up in Chrome's own store as well as in our encrypted file.
+
+A failed login is **not** retried. This account was locked out once by repeated attempts, so
+`LoginGuard` rations them and a refusal is shown as a refusal — `pnpm spike --lockout-cleared`
+releases a block, and only after you have signed in at mail.proton.me and seen the account is fine.
+
 The dashboard now reads your mirror instead of the demo, and says so — including how old the copy is
 and whether the last sync was cut short. Stop the server and reload, and it falls back to the demo
 without an error: no server running is the ordinary case, not a failure.

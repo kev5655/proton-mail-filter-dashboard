@@ -17,6 +17,8 @@ import { ApplyProvider, useApply } from './apply.js';
 import { ModelProvider } from './llm.js';
 import { MailboxProvider, useMailbox, useMailboxStatus, useReloadMailbox } from './mailbox.js';
 import { SyncPanel } from './components/SyncPanel.js';
+import { LoginPanel } from './components/LoginPanel.js';
+import { LoginProvider } from './login.js';
 import { SyncProvider } from './sync.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
@@ -47,6 +49,9 @@ function Sources(): React.JSX.Element {
 
     return (
         <SyncProvider onFinished={reload}>
+            {/* A finished login means the server can reach Proton now, so the copy is worth asking
+                for again — the dashboard was very likely showing the demo a moment ago. */}
+            <LoginProvider onSignedIn={reload}>
             <ApplyProvider onApplied={reload}>
             {/*
              * Keyed on the source, the sync time *and* the account fingerprint.
@@ -66,6 +71,7 @@ function Sources(): React.JSX.Element {
                 <Shell />
             </StoreProvider>
             </ApplyProvider>
+            </LoginProvider>
         </SyncProvider>
     );
 }
@@ -187,6 +193,7 @@ function Shell(): React.JSX.Element {
                  */}
                 <SourceBanner status={status} />
 
+                <LoginPanel />
                 <SyncPanel />
             </nav>
 

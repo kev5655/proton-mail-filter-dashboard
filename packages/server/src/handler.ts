@@ -3,6 +3,7 @@ import type { Db } from '@pms/store';
 
 import { buildSnapshot } from './snapshot.js';
 import type { ApplyChannel } from './apply-channel.js';
+import type { LoginChannel } from './login-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
 const log = getLogger('server');
@@ -36,11 +37,12 @@ export const READ_ONLY_MESSAGE =
     'Dieser Server liest nur. Änderungen an Proton laufen über den bestätigten Weg, nicht über HTTP.';
 
 /** Paths that stream rather than answer once, so the transport handles them before `route`. */
-export const STREAM_PATHS = new Set(['/api/sync/stream']);
+export const STREAM_PATHS = new Set(['/api/sync/stream', '/api/login/stream']);
 
 export interface Channels {
     sync?: SyncChannel | undefined;
     apply?: ApplyChannel | undefined;
+    login?: LoginChannel | undefined;
 }
 
 export function route(
@@ -50,7 +52,7 @@ export function route(
     channels: Channels = {},
     body?: unknown
 ): Reply {
-    const { sync, apply } = channels;
+    const { sync, apply, login } = channels;
 
     /*
      * Offering a change is not making one.
@@ -107,6 +109,33 @@ export function route(
             : { status: 409, body: { error: refused, code: 'SERVER_SYNC_BUSY' } };
     }
 
+    /*
+     * The third non-GET route, and the last.
+     *
+     * It writes nothing to Proton's data, but it is the most consequential thing this tool does, so
+     * it is named here on its own line rather than folded into something that already existed. What
+     * it starts is a browser window; what happens in that window is a person's business, and this
+     * process never sees a password.
+     *
+     * `LoginGuard` still decides whether an attempt may happen at all. A button in a web interface
+     * makes it easy to hammer a login, which is exactly what earned this account a lockout once.
+     */
+    if (method === 'POST' && path === '/api/login') {
+        if (login === undefined) {
+            return {
+                status: 503,
+                body: {
+                    error: 'Dieser Server kann sich nicht anmelden.',
+                    code: 'SERVER_LOGIN_UNAVAILABLE',
+                },
+            };
+        }
+        const refused = login.start();
+        return refused === undefined
+            ? { status: 202, body: { started: true } }
+            : { status: 409, body: { error: refused, code: 'SERVER_LOGIN_BUSY' } };
+    }
+
     if (method !== 'GET') {
         return { status: 405, body: { error: READ_ONLY_MESSAGE, code: 'SERVER_READ_ONLY' } };
     }
@@ -119,6 +148,12 @@ export function route(
             return {
                 status: 200,
                 body: { available: sync?.available ?? false, ...(sync?.state ?? { state: 'idle' }) },
+            };
+
+        case '/api/login':
+            return {
+                status: 200,
+                body: { available: login?.available ?? false, ...(login?.state ?? { state: 'idle' }) },
             };
 
         case '/api/mailbox': {

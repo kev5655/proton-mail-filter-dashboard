@@ -6,6 +6,7 @@ import type { Db } from '@pms/store';
 
 import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
+import type { LoginChannel } from './login-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
 const log = getLogger('server');
@@ -27,6 +28,8 @@ export interface ServeOptions {
     sync?: SyncChannel | undefined;
     /** Absent when nothing may be written — then a change can be offered but never accepted. */
     apply?: ApplyChannel | undefined;
+    /** Absent when this process cannot open a browser — then the dashboard says so and offers none. */
+    login?: LoginChannel | undefined;
 }
 
 export interface RunningServer {
@@ -46,7 +49,14 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
         const path = new URL(request.url ?? '/', `http://${host}`).pathname;
 
         if (STREAM_PATHS.has(path)) {
-            streamSyncState(request, response, options.sync);
+            // Two streams, one shape. A login is mostly waiting — for a window to open, then for a
+            // person — and a dashboard that could only poll would either be slow to notice or
+            // noisy while nothing happened.
+            streamState(
+                request,
+                response,
+                path === '/api/login/stream' ? options.login : options.sync
+            );
             return;
         }
 
@@ -138,7 +148,11 @@ function actualPort(server: Server, requested: number): number {
  * The current state is sent immediately on connect. A dashboard reloaded mid-sync then shows the
  * run already in flight rather than an idle bar next to a busy server.
  */
-function streamSyncState(request: IncomingMessage, response: ServerResponse, sync: SyncChannel | undefined): void {
+function streamState(
+    request: IncomingMessage,
+    response: ServerResponse,
+    channel: { available: boolean; state: unknown; subscribe: (listener: (state: unknown) => void) => () => void } | undefined
+): void {
     response.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-store',
@@ -151,15 +165,15 @@ function streamSyncState(request: IncomingMessage, response: ServerResponse, syn
         response.write(`data: ${JSON.stringify(state)}\n\n`);
     };
 
-    if (sync === undefined) {
+    if (channel === undefined) {
         send({ state: 'idle', available: false });
         response.end();
         return;
     }
 
-    send({ ...sync.state, available: true });
-    const unsubscribe = sync.subscribe((state) => {
-        send({ ...state, available: true });
+    send({ ...(channel.state as object), available: true });
+    const unsubscribe = channel.subscribe((state) => {
+        send({ ...(state as object), available: true });
     });
 
     // Proxies and browsers drop a stream that says nothing for long enough, and a sync's quietest

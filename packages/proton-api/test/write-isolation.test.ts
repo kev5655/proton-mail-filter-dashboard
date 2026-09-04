@@ -92,6 +92,11 @@ describe('only src/write may change anything at Proton', () => {
     it('drives the browser to the login page and nowhere else', async () => {
         // Clicking through a real mailbox would move mail while leaving every HTTP-level guard
         // above untouched, which is exactly the kind of hole a written rule does not close.
+        //
+        // This got *more* important, not less, when the dashboard gained a button that opens the
+        // browser: the window is now started by an HTTP request instead of by somebody at a
+        // terminal, and it runs in a real profile that is already signed in to other things. A URL
+        // added here would be a page that request could reach.
         const allowed = new Set(['https://account.proton.me/login']);
         const found = new Set<string>();
 
@@ -268,5 +273,56 @@ describe('the write path stays where it was put', () => {
         // Its Proton-shaped types come from @pms/server/types, which is types only. A type import
         // here would be one keystroke from a value import.
         expect(offenders).toEqual([]);
+    });
+});
+
+
+/**
+ * The login the dashboard can start, and the two things that keep it narrow.
+ *
+ * It is the third non-GET route in a project that promised two, and the most consequential thing
+ * the tool does. What makes it defensible is not the route count: it is that this process never
+ * sees a password — it opens Proton's own form in a real browser profile and waits — and that
+ * `LoginGuard` still decides whether an attempt may happen at all.
+ */
+describe('signing in from the dashboard', () => {
+    it('never asks the credential source for a password', async () => {
+        // `connect()` fetches the username and password and hands them to Playwright to type. The
+        // browser-driven login must not: a password manager's extension fills Proton's own form,
+        // and what this process never receives it cannot leak, log or mistype.
+        const source = await readFile(join(REPO, 'packages', 'browser-auth', 'src', 'login.ts'), 'utf8');
+        const byHand = source.slice(source.indexOf('export async function loginByHandInBrowser'));
+
+        expect(byHand).not.toMatch(/options\.password|fill\(page, 'password'/);
+        expect(byHand).toContain('PROTON_LOGIN_URL');
+    });
+
+    it('asks the guard before it opens anything', async () => {
+        // A button in a web interface makes a login easy to hammer, which is how this account
+        // earned a lockout. The guard is consulted first, and a refusal is a refusal.
+        const session = await readFile(join(REPO, 'apps', 'spike', 'src', 'session.ts'), 'utf8');
+        const fn = session.slice(session.indexOf('export async function loginInBrowser'));
+
+        const guardAt = fn.indexOf('assertMayAttempt');
+        const openAt = fn.indexOf('loginByHandInBrowser');
+        expect(guardAt).toBeGreaterThan(-1);
+        expect(openAt).toBeGreaterThan(guardAt);
+    });
+
+    it('records the failure so the guard can count it', async () => {
+        const session = await readFile(join(REPO, 'apps', 'spike', 'src', 'session.ts'), 'utf8');
+        const fn = session.slice(session.indexOf('export async function loginInBrowser'));
+
+        expect(fn).toContain('recordFailure');
+        // And no retry loop around it. One attempt, then stop — the rule that got this account back.
+        expect(fn).not.toMatch(/for \(|while \(|retry/);
+    });
+
+    it('keeps the server unable to perform one', async () => {
+        // Same shape as sync and apply: the routing file knows a login was asked for and nothing
+        // about how one is done. The runner comes from the process that holds the session.
+        const channel = await readFile(join(REPO, 'packages', 'server', 'src', 'login-channel.ts'), 'utf8');
+
+        expect(channel).not.toMatch(/@pms\/browser-auth|playwright/);
     });
 });

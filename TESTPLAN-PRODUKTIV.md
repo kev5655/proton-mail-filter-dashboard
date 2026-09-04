@@ -733,3 +733,65 @@ gegengeprüft, indem ich den Fehler wieder eingebaut habe — darunter:
 - Ohne die Seiten-Rückstellung bleibt die Seitenzahl beim Umschalten stehen. Der erste Test dafür
   war wertlos — er mountete neu und fing dadurch ohnehin bei Seite eins an; er tauscht jetzt die
   Mails unter einer stehenden Liste.
+
+---
+
+## V-08 · Anmelden über die Website
+
+Das letzte Stück deiner Liste. **Ein Punkt davon geht nicht, und ich sage es lieber, bevor du dich
+darauf verlässt:** „den Browser verwenden, in dem meine App schon läuft" ist nicht machbar. Die
+Sitzung besteht aus Cookies und Tokens auf `proton.me`; eine Seite auf `localhost` darf sie nicht
+lesen (Same-Origin), und Proton lässt sich auch nicht in ein `iframe` einbetten. Der einzige Weg
+dorthin wäre eine eigene Browser-Erweiterung — ein zweites Produkt, kein Häkchen.
+
+Was gebaut ist: in der Seitenleiste steht **„Bei Proton anmelden"**. Das öffnet ein echtes
+Browser-Fenster auf Protons eigener Anmeldeseite und wartet. **Durch dieses Werkzeug läuft dabei
+kein Passwort** — weder durch das Dashboard, noch durch den lokalen Server, noch durch den Prozess
+dahinter. Genau deshalb kann die 1Password-Erweiterung überhaupt mitmachen: sie füllt Protons
+Formular aus wie auf jeder anderen Seite.
+
+### Vorbereitung
+
+Die Erweiterung steckt in **deinem** Chrome-Profil, nicht in einem frisch angelegten. Also:
+
+```sh
+PMS_BROWSER_CHANNEL=chrome
+PMS_BROWSER_PROFILE=~/.config/pms-chrome
+```
+
+Beides liest `pnpm serve` beim Start, also in die `.env` und danach neu starten. Die
+Einstellungsseite zeigt die Werte an, statt ein Feld anzubieten, das nichts bewirken würde.
+
+Beim ersten Mal ist das Profil leer — melde dich dort einmal bei 1Password an und installiere die
+Erweiterung. Danach kennt Proton auch das Gerät wieder, was die Anmeldungen ruhiger macht.
+
+### Zu prüfen
+
+1. `pnpm serve`, `pnpm dev`, „Bei Proton anmelden". **Geht ein Fenster auf?**
+2. **Ist die 1Password-Erweiterung darin?** Wenn nicht, stimmt das Profil nicht.
+3. Füllt sie Protons Formular aus? Funktioniert dein Passkey?
+4. Nach dem Abschluss: schliesst sich das Fenster, und sagt das Dashboard „Angemeldet"?
+5. `pnpm serve` neu starten: wird die Sitzung wiederverwendet, ohne dass ein Fenster aufgeht?
+
+### Was ich absichtlich nicht aufgeweicht habe
+
+- **`LoginGuard` gilt weiter.** Er wird gefragt, *bevor* ein Fenster aufgeht, ein Fehlschlag wird
+  gezählt, und es gibt **keine Wiederholung**. Ein Knopf in einer Weboberfläche macht es leicht, den
+  Login zu hämmern — genau so kam dieses Konto zu seiner Sperre. Eine Abweisung steht als Abweisung
+  da, ohne Knopf daneben.
+- **Die Freigabe nach einer Sperre bleibt im Terminal:** `pnpm spike --lockout-cleared`, und erst
+  nachdem du dich bei mail.proton.me angemeldet und gesehen hast, dass das Konto erreichbar ist. Ein
+  Ein-Klick-Knopf dafür wäre der ursprüngliche Fehler in bequem.
+- **Der Browser zeigt weiterhin nur auf die Login-Seite**, und der Test dafür ist jetzt wichtiger
+  als vorher: das Fenster wird neu von einer HTTP-Anfrage gestartet statt von jemandem am Terminal,
+  und es läuft in einem echten Profil, das schon bei anderen Diensten angemeldet ist.
+- **Unsichtbar geht für die erste Anmeldung nicht** — es gibt niemanden, der tippt, und ein Passkey
+  hat nichts zum Bestätigen. Das Auffrischen einer bestehenden Sitzung braucht sowieso keinen
+  Browser.
+
+### Der Preis, den du kennen sollst
+
+Mit einem dauerhaften Profil liegen die Proton-Cookies danach auch in Chromes eigenem Speicher,
+nicht nur in unserer verschlüsselten Datei. Das war schon immer so und stand bisher nur in
+`.env.example`; es steht jetzt auch auf der Einstellungsseite. Wenn dir das zu viel ist: ohne Profil
+funktioniert die Anmeldung weiterhin, nur ohne Erweiterung und ohne Passkey.
