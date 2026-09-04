@@ -95,13 +95,20 @@ export const BODIES: Record<string, DemoBody> = {
     },
 };
 
-const FALLBACK: DemoBody = {
-    remoteHosts: [],
-    html: `<p>Diese Demo-Mail hat keinen eigenen Inhalt.</p>`,
-};
-
-/** Bodies are keyed by a subject prefix, so generated variations share one body. */
-export function bodyFor(subject: string): DemoBody {
+/**
+ * Bodies are keyed by a subject prefix, so generated variations share one body.
+ *
+ * Undefined when there is none, rather than a placeholder body.
+ *
+ * There used to be a `FALLBACK` reading "Diese Demo-Mail hat keinen eigenen Inhalt", and the viewer
+ * rendered it like any other message. That was survivable in the demo and became a real problem the
+ * moment the viewer was pointed at a real mailbox: every real subject missed every key, so every
+ * real message displayed the placeholder and looked like an empty mail with no images. The check
+ * that remote images stay blocked passed against a body that did not exist.
+ *
+ * Absence is now something the caller has to handle, which is the only way it gets said out loud.
+ */
+export function bodyFor(subject: string): DemoBody | undefined {
     const match = Object.keys(BODIES).find((key) => subject.startsWith(key));
-    return match === undefined ? FALLBACK : (BODIES[match] as DemoBody);
+    return match === undefined ? undefined : (BODIES[match] as DemoBody);
 }

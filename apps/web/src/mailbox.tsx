@@ -68,10 +68,17 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
 
     useEffect(() => {
         let cancelled = false;
+        // Aborted rather than merely ignored on unmount: a `cancelled` flag stops the result being
+        // used but leaves the request running, which in a test teardown becomes a rejected promise
+        // nobody is left to catch.
+        const abort = new AbortController();
 
         void (async () => {
             try {
-                const response = await fetch(ENDPOINT, { headers: { Accept: 'application/json' } });
+                const response = await fetch(ENDPOINT, {
+                    headers: { Accept: 'application/json' },
+                    signal: abort.signal,
+                });
                 if (!response.ok) {
                     throw new Error(`Der Server antwortete mit ${response.status}.`);
                 }
@@ -109,6 +116,7 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
 
         return () => {
             cancelled = true;
+            abort.abort();
         };
     }, []);
 
@@ -131,6 +139,10 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
  */
 function describeProblem(cause: unknown): string | undefined {
     if (cause instanceof TypeError) {
+        return undefined;
+    }
+    // Our own doing — the page went away mid-request. Not something to report to the user.
+    if (cause instanceof DOMException && cause.name === 'AbortError') {
         return undefined;
     }
     return cause instanceof Error ? cause.message : 'Der lokale Server hat unerwartet geantwortet.';
