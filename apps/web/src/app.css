@@ -762,3 +762,164 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ---------------------------------------------------------------- rule editor */
+
+/*
+ * List left, editor right. Both tracks are minmax(0, …) for the same reason every other flexible
+ * track in this file is: a long subject in the preview would otherwise widen the column.
+ */
+.rules-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .rules-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.rule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.rule-list .rule-row[aria-current='true'] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.rule-detail {
+    min-width: 0;
+}
+
+.rule-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    background: var(--surface);
+    min-width: 0;
+}
+
+.editor-section {
+    min-width: 0;
+}
+
+.editor-section > h3 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
+
+.editor-section > h4 {
+    margin: 0 0 6px;
+    font-size: 13px;
+}
+
+.bare-fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}
+
+.statement-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.radio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    min-width: 0;
+}
+
+.condition-editor {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 10px;
+    min-width: 0;
+}
+
+.condition-editor-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.condition-editor-row select {
+    flex: 0 1 auto;
+}
+
+.chips {
+    min-width: 0;
+}
+
+.chips-input {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.chips-input .text-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.chip-joiner {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-right: 6px;
+}
+
+.value-chip-warning {
+    border-color: var(--warning, #c98a00);
+}
+
+.chip-remove {
+    background: none;
+    border: 0;
+    padding: 0 0 0 6px;
+    cursor: pointer;
+    color: inherit;
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* The two preview columns. Each scrolls its own content rather than the page. */
+.split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
