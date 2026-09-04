@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { AccountSettings } from '../components/AccountSettings.js';
 import { ProtonConnection } from '../components/ProtonConnection.js';
 import { CLOUD_PRESETS, presetById } from '@pms/llm';
 
@@ -439,6 +440,8 @@ export function SettingsPage(): React.JSX.Element {
                     <code>pnpm serve --auto-sync {form.sync.autoSyncMinutes}</code>.
                 </p>
             </div>
+
+            <AccountSettings />
 
             <ProtonConnection />
 

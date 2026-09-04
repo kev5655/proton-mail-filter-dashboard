@@ -32,6 +32,9 @@ importers:
 
   apps/spike:
     dependencies:
+      '@pms/account':
+        specifier: workspace:*
+        version: link:../../packages/account
       '@pms/apply':
         specifier: workspace:*
         version: link:../../packages/apply
@@ -101,6 +104,9 @@ importers:
       '@proton/sieve':
         specifier: workspace:*
         version: link:../../vendor/proton/sieve
+      '@simplewebauthn/browser':
+        specifier: ^13.3.0
+        version: 13.3.0
       react:
         specifier: ^19.2.0
         version: 19.2.8
@@ -763,6 +769,9 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@simplewebauthn/browser@13.3.0':
+    resolution: {integrity: sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ==}
 
   '@simplewebauthn/server@13.3.3':
     resolution: {integrity: sha512-LelX/lcy5cjc15A86i/aNxHhB5eU7dd20QsbP0VLAf9e38+SLlsnqCCyecx3xqfGofhmX05h1J9fKRYWxw+luA==}
@@ -1988,6 +1997,8 @@ snapshots:
   '@rolldown/pluginutils@1.0.0-rc.3': {}
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@simplewebauthn/browser@13.3.0': {}
 
   '@simplewebauthn/server@13.3.3':
     dependencies:

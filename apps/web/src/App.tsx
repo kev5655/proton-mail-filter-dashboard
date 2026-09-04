@@ -20,10 +20,50 @@ import { SyncPanel } from './components/SyncPanel.js';
 import { LoginPanel } from './components/LoginPanel.js';
 import { LoginProvider } from './login.js';
 import { SyncProvider } from './sync.js';
+import { AccountProvider, isLocked, useAccount } from './account.js';
+import { LockScreen } from './components/LockScreen.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
 
 export function App(): React.JSX.Element {
+    return (
+        <AccountProvider>
+            <Gate />
+        </AccountProvider>
+    );
+}
+
+/**
+ * Nothing below this renders until it is known whether anything is locked.
+ *
+ * The wait is one request and it is worth it. Rendering the dashboard first would show the demo
+ * mailbox for a moment and then replace it with a password field — which looks like the tool
+ * logging somebody out, and teaches them to distrust a screen that is telling the truth.
+ *
+ * The providers underneath are mounted only once past the gate, so a locked server is never asked
+ * for a mailbox it cannot open.
+ */
+function Gate(): React.JSX.Element {
+    const { status, known, served } = useAccount();
+
+    if (!known) {
+        return <div className="lock-screen" />;
+    }
+    if (isLocked(status, known, served)) {
+        return <LockScreen />;
+    }
+
+    return <Dashboard />;
+}
+
+/**
+ * Everything past the gate.
+ *
+ * Its own export because the gate above it waits for a request, and a synchronous render therefore
+ * never gets here — so a test about the shell would be a test about a placeholder. What the gate
+ * itself decides is checked in `lock-screen.test.tsx`, against the states that decide it.
+ */
+export function Dashboard(): React.JSX.Element {
     return (
         <MailboxProvider>
             <AppStateProvider>

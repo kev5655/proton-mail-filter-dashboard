@@ -149,17 +149,19 @@ describe('the server refuses to write', () => {
         expect(route('POST', '/api/anything', db).status).toBe(405);
     });
 
-    it('accepts exactly four non-GET paths, and only those', () => {
+    it('accepts exactly five non-GET paths, and only those', () => {
         // If this list ever grows, it should be because someone meant it to — which is why it is a
-        // list rather than a rule. Each of the four is named in CLAUDE.md with its own reason:
+        // list rather than a rule. Each of the five is named in CLAUDE.md with its own reason:
         // `/api/apply` records an offer and writes nothing yet, `/api/sync` only reads at Proton,
-        // `/api/login` opens a browser window that this process never types into, and `/api/logout`
-        // is the one route on the list that only ever takes away.
+        // `/api/login` opens a browser window that this process never types into, `/api/logout` is
+        // the one route that only ever takes away, and `/api/account` is the one that cannot reach
+        // Proton at all — it opens and closes the local key.
         const paths = [
             '/api/sync',
             '/api/apply',
             '/api/login',
             '/api/logout',
+            '/api/account',
             '/api/mailbox',
             '/api/health',
             '/api/anything',
@@ -173,10 +175,16 @@ describe('the server refuses to write', () => {
                 }).status !== 405
         );
 
-        // All three are *recognised* — `/api/apply` answers 503 here because no apply channel was
-        // given, which is a different answer from „this server does not write". Everything else is
-        // refused before the path is even looked at.
-        expect(accepted).toEqual(['/api/sync', '/api/apply', '/api/login', '/api/logout']);
+        // All five are *recognised* — `/api/apply` and `/api/account` answer 503 here because no
+        // such channel was given, which is a different answer from „this server does not write".
+        // Everything else is refused before the path is even looked at.
+        expect(accepted).toEqual([
+            '/api/sync',
+            '/api/apply',
+            '/api/login',
+            '/api/logout',
+            '/api/account',
+        ]);
     });
 
     it('refuses a login when the server has no way to open one', () => {

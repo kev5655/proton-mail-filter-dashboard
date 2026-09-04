@@ -1191,3 +1191,65 @@
     min-width: 0;
     overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------- lock screen */
+
+/*
+ * The gate. Deliberately not the dashboard shell: there is no navigation to offer, nothing to
+ * scroll and no mailbox behind it — the server cannot open one until this form is answered.
+ */
+.lock-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+}
+
+.lock-card {
+    width: 100%;
+    max-width: 460px;
+    padding: 28px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.lock-card h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+.lock-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.field-error {
+    font-weight: 400;
+    color: var(--danger);
+}
+
+/* A block inside a settings card: its own heading, separated from the one above it. */
+.settings-block {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.settings-block:first-of-type {
+    margin-top: 14px;
+}
+
+.settings-block h3 {
+    font-size: 14px;
+    margin: 0 0 4px;
+}

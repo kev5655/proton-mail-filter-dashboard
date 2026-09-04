@@ -128,6 +128,28 @@ async function openCredentials(): Promise<{ source: CredentialSource; passphrase
     return { source, passphrase };
 }
 
+/**
+ * Pick up a stored session, and under no circumstances start a new one.
+ *
+ * This is what the server does after somebody unlocks the dashboard, and the difference from
+ * `connect()` is the whole reason it exists. `connect()` will, as a last resort, spend a login —
+ * the expensive thing, the one `LoginGuard` rations and the one that earned this account a lockout
+ * when a program did it on every start. Unlocking a dashboard must never be able to cause one.
+ *
+ * So: a stored session is reused and refreshed if it needs it, and anything else comes back as
+ * `signedIn: false`. The client is then a client with no session, which refuses every request
+ * rather than sending an unauthenticated one — and the dashboard offers a „Anmelden" button, which
+ * is a person deciding to spend a login rather than a side effect of typing a password.
+ */
+export async function resume(passphrase: string): Promise<{ http: ProtonHttp; signedIn: boolean }> {
+    const http = newHttp();
+    const stored = await loadSession(SESSION_FILE, passphrase);
+    if (stored === undefined) {
+        return { http, signedIn: false };
+    }
+    return { http, signedIn: await reuse(http, stored, passphrase) };
+}
+
 export async function connect(): Promise<Connection> {
     const guard = new LoginGuard({ path: GUARD_FILE });
     const http = newHttp();
@@ -363,6 +385,15 @@ export async function loginInBrowser(options: {
     profileDir: string;
     channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
     onOpen?: () => void;
+    /**
+     * The client that should end up holding the new session.
+     *
+     * Storing the tokens and not handing them to the running process would produce a sign-in that
+     * takes effect at the *next* start — which is exactly the shape of the bug this file's own
+     * comments warn about in the other direction, where deleting the file left a live client
+     * working. A session lives in memory; putting it there is part of signing in.
+     */
+    http?: ProtonHttp | undefined;
 }): Promise<void> {
     const guard = new LoginGuard({ path: GUARD_FILE });
     await guard.assertMayAttempt();
@@ -385,6 +416,7 @@ export async function loginInBrowser(options: {
         throw error;
     }
 
+    options.http?.setSession(session);
     await guard.recordSuccess();
     await persist(session, userId, options.passphrase);
 }

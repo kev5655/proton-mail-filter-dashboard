@@ -53,6 +53,8 @@ export const ERROR_CODES = [
     'ACCOUNT_LOCKED',
     'ACCOUNT_SECOND_FACTOR_REQUIRED',
     'ACCOUNT_SECOND_FACTOR_WRONG',
+    // A WebAuthn answer arrived without the server having an open question for it.
+    'ACCOUNT_NO_CHALLENGE',
 
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',

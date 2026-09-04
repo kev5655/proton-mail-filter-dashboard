@@ -5,10 +5,26 @@ import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type Chan
 import { describeChange, type PendingChange } from '@pms/changes';
 import { undoChange } from '@pms/changes/undo';
 import { moveIntoCategory } from '@pms/changes/category';
+import {
+    finishPasskeyRegistration,
+    newTotpSecret,
+    startPasskeyLogin,
+    startPasskeyRegistration,
+    totpCode,
+    totpUri,
+    Vault,
+} from '@pms/account';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
-import { getFolders, getMessages } from '@pms/proton-api';
-import { ApplyChannel, SessionChannel, serveMailbox, SyncChannel } from '@pms/server';
+import { getFolders, getMessages, type ProtonHttp } from '@pms/proton-api';
+import {
+    AccountChannel,
+    ApplyChannel,
+    SessionChannel,
+    serveMailbox,
+    SyncChannel,
+    type AccountView,
+} from '@pms/server';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import {
     getMeta,
@@ -24,7 +40,7 @@ import {
 
 import { DATA_DIR, logFilePath } from './paths.js';
 import { deleteLocalCopy } from './local-data.js';
-import { connect, loginInBrowser, signOut } from './session.js';
+import { loginInBrowser, resolvePassphrase, resume, signOut } from './session.js';
 
 /**
  * Hand the dashboard the mirrored mailbox, and let it ask for a fresh one.
@@ -40,8 +56,15 @@ import { connect, loginInBrowser, signOut } from './session.js';
  * message. Anything that would goes a different way entirely, and `write-isolation.test.ts` is what
  * keeps that true rather than this paragraph.
  *
- * The sign-in happens here, in a terminal, where a password prompt and a second factor make sense.
- * A server that had to authenticate in the middle of an HTTP request could not do either.
+ * **Nothing is open when this starts.** The mailbox database and the stored Proton session are
+ * encrypted with a key that only the app password unwraps, so the server comes up serving a lock
+ * screen and one route — `/api/account` — and opens the rest when somebody hands the key over. That
+ * is the whole point of the account layer: a copy of `data/` without the password is noise.
+ *
+ * Signing in *at Proton* is a separate act and stays one. Unlocking picks up a stored session if
+ * there is one and does nothing at all if there is not; it can never spend a login, which is the
+ * expensive thing `LoginGuard` rations and the thing that earned this account a lockout when a
+ * program did it on every start.
  *
  * It runs until interrupted, because the dashboard needs it for as long as it is open.
  */
@@ -49,6 +72,7 @@ import { connect, loginInBrowser, signOut } from './session.js';
 const log = getLogger('serve');
 
 const DATABASE = join(DATA_DIR, 'mailbox.db');
+const ACCOUNT_FILE = join(DATA_DIR, 'account.json');
 
 /** How often the copy refreshes itself, in minutes. `--auto-sync 0` turns it off. */
 const DEFAULT_AUTO_SYNC_MINUTES = 5;
@@ -59,24 +83,66 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     console.log('\nProton Mail Sorter — lokaler Server\n');
     console.log('Liest die lokale Kopie. Zu Proton wird keine Verbindung aufgebaut.');
 
-    if (!existsSync(DATABASE)) {
-        throw new AppError('SERVER_DATABASE_MISSING', {
-            message: 'Es gibt noch keine lokale Kopie des Postfachs.',
-            hint: 'Einmal `pnpm sync` laufen lassen — das legt sie an und füllt sie.',
-            context: { path: DATABASE },
-        });
+    const vault = new Vault(ACCOUNT_FILE);
+    await vault.load();
+
+    /*
+     * The passphrase an installation already has, asked for once and only when it is needed.
+     *
+     * A database that exists was encrypted with whatever came from 1Password or a prompt. Creating
+     * an account would otherwise mint a fresh key and leave every byte of it unreadable — a mailbox
+     * lost to a form somebody filled in. So the old passphrase is collected here, at a terminal,
+     * and handed to the registration as the key to adopt.
+     *
+     * Only in this one case. A fresh installation is asked nothing, and an installation that has an
+     * account is asked nothing either: from then on the app password is the only key there is.
+     */
+    let adoptPassphrase: string | undefined;
+    if (!vault.state.registered && existsSync(DATABASE)) {
+        console.log(
+            '\n  Es gibt eine lokale Kopie, aber noch kein Konto für dieses Werkzeug.\n' +
+                '  Die bisherige Passphrase wird einmal gebraucht, damit das neue Konto ihren\n' +
+                '  Schlüssel übernimmt und die Kopie lesbar bleibt.\n'
+        );
+        adoptPassphrase = await resolvePassphrase();
     }
 
-    // `connect()` rather than `resolvePassphrase()`: the same credentials, but it also establishes
-    // the session. It reuses a stored one when it can — a login is the expensive thing here, and
-    // starting the dashboard must not become a reason to spend one.
-    const { http, passphrase } = await connect();
-    const db = await openDatabase({ path: DATABASE, passphrase });
+    /*
+     * Everything that only exists once somebody has unlocked.
+     *
+     * `undefined` is the honest start-up state, not a placeholder: the key is not in this process
+     * yet, so the database cannot be opened and the stored session cannot be decrypted.
+     */
+    let db: Db | undefined;
+    let http: ProtonHttp | undefined;
+    /** The dashboard shows the lock screen. Separate from the key being held — see the grace period. */
+    let uiLocked = true;
+    let openProblem: string | undefined;
 
     // Declared out here because the `finally` below has to see it: a disconnect closes the database
     // before deleting its files, and closing twice would throw on the way out of a shutdown that
     // already succeeded.
     let databaseClosed = false;
+
+    const requireDb = (): Db => {
+        if (db === undefined) {
+            throw new AppError('ACCOUNT_LOCKED', {
+                message: 'Die lokale Kopie ist nicht geöffnet.',
+                hint: 'Im Dashboard anmelden. Ohne Passwort gibt es keinen Schlüssel dafür.',
+            });
+        }
+        return db;
+    };
+
+    const requireHttp = (): ProtonHttp => {
+        if (http === undefined) {
+            throw new AppError('ACCOUNT_LOCKED', {
+                message: 'Es besteht keine Verbindung zu Proton.',
+                hint: 'Erst im Dashboard anmelden, dann bei Proton verbinden.',
+            });
+        }
+        return http;
+    };
 
     try {
         /*
@@ -142,7 +208,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         const sync: SyncChannel = new SyncChannel(
             async (report) => {
                 refuseWhenSignedOut();
-                const result = await syncAll(db, http, {
+                const result = await syncAll(requireDb(), requireHttp(), {
                     window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
                     maxMessages: 20_000,
                     incremental: true,
@@ -192,15 +258,16 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 });
             }
 
-            const folders = await getFolders(http);
+            const live = requireHttp();
+            const folders = await getFolders(live);
             const outcome = await undoChange(entry, {
-                http,
+                http: live,
                 applyInverse: async () => {
                     await performInverse(entry.inverse);
                 },
                 readCurrent: async (ids) => {
                     const wanted = new Set(ids);
-                    const page = await getMessages(http, { pageSize: 150 });
+                    const page = await getMessages(live, { pageSize: 150 });
                     return page.messages
                         .filter((message) => wanted.has(message.ID))
                         .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
@@ -208,7 +275,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 folderIds: new Map(folders.map((folder) => [folder.Name, folder.ID])),
             });
 
-            markUndone(db, entry.id, Math.floor(Date.now() / 1000));
+            markUndone(requireDb(), entry.id, Math.floor(Date.now() / 1000));
 
             return {
                 restored: outcome.restored.reduce((total, group) => total + group.messageIds.length, 0),
@@ -236,7 +303,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                  * `applyChange` calls `weigh` again for real; this is the same function on the same
                  * request, so the answer shown is the answer that will be acted on.
                  */
-                const weight = weigh(parsed, mailboxSize(db));
+                const weight = weigh(parsed, mailboxSize(requireDb()));
                 return {
                     id: parsed.requestId,
                     summary: describeChange(parsed.change),
@@ -255,12 +322,12 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     });
                 }
                 const outcome = await applyChange(parsed, {
-                    http,
+                    http: requireHttp(),
                     backupDir: join(DATA_DIR, 'backups'),
                     confirm,
                     // Read fresh: the share of the mailbox a change touches decides whether it is
                     // asked about a second time, and the copy grows with every sync.
-                    mailboxSize: mailboxSize(db),
+                    mailboxSize: mailboxSize(requireDb()),
                     /*
                      * The one capability that moves mail, handed in here and nowhere else.
                      *
@@ -286,7 +353,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                      * as unrestorable instead of guessed at.
                      */
                     undoEntry: async (entryId, performInverse) => {
-                        const entry = readJournalEntry(db, entryId);
+                        const entry = readJournalEntry(requireDb(), entryId);
                         if (entry === undefined) {
                             throw new AppError('APPLY_MALFORMED', {
                                 message: 'Diesen Eintrag gibt es im Verlauf nicht.',
@@ -305,7 +372,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                      * because that would be a second unwatched write series inside an error path.
                      */
                     rewindTo: async (entryId, performInverse) => {
-                        const chain = readJournalSince(db, entryId);
+                        const chain = readJournalSince(requireDb(), entryId);
                         if (chain.length === 0) {
                             throw new AppError('APPLY_MALFORMED', {
                                 message: 'Ab diesem Eintrag gibt es nichts zurückzunehmen.',
@@ -327,11 +394,12 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                         return { steps };
                     },
                     moveToCategory: async (messageIds, categoryId) => {
+                        const live = requireHttp();
                         await moveIntoCategory(messageIds, categoryId, {
-                            http,
+                            http: live,
                             readCurrent: async (ids) => {
                                 const wanted = new Set(ids);
-                                const page = await getMessages(http, { pageSize: 150 });
+                                const page = await getMessages(live, { pageSize: 150 });
                                 return page.messages
                                     .filter((message) => wanted.has(message.ID))
                                     .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
@@ -351,11 +419,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                  * that silently disagrees with it is worse than one that says it is behind.
                  */
                 try {
-                    await refreshAccountObjects(db, http);
+                    await refreshAccountObjects(requireDb(), requireHttp());
                     // A rule this tool wrote, or one the user just adopted, is not a surprise the
                     // next time the account is read. Marked after the refresh, which rewrites the
                     // table wholesale.
-                    markAdopted(db, outcome.adoptedFilterIds);
+                    markAdopted(requireDb(), outcome.adoptedFilterIds);
                 } catch (cause) {
                     log.warn({ cause }, 'the change landed but the local copy could not be refreshed');
                 }
@@ -373,7 +441,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                  * successful write would be worse — the backup on disk can still rebuild the rest.
                  */
                 try {
-                    recordJournalEntry(db, {
+                    recordJournalEntry(requireDb(), {
                         ...outcome.entry,
                         backupPath: outcome.backupPath,
                         // An undo gets its own line in the record, naming what it took back. That
@@ -419,8 +487,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 });
             }
             await loginInBrowser({
-                passphrase,
+                passphrase: vault.passphrase(),
                 profileDir,
+                // So the session lands in the client this process is already using. Storing it and
+                // not handing it over would make a sign-in take effect at the *next* start.
+                ...(http === undefined ? {} : { http }),
                 ...(process.env['PMS_BROWSER_CHANNEL'] === undefined
                     ? {}
                     : { channel: process.env['PMS_BROWSER_CHANNEL'] as 'chrome' | 'msedge' | 'chromium' }),
@@ -444,7 +515,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             async (everywhere) => {
                 signedOut = true;
                 const result = await signOut({
-                    http,
+                    http: requireHttp(),
                     everywhere,
                     stopBackgroundWork: () => {
                         if (autoSync !== undefined) {
@@ -454,7 +525,10 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     },
                 });
 
-                closeDatabase(db);
+                if (db !== undefined) {
+                    closeDatabase(db);
+                    db = undefined;
+                }
                 await deleteLocalCopy(DATABASE);
                 databaseClosed = true;
 
@@ -470,17 +544,188 @@ export async function runServe(argv: readonly string[]): Promise<void> {
 
                 return result;
             },
-            // There is a session: `connect()` above established one, or this process would not be
-            // here at all.
-            true
+            // Not known yet. Whether a stored session exists is only readable once the key that
+            // decrypts it has been handed over, so `openLocalData` sets it.
+            false
         );
 
+        /*
+         * Opening what the key opens, once there is a key.
+         *
+         * Two things, in this order and no other: the mailbox database, then whatever Proton
+         * session is stored beside it. Both are encrypted with the same passphrase, and until this
+         * moment neither could be read at all.
+         *
+         * `resume` is deliberately not `connect`. It picks up a stored session and refreshes it if
+         * it needs it, and if there is none it comes back with a client that has none — it can
+         * never start a login. Unlocking a dashboard must not be able to spend the expensive thing.
+         */
+        const openLocalData = async (): Promise<void> => {
+            if (db !== undefined) {
+                return;
+            }
+            openProblem = undefined;
+            const passphrase = vault.passphrase();
+            try {
+                db = await openDatabase({ path: DATABASE, passphrase });
+                const resumed = await resume(passphrase);
+                http = resumed.http;
+                login.signedIn = resumed.signedIn;
+                restartAutoSync();
+                const lastSync = getMeta(db, 'lastSyncAt');
+                console.log(
+                    lastSync === undefined
+                        ? '\n  Aufgeschlossen. Stand: unbekannt — es ist noch keine Synchronisation fertig geworden.'
+                        : `\n  Aufgeschlossen. Stand: ${new Date(Number(lastSync) * 1000).toLocaleString('de-CH')}`
+                );
+                console.log(
+                    resumed.signedIn
+                        ? '  Gespeicherte Proton-Sitzung übernommen.\n'
+                        : '  Keine gültige Proton-Sitzung — im Dashboard verbinden.\n'
+                );
+            } catch (cause) {
+                // Reported rather than thrown past the HTTP layer: the unlock itself succeeded, and
+                // a lock screen that disappears onto an empty mailbox explains nothing.
+                openProblem = cause instanceof Error ? cause.message : 'Unbekannter Fehler.';
+                log.error({ cause }, 'unlocked, but the local data could not be opened');
+                throw cause;
+            }
+        };
+
+        const closeLocalData = (): void => {
+            if (db !== undefined) {
+                closeDatabase(db);
+                db = undefined;
+            }
+            http = undefined;
+            login.signedIn = false;
+            if (autoSync !== undefined) {
+                clearInterval(autoSync);
+                autoSync = undefined;
+            }
+        };
+
+        const view = (): AccountView => {
+            const state = vault.state;
+            return {
+                available: true,
+                registered: state.registered,
+                unlocked: state.unlocked && !uiLocked,
+                ...(state.username === undefined ? {} : { username: state.username }),
+                requiresTotp: state.requiresTotp,
+                hasPasskeys: state.passkeys.length > 0,
+                passkeys: state.passkeys,
+                ...(state.graceUntil === undefined ? {} : { graceUntil: state.graceUntil }),
+                graceMinutes: state.graceMinutes,
+                withinGrace: uiLocked && vault.withinGrace,
+                ready: db !== undefined && !uiLocked,
+                ...(openProblem === undefined ? {} : { problem: openProblem }),
+            };
+        };
+
+        /*
+         * The account surface, assembled here because this is the only place that may hold the key.
+         *
+         * `packages/server/` parses these requests and can perform none of them — it has no `Vault`,
+         * no database and no way to obtain either. That is the same shape as every other capability
+         * in this file: HTTP can ask, and only this process can act.
+         */
+        const account = new AccountChannel({
+            view,
+            register: async (input) => {
+                await vault.register({
+                    ...input,
+                    // The key an existing installation already uses, collected at the terminal
+                    // above. Without it, registering would orphan the mailbox.
+                    ...(adoptPassphrase === undefined ? {} : { adoptPassphrase }),
+                });
+                adoptPassphrase = undefined;
+                uiLocked = false;
+                await openLocalData();
+            },
+            unlock: async (input) => {
+                await vault.unlock(input);
+                uiLocked = false;
+                await openLocalData();
+            },
+            resume: async () => {
+                if (!vault.withinGrace) {
+                    throw new AppError('ACCOUNT_LOCKED', {
+                        message: 'Der Schlüssel wird nicht mehr gehalten.',
+                        hint: 'Die Nachfrist ist abgelaufen. Es braucht wieder das Passwort.',
+                    });
+                }
+                uiLocked = false;
+                await openLocalData();
+            },
+            /*
+             * Locking, and what it does to the data underneath.
+             *
+             * Within the grace period the key is still held, so the database stays open and the
+             * Proton session stays live — that is the convenience the grace period *is*, and
+             * pretending otherwise by closing the file while the key sits in memory would be
+             * theatre. Once the key is genuinely gone, so is everything it opened.
+             */
+            lock: (immediate) => {
+                uiLocked = true;
+                vault.lock(immediate);
+                if (!vault.state.unlocked) {
+                    closeLocalData();
+                }
+            },
+            changePassword: async (current, next) => {
+                await vault.changePassword(current, next);
+            },
+            beginTotp: async () => {
+                const secret = newTotpSecret();
+                return {
+                    secret,
+                    uri: totpUri(secret, vault.state.username ?? 'proton-mail-sorter'),
+                };
+            },
+            enableTotp: async (secret, code) => {
+                // Confirmed against the secret the user is about to be locked behind, before it is
+                // stored. An enrolment that stored first would lock somebody out of their own data
+                // because they mistyped a digit into an authenticator app.
+                if (code !== totpCode(secret, Math.floor(Date.now() / 1000))) {
+                    throw new AppError('ACCOUNT_SECOND_FACTOR_WRONG', {
+                        message: 'Der Code stimmt nicht.',
+                        hint: 'Es wurde nichts eingeschaltet. Der Code gilt dreissig Sekunden.',
+                    });
+                }
+                await vault.enableTotp(secret);
+            },
+            disableTotp: async (password) => {
+                // The password again, because switching a second factor off is exactly the act
+                // somebody who found an unlocked screen would perform.
+                await vault.changePassword(password, password);
+                await vault.disableTotp();
+            },
+            beginPasskeyRegistration: async (origin) =>
+                startPasskeyRegistration(vault.state.username ?? 'proton-mail-sorter', vault.passkeys, origin),
+            finishPasskeyRegistration: async (input) => {
+                await vault.addPasskey(
+                    await finishPasskeyRegistration(input.response, input.challenge, input.origin, input.label)
+                );
+            },
+            removePasskey: async (id) => {
+                await vault.removePasskey(id);
+            },
+            beginPasskeyLogin: async (origin) => startPasskeyLogin(vault.passkeys, origin),
+            setGraceMinutes: async (minutes) => {
+                await vault.setGraceMinutes(minutes);
+            },
+        });
+
         const server = await serveMailbox({
-            db,
+            // A function, because the mailbox appears when somebody unlocks and disappears when
+            // they lock — the server outlives both.
+            db: () => db,
             port: Number.isFinite(port) ? port : 5174,
             sync,
             apply,
             login,
+            account,
         });
 
         /*
@@ -499,11 +744,10 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         restartAutoSync();
 
 
-        const lastSync = getMeta(db, 'lastSyncAt');
         console.log(
-            lastSync === undefined
-                ? '\n  Stand: unbekannt — es ist noch keine Synchronisation fertig geworden.'
-                : `\n  Stand: ${new Date(Number(lastSync) * 1000).toLocaleString('de-CH')}`
+            vault.state.registered
+                ? '\n  Gesperrt. Die lokale Kopie wird erst nach der Anmeldung im Dashboard geöffnet.'
+                : '\n  Noch kein Konto. Im Dashboard eines anlegen — damit entsteht der Schlüssel für die lokalen Daten.'
         );
         console.log(`  Server: ${server.url} (nur von diesem Rechner erreichbar)`);
         console.log('  Synchronisieren lässt sich aus dem Dashboard heraus — gelesen wird, geschrieben nur lokal.');
@@ -537,7 +781,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     } finally {
         // A disconnect closes it before deleting its files; closing twice would throw on the way
         // out of a shutdown that already succeeded.
-        if (!databaseClosed) {
+        if (!databaseClosed && db !== undefined) {
             closeDatabase(db);
         }
     }

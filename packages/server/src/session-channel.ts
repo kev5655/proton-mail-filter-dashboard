@@ -72,6 +72,18 @@ export class SessionChannel {
         return this.#signedIn;
     }
 
+    /**
+     * Say whether a session was picked up, once it is known.
+     *
+     * The constructor cannot answer this any more: the server now starts before anything is
+     * unlocked, and whether a stored session exists is only readable after the key that decrypts it
+     * has been handed over. A channel that answered „nicht angemeldet" for the rest of its life
+     * because that was true at start-up would put a login button in front of a working session.
+     */
+    set signedIn(value: boolean) {
+        this.#signedIn = value;
+    }
+
     get available(): boolean {
         return this.#run !== undefined;
     }

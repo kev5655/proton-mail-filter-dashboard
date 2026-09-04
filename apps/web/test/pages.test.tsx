@@ -2,7 +2,7 @@ import { FilterStatement } from '@proton/sieve/filterModel';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { App } from '../src/App.js';
+import { Dashboard } from '../src/App.js';
 import { FoldersPage } from '../src/pages/FoldersPage.js';
 import { RulesPage } from '../src/pages/RulesPage.js';
 import { TriagePage } from '../src/pages/TriagePage.js';
@@ -193,7 +193,10 @@ describe('the folders page', () => {
 });
 
 describe('the shell', () => {
-    const html = render(<App />);
+    // The dashboard, not `App`: `App` waits for the server's answer about whether anything is
+    // locked, and a synchronous render never gets past that wait. The gate is checked in
+    // `lock-screen.test.tsx`, which can await.
+    const html = render(<Dashboard />);
 
     it('says on every screen that this is demo data', () => {
         // Someone looking at a plausible list of folder names must never wonder whether it is real.

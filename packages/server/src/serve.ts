@@ -4,6 +4,7 @@ import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
+import type { AccountChannel } from './account-channel.js';
 import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
 import type { SessionChannel } from './session-channel.js';
@@ -20,7 +21,16 @@ const log = getLogger('server');
  */
 
 export interface ServeOptions {
-    db: Db;
+    /**
+     * The mailbox, once it can be opened.
+     *
+     * A function rather than a value, because the server now starts before anything is unlocked and
+     * the database appears partway through its life. Passing the handle at construction would have
+     * meant either starting no server until somebody has typed a password — leaving the dashboard
+     * with nothing to talk to and no way to ask for one — or handing over a handle that is replaced
+     * behind the caller's back.
+     */
+    db: Db | undefined | (() => Db | undefined);
     /** 0 asks the operating system for a free one, which is what the tests use. */
     port?: number;
     host?: string;
@@ -30,6 +40,8 @@ export interface ServeOptions {
     apply?: ApplyChannel | undefined;
     /** Absent when this process cannot open a browser — then the dashboard says so and offers none. */
     login?: SessionChannel | undefined;
+    /** Absent when nothing guards this installation — then the dashboard shows no lock screen. */
+    account?: AccountChannel | undefined;
 }
 
 export interface RunningServer {
@@ -64,8 +76,8 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
         // plan the user was shown. The cap is there so a stray upload cannot fill this process's
         // memory; nothing legitimate comes close to it.
         readBody(request, 4_000_000)
-            .then((body) => {
-                answer(request, response, options, path, body);
+            .then(async (body) => {
+                await answer(request, response, options, path, body);
             })
             .catch(() => {
                 response.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -73,16 +85,23 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
             });
     });
 
-    function answer(
+    async function answer(
         request: IncomingMessage,
         response: ServerResponse,
         served: ServeOptions,
         path: string,
         body: unknown
-    ): void {
+    ): Promise<void> {
         let reply;
         try {
-            reply = route(request.method, path, served.db, { sync: served.sync, apply: served.apply }, body);
+            // The login channel was missing from this list, which made `POST /api/login` answer
+            // 503 however well it was wired up at the other end.
+            reply = await route(request.method, path, currentDb(served), {
+                sync: served.sync,
+                apply: served.apply,
+                login: served.login,
+                account: served.account,
+            }, body);
         } catch (cause) {
             // One failing request must not take the server with it: the dashboard is meant to stay
             // up while the copy underneath it is being re-synced.
@@ -131,6 +150,10 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
                 server.close(() => resolve());
             }),
     };
+}
+
+function currentDb(served: ServeOptions): Db | undefined {
+    return typeof served.db === 'function' ? served.db() : served.db;
 }
 
 function actualPort(server: Server, requested: number): number {

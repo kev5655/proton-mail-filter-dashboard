@@ -2,6 +2,7 @@ import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
 import { buildSnapshot } from './snapshot.js';
+import type { AccountChannel } from './account-channel.js';
 import type { ApplyChannel } from './apply-channel.js';
 import type { SessionChannel } from './session-channel.js';
 import type { SyncChannel } from './sync-channel.js';
@@ -14,9 +15,11 @@ const log = getLogger('server');
  * Nothing here changes anything at Proton, and the shape of the code is what says so rather than a
  * promise in a comment.
  *
- * There is exactly one route that is not a `GET`: starting a sync. A sync reads at Proton and
- * writes only into the local mirror, so it needs no confirmation — which is precisely what makes it
- * different from every change to the account, and those do not come through here at all.
+ * Five routes are not a `GET`, and each is named in an `if` of its own rather than entered in a
+ * table, so adding a sixth is a decision somebody has to write down. Four of them concern Proton:
+ * `/api/sync` reads, `/api/apply` records an offer that only a terminal can accept, `/api/login`
+ * opens a browser window, `/api/logout` takes the connection away. The fifth, `/api/account`, is
+ * the odd one out and cannot reach Proton at all — it opens and closes the local key.
  *
  * The rule this file keeps is that it cannot perform anything. It parses a request and calls a
  * `SyncChannel` handed to it; it holds no Proton client, imports nothing that does, and has no way
@@ -33,6 +36,9 @@ export interface Reply {
     body: unknown;
 }
 
+export const LOCKED_MESSAGE =
+    'Dieses Werkzeug ist gesperrt. Ohne Passwort ist die lokale Kopie nicht lesbar.';
+
 export const READ_ONLY_MESSAGE =
     'Dieser Server liest nur. Änderungen an Proton laufen über den bestätigten Weg, nicht über HTTP.';
 
@@ -43,16 +49,24 @@ export interface Channels {
     sync?: SyncChannel | undefined;
     apply?: ApplyChannel | undefined;
     login?: SessionChannel | undefined;
+    account?: AccountChannel | undefined;
 }
 
+/**
+ * `db` is undefined while the tool is locked, and that is the ordinary state at start-up.
+ *
+ * Nothing can open the mailbox before somebody has handed over the key, so every route that reads
+ * it answers `423` — a status that means locked, so the dashboard can tell "not unlocked yet" from
+ * "something broke" without parsing a sentence.
+ */
 export function route(
     method: string | undefined,
     path: string,
-    db: Db,
+    db: Db | undefined,
     channels: Channels = {},
     body?: unknown
-): Reply {
-    const { sync, apply, login } = channels;
+): Reply | Promise<Reply> {
+    const { sync, apply, login, account } = channels;
 
     /*
      * Offering a change is not making one.
@@ -88,7 +102,8 @@ export function route(
               };
     }
 
-    // The one exception, named explicitly rather than by a table anyone could extend.
+    // Reading at Proton, and writing only into the local mirror — which is what makes it the one
+    // route that reaches the account and needs no confirmation.
     if (method === 'POST' && path === '/api/sync') {
         if (sync === undefined) {
             return {
@@ -100,8 +115,8 @@ export function route(
             };
         }
         // The dashboard may ask for a different auto-sync rhythm while it is at it. Carried on this
-        // request rather than on a route of its own, so the promise of exactly two non-GET routes
-        // stays literally true.
+        // request rather than on a route of its own: a local timer is not worth a line of the route
+        // list, and the list is only worth anything while it is short enough to read.
         const asked = (body as { intervalMinutes?: unknown } | undefined)?.intervalMinutes;
         const refused = sync.start(typeof asked === 'number' ? asked : undefined);
         return refused === undefined
@@ -110,7 +125,7 @@ export function route(
     }
 
     /*
-     * The third non-GET route, and the last.
+     * Opening a browser window, which is the most consequential thing this tool does.
      *
      * It writes nothing to Proton's data, but it is the most consequential thing this tool does, so
      * it is named here on its own line rather than folded into something that already existed. What
@@ -164,6 +179,32 @@ export function route(
             : { status: 409, body: { error: refused, code: 'SERVER_LOGIN_BUSY' } };
     }
 
+    /*
+     * The fifth non-GET route, and the only one that cannot reach Proton.
+     *
+     * It is also the only one a locked tool answers at all, which is what makes it the gate rather
+     * than a feature: registering creates the key the mailbox database and the stored Proton
+     * session are encrypted with, and unlocking is what makes every other route on this list able
+     * to do anything.
+     *
+     * One route with a named action rather than eleven paths. The count promise above is about
+     * routes that change something at Proton, and this one changes nothing there; spending eleven
+     * lines of that promise on a local password form would make the promise harder to read without
+     * making it stronger. `AccountChannel` still names each action in a branch of its own.
+     */
+    if (method === 'POST' && path === '/api/account') {
+        if (account === undefined) {
+            return {
+                status: 503,
+                body: {
+                    error: 'Dieser Server verwaltet kein Konto.',
+                    code: 'SERVER_ACCOUNT_UNAVAILABLE',
+                },
+            };
+        }
+        return account.perform(body);
+    }
+
     if (method !== 'GET') {
         return { status: 405, body: { error: READ_ONLY_MESSAGE, code: 'SERVER_READ_ONLY' } };
     }
@@ -188,7 +229,30 @@ export function route(
                 },
             };
 
+        case '/api/account':
+            return {
+                status: 200,
+                body:
+                    account?.view ?? {
+                        available: false,
+                        registered: false,
+                        unlocked: true,
+                        requiresTotp: false,
+                        hasPasskeys: false,
+                        passkeys: [],
+                        graceMinutes: 0,
+                        withinGrace: false,
+                        // No account surface means no lock: an older server, or one started
+                        // without one. The dashboard must not put a lock screen in front of a
+                        // mailbox that is being served.
+                        ready: true,
+                    },
+            };
+
         case '/api/mailbox': {
+            if (db === undefined) {
+                return { status: 423, body: { error: LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' } };
+            }
             const snapshot = buildSnapshot(db);
             log.debug(
                 {
