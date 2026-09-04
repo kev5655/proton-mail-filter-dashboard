@@ -93,9 +93,19 @@ describe('without a model', () => {
 
 describe('with a model', () => {
     beforeEach(async () => {
+        // A hosted model, configured but never called: `isAvailable` for that mode is a check of
+        // the configuration rather than a request, so the screen can be rendered in its
+        // model-is-there state without a network or a stand-in provider.
         window.localStorage.setItem(
             'pms.settings',
-            JSON.stringify({ ...DEFAULTS, llm: { ...DEFAULTS.llm, mode: 'demo' } })
+            JSON.stringify({
+                ...DEFAULTS,
+                llm: {
+                    ...DEFAULTS.llm,
+                    mode: 'cloud',
+                    cloud: { provider: 'openai', apiKey: 'k', model: 'gpt-4o-mini', baseUrl: '' },
+                },
+            })
         );
         await mount();
     });

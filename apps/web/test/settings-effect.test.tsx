@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -105,5 +108,60 @@ describe('the Ollama address', () => {
         );
 
         expect(loadSettings().llm.baseUrl).toBe('http://gpu.fritz.box:11434');
+    });
+});
+
+describe('the language-model choice', () => {
+    it('no longer offers a stand-in', () => {
+        // A provider answering from a lookup table is the wrong offer next to a real mailbox: it
+        // puts generated-looking text exactly where a judgement would go.
+        const source = readFileSync(join(import.meta.dirname, '..', 'src', 'settings.ts'), 'utf8');
+        expect(source).not.toContain("'demo'");
+    });
+
+    it('moves a copy saved with the stand-in selected onto off', () => {
+        // Rather than leaving an unknown mode to fall through to a default nobody chose.
+        window.localStorage.setItem(
+            'pms.settings',
+            JSON.stringify({ ...DEFAULTS, llm: { ...DEFAULTS.llm, mode: 'demo' } })
+        );
+
+        expect(loadSettings().llm.mode).toBe('off');
+    });
+
+    it('keeps the hosted-model key out of everything but the settings', () => {
+        // It is the one secret in this file. Nothing else may read it, and in particular nothing
+        // may put it in a log line or an error.
+        window.localStorage.setItem(
+            'pms.settings',
+            JSON.stringify({
+                ...DEFAULTS,
+                llm: { ...DEFAULTS.llm, mode: 'cloud', cloud: { provider: 'openai', apiKey: 'geheim', model: 'm', baseUrl: '' } },
+            })
+        );
+
+        expect(loadSettings().llm.cloud.apiKey).toBe('geheim');
+    });
+});
+
+describe('the page size', () => {
+    it('accepts a number that had to be typed over the old one', () => {
+        // As a plain number the field could not be emptied — `Number('') || 10` put the 10 straight
+        // back, so „30" was impossible to type without selecting the old value first.
+        window.localStorage.setItem(
+            'pms.settings',
+            JSON.stringify({ ...DEFAULTS, display: { pageSize: 30 } })
+        );
+
+        expect(loadSettings().display.pageSize).toBe(30);
+    });
+
+    it('refuses a stored value outside the range instead of trusting it', () => {
+        window.localStorage.setItem(
+            'pms.settings',
+            JSON.stringify({ ...DEFAULTS, display: { pageSize: 5000 } })
+        );
+
+        expect(loadSettings().display.pageSize).toBe(100);
     });
 });

@@ -195,7 +195,11 @@ importers:
 
   packages/grouping: {}
 
-  packages/llm: {}
+  packages/llm:
+    dependencies:
+      '@pms/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/mail-view: {}
 

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
 import { ProtonConnection } from '../components/ProtonConnection.js';
+import { CLOUD_PRESETS, presetById } from '@pms/llm';
+
 import { useModel } from '../llm.js';
 import { useMailboxStatus } from '../mailbox.js';
 import { protonMailUrl } from '../proton-link.js';
@@ -18,6 +20,13 @@ export function SettingsPage(): React.JSX.Element {
     const status = useMailboxStatus();
     const [form, setForm] = useState(settings);
     const [saved, setSaved] = useState(false);
+    // The page-size field keeps its own text, so it can be empty mid-edit without the form having
+    // to hold a number that is not one.
+    const [pageSizeText, setPageSizeText] = useState(String(settings.display.pageSize));
+
+    const parsedPageSize = Number(pageSizeText);
+    const pageSizeUsable =
+        pageSizeText !== '' && Number.isInteger(parsedPageSize) && parsedPageSize >= 5 && parsedPageSize <= 100;
 
     const dirty = JSON.stringify(form) !== JSON.stringify(settings);
 
@@ -73,11 +82,20 @@ export function SettingsPage(): React.JSX.Element {
                                 }
                                 aria-label="Ollama-Adresse"
                             />
+                            {/*
+                             * Two ways to reach a machine that is not this one, and they fail
+                             * differently — which is the only reason both are named. Ollama answers
+                             * only origins it was told to allow, and a blocked request arrives in a
+                             * browser as the same network error as a dead port.
+                             */}
                             <span className="faint">
-                                <code>/ollama</code> geht über diese Seite an dein lokales Ollama.
-                                Eine vollständige Adresse ist für ein Ollama auf einem anderen
-                                Rechner — dort muss dann <code>OLLAMA_ORIGINS</code> diese Seite
-                                erlauben.
+                                <code>/ollama</code> geht über diese Seite — ohne CORS-Frage. Für ein
+                                Ollama auf einem <strong>anderen Rechner</strong> gibt es zwei Wege:
+                                entweder <code>PMS_OLLAMA_URL=http://…:11434</code> setzen und{' '}
+                                <code>pnpm dev</code> neu starten, dann bleibt es <code>/ollama</code>{' '}
+                                und die Seite fragt weiter ihren eigenen Ursprung — oder die
+                                vollständige Adresse hier eintragen, dann muss dort{' '}
+                                <code>OLLAMA_ORIGINS</code> diese Seite erlauben.
                             </span>
                         </label>
                         <label className="stack">
@@ -95,14 +113,167 @@ export function SettingsPage(): React.JSX.Element {
                     </div>
                 )}
 
+                {/*
+                 * A model somebody else runs, and the sentence that has to come before the key
+                 * field rather than after it.
+                 *
+                 * Ollama answers on localhost and nothing leaves. A hosted model gets the subject
+                 * lines and sender addresses of the mail a rule would catch — for a tool whose
+                 * argument is that a Proton account exists to withhold exactly that, this is a real
+                 * trade and belongs where the decision is made.
+                 */}
+                {form.llm.mode === 'cloud' && (
+                    <>
+                        <p className="notice notice-warning" style={{ marginTop: 12 }}>
+                            <strong>Damit verlassen Daten diesen Rechner.</strong> Gesendet werden
+                            Betreffzeilen und Absenderadressen der betroffenen Mails — keine
+                            Mailinhalte, die gibt es hier ohnehin nicht. Wer das Modell betreibt,
+                            sieht sie. Bei Ollama ist das nicht so.
+                        </p>
+
+                        <div className="row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+                            <label className="stack">
+                                <span className="faint">Anbieter</span>
+                                <select
+                                    className="text-input"
+                                    value={form.llm.cloud.provider}
+                                    aria-label="Anbieter"
+                                    onChange={(event) => {
+                                        const next = presetById(event.target.value);
+                                        setForm({
+                                            ...form,
+                                            llm: {
+                                                ...form.llm,
+                                                cloud: {
+                                                    ...form.llm.cloud,
+                                                    provider: event.target.value,
+                                                    // Only when the field is still empty: overwriting
+                                                    // a model somebody typed would be the tidier
+                                                    // kind of rude.
+                                                    model:
+                                                        form.llm.cloud.model === ''
+                                                            ? (next?.defaultModel ?? '')
+                                                            : form.llm.cloud.model,
+                                                },
+                                            },
+                                        });
+                                    }}
+                                >
+                                    {CLOUD_PRESETS.map((preset) => (
+                                        <option key={preset.id} value={preset.id}>
+                                            {preset.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <label className="stack">
+                                <span className="faint">Modell</span>
+                                <input
+                                    type="text"
+                                    className="text-input"
+                                    value={form.llm.cloud.model}
+                                    placeholder={presetById(form.llm.cloud.provider)?.defaultModel ?? ''}
+                                    aria-label="Modellname beim Anbieter"
+                                    onChange={(event) =>
+                                        setForm({
+                                            ...form,
+                                            llm: {
+                                                ...form.llm,
+                                                cloud: { ...form.llm.cloud, model: event.target.value },
+                                            },
+                                        })
+                                    }
+                                />
+                            </label>
+                        </div>
+
+                        {presetById(form.llm.cloud.provider)?.baseUrl === '' && (
+                            <label className="stack" style={{ marginTop: 12 }}>
+                                <span className="faint">Adresse (OpenAI-kompatibel)</span>
+                                <input
+                                    type="text"
+                                    className="text-input"
+                                    value={form.llm.cloud.baseUrl}
+                                    placeholder="https://…/v1"
+                                    aria-label="Adresse des Anbieters"
+                                    onChange={(event) =>
+                                        setForm({
+                                            ...form,
+                                            llm: {
+                                                ...form.llm,
+                                                cloud: { ...form.llm.cloud, baseUrl: event.target.value },
+                                            },
+                                        })
+                                    }
+                                />
+                            </label>
+                        )}
+
+                        <label className="stack" style={{ marginTop: 12 }}>
+                            <span className="faint">API-Schlüssel</span>
+                            <input
+                                type="password"
+                                className="text-input"
+                                value={form.llm.cloud.apiKey}
+                                autoComplete="off"
+                                aria-label="API-Schlüssel"
+                                onChange={(event) =>
+                                    setForm({
+                                        ...form,
+                                        llm: {
+                                            ...form.llm,
+                                            cloud: { ...form.llm.cloud, apiKey: event.target.value },
+                                        },
+                                    })
+                                }
+                            />
+                            <span className="faint">
+                                Liegt im Speicher dieses Browsers, wie die übrigen Einstellungen —
+                                nicht verschlüsselt. Wer an diesen Rechner kommt, kommt an den
+                                Schlüssel.
+                                {presetById(form.llm.cloud.provider)?.keysUrl !== undefined &&
+                                    presetById(form.llm.cloud.provider)?.keysUrl !== '' && (
+                                        <>
+                                            {' '}
+                                            <a
+                                                href={presetById(form.llm.cloud.provider)?.keysUrl}
+                                                target="_blank"
+                                                rel="noreferrer noopener"
+                                            >
+                                                Schlüssel holen
+                                            </a>
+                                        </>
+                                    )}
+                            </span>
+                        </label>
+                    </>
+                )}
+
+                {/*
+                 * Nothing to check when there is nothing configured. „Verbindung prüfen" next to
+                 * „Aus" offers to test the absence of a thing, which is the sort of button that
+                 * makes an interface feel automatic rather than thought about.
+                 */}
                 <div className="row" style={{ marginTop: 12 }}>
-                    <button type="button" className="button button-quiet" onClick={recheck}>
-                        Verbindung prüfen
-                    </button>
+                    {form.llm.mode !== 'off' && (
+                        <button type="button" className="button button-quiet" onClick={recheck}>
+                            Verbindung prüfen
+                        </button>
+                    )}
                     <span className="faint">
-                        {state === 'available' && `Erreichbar — ${provider.name}.`}
+                        {/*
+                         * „Eingerichtet", not „erreichbar", for a hosted model. Probing one costs a
+                         * request and money, so what was actually checked is that a key, a model and
+                         * an address are present — and the word has to say that rather than imply a
+                         * round trip nobody made.
+                         */}
+                        {state === 'available' &&
+                            (form.llm.mode === 'cloud'
+                                ? `Eingerichtet — ${provider.name}. Ob der Schlüssel stimmt, zeigt erst die erste Anfrage.`
+                                : `Erreichbar — ${provider.name}.`)}
                         {state === 'checking' && 'Wird geprüft …'}
-                        {state === 'disabled' && 'Ausgeschaltet.'}
+                        {state === 'disabled' && 'Kein Modell eingerichtet.'}
                         {state === 'unavailable' && 'Nicht erreichbar.'}
                     </span>
                 </div>
@@ -194,20 +365,37 @@ export function SettingsPage(): React.JSX.Element {
                 <h2>Anzeige</h2>
                 <label className="stack">
                     <span className="faint">Mails pro Seite</span>
+                    {/*
+                     * Held as text while it is being edited.
+                     *
+                     * As a number it could not be emptied: clearing the field to type something
+                     * longer produced `Number('') || 10`, which put the 10 straight back and made
+                     * „30" impossible to type without selecting the old value first. An empty field
+                     * is a legitimate state *while typing* and an illegitimate one to save, which is
+                     * two different rules — so the field allows it and the save button does not.
+                     */}
                     <input
                         type="number"
                         min={5}
                         max={100}
                         className="text-input"
-                        value={form.display.pageSize}
-                        onChange={(event) =>
-                            setForm({
-                                ...form,
-                                display: { pageSize: Number(event.target.value) || 10 },
-                            })
-                        }
+                        value={pageSizeText}
+                        onChange={(event) => {
+                            const next = event.target.value;
+                            setPageSizeText(next);
+                            const parsed = Number(next);
+                            if (next !== '' && Number.isFinite(parsed)) {
+                                setForm({ ...form, display: { pageSize: parsed } });
+                            }
+                        }}
                         aria-label="Mails pro Seite"
                     />
+                    {!pageSizeUsable && (
+                        <span className="faint">
+                            Zwischen 5 und 100. Solange hier nichts Gültiges steht, lässt sich nicht
+                            speichern.
+                        </span>
+                    )}
                 </label>
             </div>
 
@@ -337,7 +525,12 @@ export function SettingsPage(): React.JSX.Element {
             )}
 
             <div className="row" style={{ marginTop: 16 }}>
-                <button type="button" className="button" disabled={!dirty} onClick={save}>
+                <button
+                    type="button"
+                    className="button"
+                    disabled={!dirty || !pageSizeUsable}
+                    onClick={save}
+                >
                     {dirty ? 'Speichern' : 'Gespeichert'}
                 </button>
                 {dirty && (
@@ -351,16 +544,23 @@ export function SettingsPage(): React.JSX.Element {
     );
 }
 
+/**
+ * The three answers, and the one that used to be four.
+ *
+ * „Platzhalter" is gone: a stand-in answering from a lookup table is the wrong thing to offer next
+ * to a real mailbox, because it puts generated-looking text exactly where a judgement would go.
+ * Somebody looking at their own mail wants a model or no model, not a rehearsal of one.
+ */
 const MODES: Array<{ value: LlmMode; label: string; hint: string }> = [
     { value: 'off', label: 'Aus', hint: 'Kein Modell. Alles Abgeleitete funktioniert weiterhin.' },
     {
         value: 'ollama',
         label: 'Ollama',
-        hint: 'Ein Modell auf diesem Rechner oder im Netz.',
+        hint: 'Auf diesem Rechner oder auf einem anderen im Netz. Nichts verlässt dein Netz.',
     },
     {
-        value: 'demo',
-        label: 'Platzhalter',
-        hint: 'Fest verdrahtete Antworten zum Ausprobieren der Oberfläche — kein Modell.',
+        value: 'cloud',
+        label: 'Anbieter mit API-Schlüssel',
+        hint: 'OpenAI, Anthropic und andere. Betreffzeilen und Absender verlassen dabei diesen Rechner.',
     },
 ];

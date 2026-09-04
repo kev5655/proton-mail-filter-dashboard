@@ -1,3 +1,11 @@
+export {
+    createCloudProvider,
+    presetById,
+    CLOUD_PRESETS,
+    type CloudConfig,
+    type CloudDialect,
+    type CloudPreset,
+} from './cloud.js';
 export { buildLabelPrompt, validateLabelProposal } from './labels.js';
 export { createDemoProvider } from './demo.js';
 export { createOllamaProvider, type OllamaConfig } from './ollama.js';

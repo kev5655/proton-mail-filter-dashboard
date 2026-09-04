@@ -14,14 +14,40 @@ import { DEFAULT_LINK_CONFIG, type ProtonLinkConfig } from './proton-link.js';
  * survives.
  */
 
-export type LlmMode = 'off' | 'demo' | 'ollama';
+/**
+ * Where a model runs, if one does.
+ *
+ * There used to be a `demo` mode — a stand-in that answered instantly from a lookup table. It was
+ * removed because it is the wrong offer to make next to a real mailbox: generated-looking text that
+ * is not a model's judgement, sitting where a judgement would go. Anybody looking at their own mail
+ * wants a model or no model, not a rehearsal of one.
+ */
+export type LlmMode = 'off' | 'ollama' | 'cloud';
 
 export interface Settings {
     version: 1;
     llm: {
         mode: LlmMode;
+        /** Ollama's address. `/ollama` goes through this page's own origin; see DEFAULTS. */
         baseUrl: string;
         model: string;
+        /**
+         * A model somebody else runs.
+         *
+         * The one setting in this file that is a secret, and the one that sends anything off the
+         * machine — subject lines and sender addresses of the mail a rule would catch. Both facts
+         * are in front of the user before the key field appears, because for a tool whose argument
+         * is that a Proton account exists to withhold exactly this, it is a real trade and not a
+         * checkbox.
+         */
+        cloud: {
+            /** A preset id from `CLOUD_PRESETS`, or `custom`. */
+            provider: string;
+            apiKey: string;
+            model: string;
+            /** Only used by `custom`; the presets carry their own. */
+            baseUrl: string;
+        };
     };
     proton: ProtonLinkConfig;
     display: {
@@ -61,7 +87,12 @@ export const DEFAULTS: Settings = {
      *
      * An absolute URL still works and is still the right answer for an Ollama on another machine.
      */
-    llm: { mode: 'off', baseUrl: '/ollama', model: 'qwen2.5:7b' },
+    llm: {
+        mode: 'off',
+        baseUrl: '/ollama',
+        model: 'qwen2.5:7b',
+        cloud: { provider: 'openai', apiKey: '', model: '', baseUrl: '' },
+    },
     proton: DEFAULT_LINK_CONFIG,
     display: { pageSize: 10 },
     sync: { autoSyncMinutes: 5 },
@@ -88,12 +119,20 @@ export function loadSettings(): Settings {
     return {
         version: 1,
         llm: {
-            mode: oneOf(value.llm?.mode, ['off', 'demo', 'ollama'], DEFAULTS.llm.mode),
+            // A copy saved while `demo` existed lands on `off`, which is what it should always
+            // have been next to a real mailbox.
+            mode: oneOf(value.llm?.mode, ['off', 'ollama', 'cloud'], DEFAULTS.llm.mode),
             // The old default, carried forward from a copy saved before the proxy existed. Left
             // as it is, it keeps failing on Ollama's origin check for a reason nobody can see from
             // the screen; there is nothing to lose by moving it to the path that works.
             baseUrl: migrateBaseUrl(text(value.llm?.baseUrl, DEFAULTS.llm.baseUrl)),
             model: text(value.llm?.model, DEFAULTS.llm.model),
+            cloud: {
+                provider: text(value.llm?.cloud?.provider, DEFAULTS.llm.cloud.provider),
+                apiKey: text(value.llm?.cloud?.apiKey, DEFAULTS.llm.cloud.apiKey),
+                model: text(value.llm?.cloud?.model, DEFAULTS.llm.cloud.model),
+                baseUrl: text(value.llm?.cloud?.baseUrl, DEFAULTS.llm.cloud.baseUrl),
+            },
         },
         proton: {
             host: text(value.proton?.host, DEFAULTS.proton.host),

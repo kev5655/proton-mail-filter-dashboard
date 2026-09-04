@@ -1,6 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { createDemoProvider, createOllamaProvider, NO_PROVIDER, type LlmProvider } from '@pms/llm';
+import {
+    createCloudProvider,
+    createOllamaProvider,
+    NO_PROVIDER,
+    presetById,
+    type LlmProvider,
+} from '@pms/llm';
 
 import { log } from './log.js';
 import { loadSettings, saveSettings, type Settings } from './settings.js';
@@ -39,12 +45,23 @@ export function ModelProvider({ children }: { children: React.ReactNode }): Reac
         switch (settings.llm.mode) {
             case 'ollama':
                 return createOllamaProvider({ baseUrl: settings.llm.baseUrl, model: settings.llm.model });
-            case 'demo':
-                return createDemoProvider();
+            case 'cloud': {
+                const preset = presetById(settings.llm.cloud.provider);
+                return createCloudProvider({
+                    dialect: preset?.dialect ?? 'openai',
+                    // A preset carries its own address; only „eigene Adresse" uses the field.
+                    baseUrl:
+                        preset === undefined || preset.baseUrl === ''
+                            ? settings.llm.cloud.baseUrl
+                            : preset.baseUrl,
+                    apiKey: settings.llm.cloud.apiKey,
+                    model: settings.llm.cloud.model,
+                });
+            }
             default:
                 return NO_PROVIDER;
         }
-    }, [settings.llm.mode, settings.llm.baseUrl, settings.llm.model]);
+    }, [settings.llm.mode, settings.llm.baseUrl, settings.llm.model, settings.llm.cloud]);
 
     useEffect(() => {
         if (settings.llm.mode === 'off') {
