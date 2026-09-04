@@ -67,6 +67,58 @@ export function recordJournalEntry(db: Db, entry: StoredEntry): void {
         entry.undoesId ?? null
     );
     log.info({ id: entry.id, kind: entry.change.kind, moved: entry.moved.length }, 'journal entry recorded');
+    pruneJournal(db);
+}
+
+/**
+ * How many changes the record keeps.
+ *
+ * A cap rather than a growing list, and the number is small on purpose. This record exists to be
+ * *undone from*: it holds, per change, the id of every message that moved and the labels it carried
+ * before. That is the smallest thing that can put mail back, and it is still mail metadata sitting
+ * on a disk — so it is kept for as long as taking a change back is a real prospect and no longer.
+ *
+ * Twenty is roughly a session's worth of work. Beyond that, „rückgängig" stops being something
+ * somebody does and becomes archaeology, and the backups on disk are the better tool for it: they
+ * hold every filter and folder as they were before each change, and they are not deleted by this.
+ */
+export const JOURNAL_LIMIT = 20;
+
+/**
+ * Drop everything past the cap, oldest first.
+ *
+ * By `at` and then `id`, exactly the order the list is read in, so what disappears is what was
+ * already at the bottom of the screen rather than whichever row SQLite happened to return last.
+ */
+export function pruneJournal(db: Db, limit = JOURNAL_LIMIT): number {
+    const result = db
+        .prepare(
+            `DELETE FROM journal_entries
+             WHERE id NOT IN (
+                 SELECT id FROM journal_entries ORDER BY at DESC, id DESC LIMIT ?
+             )`
+        )
+        .run(limit);
+    const removed = Number(result.changes);
+    if (removed > 0) {
+        log.info({ removed, limit }, 'journal pruned to its limit');
+    }
+    return removed;
+}
+
+/**
+ * Forget the record, on purpose.
+ *
+ * What this costs is stated where it is offered, because it cannot be taken back: undo works from
+ * this table, so a change with no entry can no longer be reversed by this tool. What it does not
+ * cost is the backups — they are files, this is a table, and clearing a history should not quietly
+ * throw away the copy of every filter as it was before each change.
+ */
+export function clearJournal(db: Db): number {
+    const result = db.prepare('DELETE FROM journal_entries').run();
+    const removed = Number(result.changes);
+    log.info({ removed }, 'journal cleared by the user');
+    return removed;
 }
 
 /** Mark an entry taken back, so it is not offered a second time. */

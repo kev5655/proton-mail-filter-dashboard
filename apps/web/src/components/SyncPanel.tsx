@@ -1,6 +1,7 @@
 import { useSettings } from '../llm.js';
 import { useMailboxStatus } from '../mailbox.js';
 import { STAGE_NAMES, useSync } from '../sync.js';
+import { ProtonSessionHint } from './ProtonSessionHint.js';
 
 /**
  * When the copy was last refreshed, and a way to refresh it.
@@ -95,10 +96,14 @@ export function SyncPanel(): React.JSX.Element | null {
             )}
 
             {status.state === 'failed' && (
-                <p className="notice notice-danger">
-                    Synchronisation fehlgeschlagen{status.code === undefined ? '' : ` (${status.code})`}:{' '}
-                    {status.error}. Am Konto hat sich dadurch nichts geändert — ein Sync liest nur.
-                </p>
+                <>
+                    <p className="notice notice-danger">
+                        Synchronisation fehlgeschlagen
+                        {status.code === undefined ? '' : ` (${status.code})`}: {status.error}. Am
+                        Konto hat sich dadurch nichts geändert — ein Sync liest nur.
+                    </p>
+                    <ProtonSessionHint code={status.code} message={status.error} />
+                </>
             )}
 
             {refusal !== undefined && <p className="notice notice-warning">{refusal}</p>}

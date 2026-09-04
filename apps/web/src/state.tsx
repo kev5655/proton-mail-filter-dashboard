@@ -33,6 +33,14 @@ export interface Navigation {
     focusFolder?: string | undefined;
     /** Set when arriving from a screen that identified a sender worth writing a rule for. */
     draftForSender?: string | undefined;
+    /**
+     * Land on the settings' account half rather than its first tab.
+     *
+     * Set by anything that reports a broken Proton session: the answer to „Invalid access token" is
+     * a button somewhere else, and sending somebody to a settings page with two tabs and letting
+     * them find it is only half an answer.
+     */
+    focusConnection?: boolean | undefined;
 }
 
 interface AppState {

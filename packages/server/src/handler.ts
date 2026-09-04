@@ -1,6 +1,8 @@
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
+import { clearJournal } from '@pms/sync';
+
 import { buildSnapshot } from './snapshot.js';
 import type { AccountChannel } from './account-channel.js';
 import type { ApplyChannel } from './apply-channel.js';
@@ -15,11 +17,12 @@ const log = getLogger('server');
  * Nothing here changes anything at Proton, and the shape of the code is what says so rather than a
  * promise in a comment.
  *
- * Five routes are not a `GET`, and each is named in an `if` of its own rather than entered in a
- * table, so adding a sixth is a decision somebody has to write down. Four of them concern Proton:
- * `/api/sync` reads, `/api/apply` records an offer that only a terminal can accept, `/api/login`
- * opens a browser window, `/api/logout` takes the connection away. The fifth, `/api/account`, is
- * the odd one out and cannot reach Proton at all — it opens and closes the local key.
+ * Six routes are not a `GET`, and each is named in an `if` of its own rather than entered in a
+ * table, so adding a seventh is a decision somebody has to write down. Four of them concern Proton:
+ * `/api/sync` reads, `/api/apply` records an offer that only a second answer can accept,
+ * `/api/login` opens a browser window, `/api/logout` takes the connection away. Two cannot reach
+ * Proton at all: `/api/account` opens and closes the local key, and `/api/history/clear` deletes
+ * rows from the local record.
  *
  * The rule this file keeps is that it cannot perform anything. It parses a request and calls a
  * `SyncChannel` handed to it; it holds no Proton client, imports nothing that does, and has no way
@@ -206,6 +209,26 @@ export function route(
         return account.perform(body);
     }
 
+    /*
+     * The sixth, and the smallest: it deletes rows from the local record and touches nothing else.
+     *
+     * It is a route rather than an action on `/api/account` because it is not about the account,
+     * and it needs no Proton client, no channel and no confirmation from another window — this
+     * server can do it by itself, which is exactly why it is safe to let it.
+     *
+     * What it costs is stated where it is offered: undo works from this table, so a change with no
+     * entry can no longer be reversed by this tool. The backups are untouched — they are files,
+     * this is a table, and clearing a history must not quietly throw away the copy of every filter
+     * as it was before each change.
+     */
+    if (method === 'POST' && path === '/api/history/clear') {
+        if (db === undefined) {
+            return { status: 423, body: { error: LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' } };
+        }
+        const removed = clearJournal(db);
+        return { status: 200, body: { removed } };
+    }
+
     if (method !== 'GET') {
         return { status: 405, body: { error: READ_ONLY_MESSAGE, code: 'SERVER_READ_ONLY' } };
     }
@@ -217,7 +240,11 @@ export function route(
         case '/api/sync':
             return {
                 status: 200,
-                body: { available: sync?.available ?? false, ...(sync?.state ?? { state: 'idle' }) },
+                body: {
+                    available: sync?.available ?? false,
+                    ...(sync?.nextRunAt === undefined ? {} : { nextRunAt: sync.nextRunAt }),
+                    ...(sync?.state ?? { state: 'idle' }),
+                },
             };
 
         case '/api/login':

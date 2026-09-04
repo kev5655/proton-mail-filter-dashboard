@@ -7,6 +7,7 @@ import { CLOUD_PRESETS, presetById } from '@pms/llm';
 import { useModel } from '../llm.js';
 import { useMailboxStatus } from '../mailbox.js';
 import { protonMailUrl } from '../proton-link.js';
+import { useAppState } from '../state.js';
 import type { LlmMode } from '../settings.js';
 
 /**
@@ -17,10 +18,18 @@ import type { LlmMode } from '../settings.js';
  * that cannot be corrected before it does.
  */
 export function SettingsPage(): React.JSX.Element {
-    const { settings, update, state, recheck, provider } = useModel();
+    const { settings, update, state, checkedAt, recheck, provider } = useModel();
     const status = useMailboxStatus();
     const [form, setForm] = useState(settings);
     const [saved, setSaved] = useState(false);
+    const { nav } = useAppState();
+    /**
+     * Which half of the page is showing. „Anwendung" first: it is what people come here for.
+     *
+     * Unless something sent them here to fix a connection, in which case landing on the other tab
+     * and making them find it would be half an answer.
+     */
+    const [tab, setTab] = useState<'app' | 'account'>(nav.focusConnection === true ? 'account' : 'app');
     // The page-size field keeps its own text, so it can be empty mid-edit without the form having
     // to hold a number that is not one.
     const [pageSizeText, setPageSizeText] = useState(String(settings.display.pageSize));
@@ -42,12 +51,55 @@ export function SettingsPage(): React.JSX.Element {
             <header className="page-head">
                 <h1>Einstellungen</h1>
                 <p>
-                    Bleiben in diesem Browser. Nichts davon ist ein Geheimnis und nichts davon stammt
-                    aus deinem Postfach — der Server ist bewusst nur lesend und kann keine
-                    Einstellungen aufbewahren.
+                    {tab === 'app'
+                        ? 'Bleiben in diesem Browser. Nichts davon ist ein Geheimnis und nichts davon stammt aus deinem Postfach — der Server ist bewusst nur lesend und kann keine Einstellungen aufbewahren.'
+                        : 'Wer du bist und woran dieses Werkzeug hängt. Nichts davon liegt im Browser: das Passwort schützt die lokale Kopie, und die Verbindung gehört dem Prozess, der sie hält.'}
                 </p>
             </header>
 
+            {/*
+             * Two groups, kept apart.
+             *
+             * They were one list, and mixing them was the complaint. „Wie viele Mails pro Seite"
+             * and „ändere das Passwort, an dem der Schlüssel zu deinem Postfach hängt" are not the
+             * same kind of decision, they are not saved the same way — the left side waits for a
+             * „Speichern", the right side takes effect the moment it is answered — and one of them
+             * is reached for far more often than the other.
+             */}
+            <div className="settings-tabs" role="tablist">
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === 'app'}
+                    className="settings-tab"
+                    onClick={() => {
+                        setTab('app');
+                    }}
+                >
+                    Anwendung
+                </button>
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === 'account'}
+                    className="settings-tab"
+                    onClick={() => {
+                        setTab('account');
+                    }}
+                >
+                    Konto und Verbindung
+                </button>
+            </div>
+
+            {tab === 'account' && (
+                <>
+                    <AccountSettings />
+                    <ProtonConnection />
+                </>
+            )}
+
+            {tab === 'app' && (
+                <>
             <div className="card">
                 <h2>Sprachmodell</h2>
                 <p className="faint">
@@ -258,8 +310,15 @@ export function SettingsPage(): React.JSX.Element {
                  */}
                 <div className="row" style={{ marginTop: 12 }}>
                     {form.llm.mode !== 'off' && (
-                        <button type="button" className="button button-quiet" onClick={recheck}>
-                            Verbindung prüfen
+                        <button
+                            type="button"
+                            className="button button-quiet"
+                            disabled={state === 'checking' || dirty}
+                            aria-busy={state === 'checking'}
+                            onClick={recheck}
+                        >
+                            {state === 'checking' && <span className="spinner" aria-hidden="true" />}
+                            {state === 'checking' ? 'Wird geprüft …' : 'Verbindung prüfen'}
                         </button>
                     )}
                     <span className="faint">
@@ -276,8 +335,32 @@ export function SettingsPage(): React.JSX.Element {
                         {state === 'checking' && 'Wird geprüft …'}
                         {state === 'disabled' && 'Kein Modell eingerichtet.'}
                         {state === 'unavailable' && 'Nicht erreichbar.'}
+                        {/*
+                         * The time the answer is from.
+                         *
+                         * Without it a second press looks like a button that does nothing: the
+                         * check lands on the same answer, so neither the state nor the sentence
+                         * changes. A clock that moves says „it ran, and the answer is the same".
+                         */}
+                        {checkedAt !== undefined && state !== 'checking' && state !== 'disabled' && (
+                            <> Zuletzt geprüft: {new Date(checkedAt).toLocaleTimeString('de-CH')}.</>
+                        )}
                     </span>
                 </div>
+
+                {/*
+                 * What is checked is what is saved.
+                 *
+                 * The provider is built from the stored settings, so a check while the form is
+                 * dirty would test the previous address and report on it confidently. Saying so is
+                 * better than either silently testing the wrong thing or saving on somebody's
+                 * behalf because they pressed a button labelled „prüfen".
+                 */}
+                {dirty && form.llm.mode !== 'off' && (
+                    <p className="faint">
+                        Geprüft wird, was gespeichert ist — erst <em>Speichern</em>, dann prüfen.
+                    </p>
+                )}
 
                 {/*
                  * Two different failures behind one word.
@@ -364,7 +447,8 @@ export function SettingsPage(): React.JSX.Element {
 
             <div className="card">
                 <h2>Anzeige</h2>
-                <label className="stack">
+                {/* Capped like every other short answer: a card is wider than a two-digit number. */}
+                <label className="stack" style={{ maxWidth: 220 }}>
                     <span className="faint">Mails pro Seite</span>
                     {/*
                      * Held as text while it is being edited.
@@ -441,10 +525,6 @@ export function SettingsPage(): React.JSX.Element {
                 </p>
             </div>
 
-            <AccountSettings />
-
-            <ProtonConnection />
-
             <div className="card">
                 <h2>Postfach</h2>
                 <p className="faint">
@@ -495,6 +575,8 @@ export function SettingsPage(): React.JSX.Element {
                 )}
                 {saved && <span className="faint">Gespeichert.</span>}
             </div>
+                </>
+            )}
         </>
     );
 }

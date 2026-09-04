@@ -3,6 +3,7 @@ import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 import {
     getMeta,
+    JOURNAL_LIMIT,
     readCategoryChanges,
     readCategoryObservations,
     readFilters,
@@ -97,6 +98,7 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
             messageCount: messages.length,
             truncated: getMeta(db, 'lastSyncTruncated') === '1',
             version: getMeta(db, 'accountVersion') ?? '',
+            historyLimit: JOURNAL_LIMIT,
         },
         folders,
         labels,

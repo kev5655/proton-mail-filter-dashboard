@@ -195,6 +195,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 autoSync = undefined;
             }
             if (autoSyncMinutes <= 0) {
+                sync.nextRunAt = undefined;
                 return;
             }
             autoSync = setInterval(() => {
@@ -203,6 +204,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     log.debug({ refused }, 'auto-sync skipped');
                 }
             }, autoSyncMinutes * 60_000);
+            // Told rather than left to be guessed at: the dashboard's own arithmetic — last sync
+            // plus the interval in its settings — is wrong on both counts, because the setting
+            // only reaches this process on the next manual sync and this timer restarts on every
+            // run.
+            sync.nextRunAt = Math.floor(Date.now() / 1000) + autoSyncMinutes * 60;
         };
 
         const sync: SyncChannel = new SyncChannel(

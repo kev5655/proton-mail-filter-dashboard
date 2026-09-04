@@ -70,6 +70,10 @@ export function ActivityLog(): React.JSX.Element {
                         <thead>
                             <tr>
                                 <th>Zeit</th>
+                                {/* Its own column, so a sentence stays a sentence. A badge glued
+                                    to the front of the text made every row start with a word that
+                                    is not part of it. */}
+                                <th>Art</th>
                                 <th>Was passiert ist</th>
                                 {technical && <th>Ereignis</th>}
                             </tr>
@@ -81,7 +85,9 @@ export function ActivityLog(): React.JSX.Element {
                                         {new Date(entry.at).toLocaleTimeString('de-CH')}
                                     </td>
                                     <td>
-                                        {entry.level !== 'info' && (
+                                        {entry.level === 'info' ? (
+                                            <span className="faint">—</span>
+                                        ) : (
                                             <span
                                                 className={
                                                     entry.level === 'error'
@@ -91,9 +97,9 @@ export function ActivityLog(): React.JSX.Element {
                                             >
                                                 {entry.level === 'error' ? 'Fehler' : 'Achtung'}
                                             </span>
-                                        )}{' '}
-                                        {describeEvent(entry)}
+                                        )}
                                     </td>
+                                    <td>{describeEvent(entry)}</td>
                                     {technical && (
                                         <td className="faint">
                                             <code>{entry.event}</code>{' '}

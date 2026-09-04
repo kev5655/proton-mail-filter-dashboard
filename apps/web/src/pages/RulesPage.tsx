@@ -228,7 +228,7 @@ export function RulesPage(): React.JSX.Element {
                                     </button>
                                     <button
                                         type="button"
-                                        className="button button-quiet"
+                                        className="button button-danger-quiet"
                                         onClick={() => {
                                             log('info', 'rule.stage-delete', { ruleId: selected.id });
                                             stage({

@@ -203,7 +203,7 @@ function Totp(): React.JSX.Element {
                 <Result error={error} done={done} />
                 <button
                     type="button"
-                    className="button button-secondary"
+                    className="button button-danger-quiet"
                     disabled={password === '' || busy}
                     onClick={() => {
                         run(async () => {
@@ -336,7 +336,7 @@ function Passkeys(): React.JSX.Element {
                             </span>
                             <button
                                 type="button"
-                                className="button button-quiet"
+                                className="button button-danger-quiet"
                                 disabled={busy}
                                 onClick={() => {
                                     run(

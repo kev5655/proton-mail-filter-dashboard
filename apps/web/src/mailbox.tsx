@@ -56,6 +56,13 @@ export interface MailboxStatus {
      * reason. The demo has none: nothing there ever reached an account.
      */
     history: JournalEntryDto[];
+    /**
+     * How many changes the record keeps, as the server reports it.
+     *
+     * Carried rather than restated here: it is the journal's number, and two copies of one number
+     * drift. Undefined against an older server, and the screen simply says nothing then.
+     */
+    historyLimit: number | undefined;
 }
 
 interface MailboxContext {
@@ -80,6 +87,7 @@ const DEMO_STATUS: MailboxStatus = {
     unreadable: [],
     problem: undefined,
     history: [],
+    historyLimit: undefined,
 };
 
 export function MailboxProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -149,6 +157,7 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                         unreadable: snapshot.unreadable,
                         problem: undefined,
                         history: snapshot.history ?? [],
+                        historyLimit: snapshot.meta.historyLimit,
                     },
                 });
             } catch (cause) {

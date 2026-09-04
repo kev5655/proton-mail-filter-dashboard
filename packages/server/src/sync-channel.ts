@@ -63,6 +63,7 @@ export const MAX_AUTO_SYNC_MINUTES = 1440;
 
 export class SyncChannel {
     #state: SyncState = { state: 'idle' };
+    #nextRunAt: number | undefined;
     readonly #listeners = new Set<Listener>();
     readonly #run: SyncRunner | undefined;
     readonly #onStarted: SyncStarted | undefined;
@@ -79,6 +80,26 @@ export class SyncChannel {
 
     get state(): SyncState {
         return this.#state;
+    }
+
+    /**
+     * When the timer will fire next, in unix seconds, or undefined when there is no timer.
+     *
+     * Reported rather than computed in the browser. „Letzter Sync plus das Intervall aus den
+     * Einstellungen" is the obvious guess and it is wrong twice over: the setting only reaches the
+     * server on the next manual sync, and the timer restarts on every run — so the dashboard would
+     * confidently name a time nothing was scheduled for.
+     *
+     * The channel holds it and does not own it. The timer lives in the process that has one.
+     */
+    get nextRunAt(): number | undefined {
+        return this.#nextRunAt;
+    }
+
+    set nextRunAt(value: number | undefined) {
+        this.#nextRunAt = value;
+        // Not an event of its own: it changes when a run starts or the interval does, and both of
+        // those already push a state down the stream.
     }
 
     subscribe(listener: Listener): () => void {

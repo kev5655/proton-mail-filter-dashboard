@@ -7,6 +7,7 @@ import { useStore } from '../store.js';
 import { useApply } from '../apply.js';
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
 import { MailList } from './MailList.js';
+import { ProtonSessionHint } from './ProtonSessionHint.js';
 import { RuleConditions } from './RuleConditions.js';
 
 /**
@@ -247,10 +248,18 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                 )}
 
                 {phase.phase === 'failed' && (
-                    <div className="notice notice-danger">
-                        <strong>Nicht geschrieben{phase.code === undefined ? '' : ` (${phase.code})`}.</strong>{' '}
-                        {phase.error}
-                    </div>
+                    <>
+                        <div className="notice notice-danger">
+                            <strong>
+                                Nicht geschrieben{phase.code === undefined ? '' : ` (${phase.code})`}.
+                            </strong>{' '}
+                            {phase.error}
+                        </div>
+                        {/* Only when the failure is about the session. Every other error is a
+                            different problem, and the same button under all of them would stop
+                            meaning anything. */}
+                        <ProtonSessionHint code={phase.code} message={phase.error} />
+                    </>
                 )}
 
                 {/*
@@ -403,7 +412,12 @@ function ConfirmWithPassword({
 
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
-            <button type="button" className="button" disabled={password === '' || busy} onClick={send}>
+            <button
+                type="button"
+                className="button button-danger"
+                disabled={password === '' || busy}
+                onClick={send}
+            >
                 {busy ? 'Wird geprüft …' : 'Löschen bestätigen'}
             </button>
         </div>

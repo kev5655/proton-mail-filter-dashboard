@@ -78,7 +78,7 @@ export function ProtonConnection(): React.JSX.Element | null {
                         <div className="row" style={{ gap: 8 }}>
                             <button
                                 type="button"
-                                className="button button-secondary"
+                                className="button button-danger-quiet"
                                 disabled={busy || !status.signedIn}
                                 onClick={() => setConfirming('local')}
                             >
@@ -86,7 +86,7 @@ export function ProtonConnection(): React.JSX.Element | null {
                             </button>
                             <button
                                 type="button"
-                                className="button button-secondary"
+                                className="button button-danger-quiet"
                                 disabled={busy || !status.signedIn}
                                 onClick={() => setConfirming('everywhere')}
                             >
@@ -104,7 +104,7 @@ export function ProtonConnection(): React.JSX.Element | null {
                             <div className="row" style={{ gap: 8 }}>
                                 <button
                                     type="button"
-                                    className="button"
+                                    className="button button-danger"
                                     disabled={busy}
                                     aria-busy={busy}
                                     onClick={() => disconnect(confirming === 'everywhere')}

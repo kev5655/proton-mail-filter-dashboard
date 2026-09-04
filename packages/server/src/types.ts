@@ -91,6 +91,14 @@ export interface MailboxMeta {
      * exists.
      */
     version: string;
+    /**
+     * How many changes the record keeps.
+     *
+     * Sent rather than restated in the browser, because it is the journal's number and two copies
+     * of one number drift. The screen says it out loud so „meine ältesten Änderungen sind weg"
+     * has an answer that is on the screen rather than in a source file.
+     */
+    historyLimit: number;
 }
 
 /**

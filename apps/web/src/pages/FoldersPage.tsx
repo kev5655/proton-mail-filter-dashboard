@@ -137,7 +137,7 @@ function FolderNode({
                 </button>
                 <button
                     type="button"
-                    className="button button-quiet"
+                    className="button button-danger-quiet"
                     onClick={() => {
                         log('warn', 'folder.stage-delete', {
                             rules: referencing.length,

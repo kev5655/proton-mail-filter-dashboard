@@ -1309,13 +1309,43 @@
 }
 
 /*
- * A button or a line of buttons placed straight into a card, with nothing to space it.
+ * Everything inside a card is spaced from the thing above it. One rule, not a list.
  *
- * Not the first child: a row at the top of a card is the card's own heading line, and pushing that
- * down would read as the card having two different paddings.
+ * It was a list, and the list kept being incomplete: buttons had no margin, then rows had none,
+ * then a mail list unfolded straight against the row of buttons above it. Each was fixed where it
+ * was noticed, which is how a fourth one was always going to appear.
+ *
+ * Two halves, and the order matters. First the elements that carry a top margin of their own are
+ * stripped of it — through `:where()`, which contributes no specificity, so the rule below can
+ * still win. Then every child except the first is spaced. The first is exempt because a card's
+ * padding already spaces it, and pushing it down would read as the card having two paddings.
  */
-.card > .button:not(:first-child),
-.card > .row:not(:first-child) {
+.card > :where(p, .notice, .field, .plain-list, .mail-list-block, table, .row, .button),
+.editor-section > :where(p, .notice, .field, .plain-list, .mail-list-block, table, .row, .button, .split) {
+    margin-top: 0;
+}
+
+.card > * + *,
+.editor-section > * + * {
+    margin-top: 12px;
+}
+
+/*
+ * Headings keep their own bottom margin, which would add to the gap above whatever follows.
+ *
+ * Zeroed here rather than in the heading rules, because outside these containers the margin is
+ * still what spaces them.
+ */
+.card > :where(h2, h3, h4),
+.editor-section > :where(h2, h3, h4) {
+    margin-bottom: 0;
+}
+
+/*
+ * A mail list unfolds under whatever asked for it — a row of buttons, a sentence, a notice — and
+ * needs its own space wherever that is, not only as a card's direct child.
+ */
+.mail-list-block:not(:first-child) {
     margin-top: 12px;
 }
 
@@ -1469,5 +1499,256 @@
     .form-stack > .field,
     .form-stack > .field-narrow {
         max-width: none;
+    }
+}
+
+/* ---------------------------------------------------------------- settings tabs */
+
+/*
+ * The two halves of the settings, kept apart.
+ *
+ * „Wie viele Mails pro Seite" and „ändere das Passwort, an dem der Schlüssel zu deinem Postfach
+ * hängt" are not the same kind of decision, and they are not even saved the same way — one waits
+ * for a „Speichern", the other takes effect when it is answered.
+ */
+.settings-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.settings-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.settings-tab {
+    flex: none;
+    padding: 8px 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.settings-tab:hover {
+    color: var(--text);
+}
+
+.settings-tab[aria-selected='true'] {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- dangerous buttons */
+
+/*
+ * A button that takes something away looks like one.
+ *
+ * The colour is not decoration: „Verbindung trennen" and „Speichern" sat side by side in the same
+ * grey, so the only thing separating them was the word on them. Every button that deletes, revokes
+ * or disconnects wears this — and nothing else does, or it stops meaning anything.
+ *
+ * It never replaces the confirmation. A red button is a warning before the click; the diff, the
+ * password and the terminal are what happen after it.
+ */
+.button-danger {
+    background: var(--danger);
+    color: var(--danger-text);
+    border-color: transparent;
+}
+
+.button-danger:hover {
+    /* No separate hover colour in the palette; darkening by hand keeps one source for the hue. */
+    filter: brightness(0.92);
+}
+
+.button-danger:disabled {
+    filter: none;
+}
+
+/* The quieter half of the same idea: a destructive choice that is not the main one on its card. */
+.button-danger-quiet {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: transparent;
+}
+
+.button-danger-quiet:hover {
+    background: var(--danger-soft);
+    filter: brightness(0.95);
+}
+
+/*
+ * Who is signed in, and the way out — at the foot of the navigation.
+ *
+ * Not in the settings: locking is what you do on the way out of the room, and a control needed on
+ * the way out should not be behind a tab.
+ */
+.sidebar-account {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------- info bubbles */
+
+/*
+ * The reasoning, one click away.
+ *
+ * A real element rather than a `title` attribute: `title` does not exist on a phone, cannot be
+ * opened from a keyboard, and vanishes while it is being read.
+ */
+.info {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.info-mark {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-faint);
+    font-size: 10px;
+    font-weight: 700;
+    font-style: italic;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.info-mark:hover,
+.info-mark[aria-expanded='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/*
+ * Hidden until hovered, focused or tapped.
+ *
+ * `display: none` rather than opacity: a bubble that is merely transparent still takes clicks and
+ * is still read out, which is worse than not being there.
+ */
+.info-bubble {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    left: 0;
+    /* Wide enough to read, and never wider than the screen it opens on. */
+    width: max-content;
+    max-width: min(46ch, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    white-space: normal;
+    text-align: left;
+}
+
+.info:hover > .info-bubble,
+.info:focus-within > .info-bubble,
+.info-bubble.is-open {
+    display: block;
+}
+
+/* Near the right-hand edge it opens leftwards, or it would push the page sideways. */
+.info-right .info-bubble {
+    left: auto;
+    right: 0;
+}
+
+/* A heading with something at the far end of its line — a count, a button, a mark. */
+.head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.head-row > h2 {
+    margin: 0;
+}
+
+/* ---------------------------------------------------------------- status strip */
+
+/*
+ * States, in the corner, without sentences.
+ *
+ * Connected, how old the copy is, when it refreshes next: read dozens of times a day and never
+ * needing a paragraph. The paragraph is behind the mark next to each one.
+ */
+.status-strip {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-faint);
+}
+
+.status-pill.is-good .status-dot {
+    background: var(--success);
+}
+
+.status-pill.is-bad {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.status-pill.is-bad .status-dot {
+    background: var(--danger);
+}
+
+/* Near the right edge, so the bubbles open leftwards rather than pushing the page sideways. */
+.status-strip .info-bubble {
+    left: auto;
+    right: 0;
+}
+
+@media (max-width: 620px) {
+    .status-strip {
+        justify-content: flex-start;
     }
 }

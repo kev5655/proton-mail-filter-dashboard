@@ -32,6 +32,7 @@ const DEMO = {
     unreadable: [],
     problem: undefined,
     history: [],
+    historyLimit: undefined,
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 
@@ -43,6 +44,7 @@ const REAL = {
     unreadable: [],
     problem: undefined,
     history: [],
+    historyLimit: undefined,
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 

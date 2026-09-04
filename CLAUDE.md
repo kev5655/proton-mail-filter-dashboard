@@ -34,7 +34,7 @@ somewhere; the service runs the rules it already has. That is what lets a new ru
 backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
 because for months the terminal announced it and nothing did it.
 
-**There are five non-GET routes, not two, and every addition is named here because each was made on
+**There are six non-GET routes, not two, and every addition is named here because each was made on
 purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
 writes nothing to Proton's data, but it is the most consequential thing the tool does. `POST
 /api/logout` is the only route on the list that *only ever takes away* — it ends the session, forgets
@@ -50,6 +50,14 @@ database, and can only hand a key to the process that does. It is one route with
 rather than eleven paths, because the route count is a promise about what reaches Proton, and
 spending eleven lines of it on a local password form would make the promise harder to read without
 making it stronger; `AccountChannel` still names each action in a branch of its own.
+
+`POST /api/history/clear` is the sixth and the smallest: it deletes rows from the local record and
+touches nothing else — no Proton client, no channel, no confirmation from another window. What it
+costs is stated where it is offered, because undo works from that table and a change with no entry
+can no longer be reversed. The backups are untouched: they are files, this is a table, and clearing
+a history must not quietly throw away the copy of every filter as it was before each change. The
+record also caps itself at `JOURNAL_LIMIT` entries on write, not on read — a record that grew for
+ever on disk and was merely *displayed* short would still be a growing pile of mail metadata.
 
 What makes it defensible is not the route count. **No password passes through this process:**
 `loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser
@@ -92,7 +100,7 @@ the module that performs it.
 The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
 parses a request cannot reach the code that performs one. They meet through a channel object handed
 in from outside, and `write-isolation.test.ts` checks that the routing files import neither
-`@pms/apply` nor the write surface. Five non-GET routes exist and each is named in an `if` rather
+`@pms/apply` nor the write surface. Six non-GET routes exist and each is named in an `if` rather
 than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
 records an offer and answers `202` while nothing has happened yet.
 

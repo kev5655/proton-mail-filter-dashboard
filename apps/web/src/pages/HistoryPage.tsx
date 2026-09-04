@@ -1,8 +1,11 @@
+import { useState } from 'react';
+
 import { describeChange } from '@pms/changes';
 
-import { useMailboxStatus } from '../mailbox.js';
+import { useMailboxStatus, useReloadMailbox } from '../mailbox.js';
 import { useStore } from '../store.js';
 import { ActivityLog } from '../components/ActivityLog.js';
+import { Info } from '../components/Info.js';
 
 /**
  * What was changed at the account, and what the tool was doing.
@@ -24,7 +27,10 @@ import { ActivityLog } from '../components/ActivityLog.js';
  */
 export function HistoryPage(): React.JSX.Element {
     const { journal, undo, stageUndo, stageRewind } = useStore();
-    const { source, history } = useMailboxStatus();
+    const { source, history, historyLimit } = useMailboxStatus();
+    const reload = useReloadMailbox();
+    const [clearing, setClearing] = useState(false);
+    const [clearError, setClearError] = useState<string | undefined>();
 
     // The demo has no account to have changed, so it shows its own local record; everything else
     // reads what actually reached Proton.
@@ -78,7 +84,73 @@ export function HistoryPage(): React.JSX.Element {
                 </p>
             </header>
 
-            <h2>Was geändert wurde</h2>
+            <div className="head-row">
+                <h2>Was geändert wurde</h2>
+
+                {/*
+                 * Forgetting the record, and what that costs.
+                 *
+                 * Undo works from this list, so an entry that is gone is a change this tool can no
+                 * longer reverse. That is said on the confirmation rather than in a paragraph above
+                 * it — it is one consequence, and it only matters at the moment of deciding.
+                 *
+                 * Not in a card of its own: a card is for a thing, and this is an action on the
+                 * list below it.
+                 */}
+                {source !== 'demo' && history.length > 0 && !clearing && (
+                    <div className="row">
+                        <Info label="Was der Verlauf enthält">
+                            {historyLimit === undefined
+                                ? 'Der Verlauf liegt in der verschlüsselten lokalen Kopie.'
+                                : `Der Verlauf behält die letzten ${String(historyLimit)} Änderungen; ältere fallen von selbst heraus.`}{' '}
+                            Er enthält pro Änderung die Mail-IDs, die sie bewegt hat — genau so viel,
+                            wie zum Zurücknehmen nötig ist, und keinen Betreff und keine Adresse.
+                        </Info>
+                        <button
+                            type="button"
+                            className="button button-danger-quiet"
+                            onClick={() => {
+                                setClearError(undefined);
+                                setClearing(true);
+                            }}
+                        >
+                            Verlauf löschen
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {clearError !== undefined && <p className="notice notice-danger">{clearError}</p>}
+
+            {clearing && (
+                <>
+                    <p className="notice notice-danger">
+                        <strong>Verlauf löschen?</strong> Danach lässt sich keine dieser Änderungen
+                        mehr rückgängig machen — dafür wird genau diese Liste gebraucht. Die
+                        Sicherungen unter <code>data/backups</code> bleiben liegen.
+                    </p>
+                    <div className="row">
+                        <button
+                            type="button"
+                            className="button button-danger"
+                            onClick={() => {
+                                void clear();
+                            }}
+                        >
+                            Ja, Verlauf löschen
+                        </button>
+                        <button
+                            type="button"
+                            className="button button-quiet"
+                            onClick={() => {
+                                setClearing(false);
+                            }}
+                        >
+                            Abbrechen
+                        </button>
+                    </div>
+                </>
+            )}
 
             {entries.length === 0 && (
                 <p className="muted">
@@ -168,4 +240,21 @@ export function HistoryPage(): React.JSX.Element {
             <ActivityLog />
         </>
     );
+
+    async function clear(): Promise<void> {
+        try {
+            const response = await fetch('/api/history/clear', { method: 'POST' });
+            if (!response.ok) {
+                const body = (await response.json()) as { error?: string };
+                setClearError(body.error ?? `Der Server antwortete mit ${String(response.status)}.`);
+                return;
+            }
+            setClearing(false);
+            // The list on screen comes from the snapshot, so it has to be fetched again — otherwise
+            // the rows stay until something else happens to reload, which reads as a failed click.
+            reload();
+        } catch {
+            setClearError('Der lokale Server ist nicht erreichbar. Läuft `pnpm serve`?');
+        }
+    }
 }

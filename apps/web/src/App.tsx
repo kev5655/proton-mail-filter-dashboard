@@ -18,6 +18,8 @@ import { ModelProvider } from './llm.js';
 import { MailboxProvider, useMailbox, useMailboxStatus, useReloadMailbox } from './mailbox.js';
 import { SyncPanel } from './components/SyncPanel.js';
 import { LoginPanel } from './components/LoginPanel.js';
+import { LockButton } from './components/LockButton.js';
+import { StatusStrip } from './components/StatusStrip.js';
 import { LoginProvider } from './login.js';
 import { SyncProvider } from './sync.js';
 import { AccountProvider, isLocked, useAccount } from './account.js';
@@ -244,9 +246,18 @@ function Shell(): React.JSX.Element {
 
                 <LoginPanel />
                 <SyncPanel />
+                <LockButton />
             </nav>
 
             <main className="main">
+                {/*
+                 * The corner, where a state can be read without being explained.
+                 *
+                 * Above the page's own content because it is about the whole dashboard rather than
+                 * about whatever screen happens to be open, and it must not move as pages change.
+                 */}
+                <StatusStrip />
+
                 <AppliedBanner />
 
                 {/*

@@ -110,15 +110,15 @@ export function ChangesPage(): React.JSX.Element {
 
                             <button
                                 type="button"
-                                className="button button-secondary"
+                                className="button button-danger-quiet"
                                 disabled={rule === undefined}
                                 onClick={() => {
                                     if (rule === undefined) {
                                         return;
                                     }
-                                    // Deleting always asks a second time, in the terminal. See
-                                    // `weigh` — removals are the one class that never gets waved
-                                    // through on the dialog alone.
+                                    // Deleting always asks a second time — for the app password,
+                                    // beside the diff. See `weigh`: removals are the one class
+                                    // that never gets waved through on the dialog alone.
                                     stage(
                                         {
                                             id: `delete-${item.id}`,

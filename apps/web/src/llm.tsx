@@ -29,6 +29,15 @@ export type ModelState = 'disabled' | 'checking' | 'available' | 'unavailable';
 interface ModelContext {
     provider: LlmProvider;
     state: ModelState;
+    /**
+     * When the last check finished.
+     *
+     * Shown, because without it pressing „Verbindung prüfen" twice looks like a button that does
+     * nothing: the check takes a few milliseconds and lands on the same answer, so neither the
+     * state nor the sentence changes. A time that moves is the difference between „nothing
+     * happened" and „it happened and the answer is the same".
+     */
+    checkedAt: number | undefined;
     settings: Settings;
     update: (next: Settings) => void;
     recheck: () => void;
@@ -39,6 +48,7 @@ const Context = createContext<ModelContext | undefined>(undefined);
 export function ModelProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
     const [settings, setSettings] = useState<Settings>(() => loadSettings());
     const [state, setState] = useState<ModelState>('checking');
+    const [checkedAt, setCheckedAt] = useState<number | undefined>(undefined);
     const [attempt, setAttempt] = useState(0);
 
     const provider = useMemo<LlmProvider>(() => {
@@ -71,24 +81,52 @@ export function ModelProvider({ children }: { children: React.ReactNode }): Reac
 
         let cancelled = false;
         setState('checking');
+        const startedAt = Date.now();
+
+        /*
+         * Long enough to be seen — but only when somebody asked.
+         *
+         * A refused connection comes back in single-digit milliseconds, so „wird geprüft" rendered
+         * and vanished inside one frame and pressing the button appeared to do nothing. The wait is
+         * not the check, it is the report of it.
+         *
+         * It applies to a *pressed* check only. The automatic one at start-up has nobody watching
+         * it, and half a second of „wird geprüft" on every screen that depends on the model would
+         * be a delay paid by everyone to answer a question nobody asked.
+         */
+        const minimumVisible = attempt > 0 ? 450 : 0;
+        const settle = (finish: () => void): void => {
+            const wait = Math.max(0, minimumVisible - (Date.now() - startedAt));
+            const report = (): void => {
+                if (!cancelled) {
+                    finish();
+                    setCheckedAt(Date.now());
+                }
+            };
+            if (wait === 0) {
+                report();
+                return;
+            }
+            setTimeout(report, wait);
+        };
 
         void provider
             .isAvailable()
             .then((available) => {
-                if (cancelled) {
-                    return;
-                }
-                setState(available ? 'available' : 'unavailable');
-                if (!available) {
-                    // The mode only. A base URL can name a host somebody would rather not paste
-                    // into a bug report, and this log is built to be handed over unedited.
-                    log('warn', 'llm.unavailable', { mode: settings.llm.mode });
-                }
+                settle(() => {
+                    setState(available ? 'available' : 'unavailable');
+                    if (!available) {
+                        // The mode only. A base URL can name a host somebody would rather not
+                        // paste into a bug report, and this log is built to be handed over
+                        // unedited.
+                        log('warn', 'llm.unavailable', { mode: settings.llm.mode });
+                    }
+                });
             })
             .catch(() => {
-                if (!cancelled) {
+                settle(() => {
                     setState('unavailable');
-                }
+                });
             });
 
         return () => {
@@ -106,8 +144,8 @@ export function ModelProvider({ children }: { children: React.ReactNode }): Reac
     }, []);
 
     const value = useMemo<ModelContext>(
-        () => ({ provider, state, settings, update, recheck }),
-        [provider, state, settings, update, recheck]
+        () => ({ provider, state, checkedAt, settings, update, recheck }),
+        [provider, state, checkedAt, settings, update, recheck]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;

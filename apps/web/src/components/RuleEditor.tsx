@@ -327,7 +327,11 @@ export function RuleEditor({
                         type="button"
                         className={draft.targetKind === 'folder' ? 'button' : 'button button-quiet'}
                         aria-pressed={draft.targetKind === 'folder'}
-                        onClick={() => onChange({ ...draft, targetKind: 'folder' })}
+                        // The name goes too. A folder and a label are different objects with
+                        // different lists, and a name typed for one is almost never the name
+                        // wanted for the other — carrying it over produced a rule pointing at a
+                        // label that did not exist, ready to create it.
+                        onClick={() => onChange({ ...draft, targetKind: 'folder', folder: '' })}
                     >
                         In einen Ordner verschieben
                     </button>
@@ -335,7 +339,7 @@ export function RuleEditor({
                         type="button"
                         className={draft.targetKind === 'label' ? 'button' : 'button button-quiet'}
                         aria-pressed={draft.targetKind === 'label'}
-                        onClick={() => onChange({ ...draft, targetKind: 'label' })}
+                        onClick={() => onChange({ ...draft, targetKind: 'label', folder: '' })}
                     >
                         Mit einem Label markieren
                     </button>

@@ -16,7 +16,17 @@ import { log } from './log.js';
  * change the account does not come this way at all.
  */
 
-export type SyncStatus = (SyncState | { state: 'idle' }) & { available: boolean };
+export type SyncStatus = (SyncState | { state: 'idle' }) & {
+    available: boolean;
+    /**
+     * When the server's timer fires next, in unix seconds.
+     *
+     * From the server, never computed here. „Letzter Sync plus das Intervall aus den Einstellungen"
+     * is the obvious guess and wrong twice over: the setting only reaches the server on the next
+     * manual sync, and the timer restarts on every run.
+     */
+    nextRunAt?: number | undefined;
+};
 
 interface SyncContext {
     status: SyncStatus;

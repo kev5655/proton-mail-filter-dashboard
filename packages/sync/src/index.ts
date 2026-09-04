@@ -21,7 +21,10 @@ export {
     type StoredMessage,
 } from './query.js';
 export {
+    clearJournal,
+    JOURNAL_LIMIT,
     markUndone,
+    pruneJournal,
     readJournal,
     readJournalEntry,
     readJournalSince,

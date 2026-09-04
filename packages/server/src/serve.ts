@@ -178,6 +178,7 @@ function streamState(
         | {
               available: boolean;
               signedIn?: boolean;
+              nextRunAt?: number | undefined;
               state: unknown;
               subscribe: (listener: (state: unknown) => void) => () => void;
           }
@@ -207,6 +208,9 @@ function streamState(
         ...(state as object),
         available: true,
         ...(channel.signedIn === undefined ? {} : { signedIn: channel.signedIn }),
+        // Read at send time rather than captured: the timer restarts on every run, so a value
+        // fixed when the stream opened would be wrong from the first sync onwards.
+        ...(channel.nextRunAt === undefined ? {} : { nextRunAt: channel.nextRunAt }),
     });
 
     send(shape(channel.state));

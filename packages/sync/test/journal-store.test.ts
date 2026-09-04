@@ -6,7 +6,16 @@ import type { JournalEntry } from '@pms/changes';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { markUndone, readJournal, readJournalEntry, readJournalSince, recordJournalEntry } from '../src/journal-store.js';
+import {
+    clearJournal,
+    JOURNAL_LIMIT,
+    markUndone,
+    pruneJournal,
+    readJournal,
+    readJournalEntry,
+    readJournalSince,
+    recordJournalEntry,
+} from '../src/journal-store.js';
 
 /**
  * The record of what was changed, and the reason it has to be on disk.
@@ -112,5 +121,53 @@ describe('the chain a rewind would follow', () => {
         recordJournalEntry(db, { ...entry({ id: 'j-4', at: 1_700_000_400 }), undoesId: 'j-3' });
 
         expect(readJournalSince(db, 'j-1').map((row) => row.id)).toEqual(['j-3', 'j-2', 'j-1']);
+    });
+});
+
+describe('how much the record keeps', () => {
+    function record(count: number): void {
+        for (let index = 0; index < count; index++) {
+            recordJournalEntry(db, entry({ id: `j-${String(index)}`, at: 1_700_000_000 + index }));
+        }
+    }
+
+    it('keeps the newest entries and drops the rest, without being asked', () => {
+        // The cap applies on write, not on read: a record that grew forever on disk and was merely
+        // displayed short would still be a growing pile of mail metadata.
+        record(JOURNAL_LIMIT + 5);
+
+        const kept = readJournal(db);
+
+        expect(kept.length).toBe(JOURNAL_LIMIT);
+        expect(kept[0]?.id).toBe(`j-${String(JOURNAL_LIMIT + 4)}`);
+        // The five oldest are gone from the table, not just from the page.
+        expect(readJournalEntry(db, 'j-0')).toBeUndefined();
+        expect(readJournalEntry(db, 'j-4')).toBeUndefined();
+        expect(readJournalEntry(db, 'j-5')).toBeDefined();
+    });
+
+    it('drops the oldest by time, not whichever row came back last', () => {
+        // Written newest first, so an implementation deleting by insertion order would throw away
+        // exactly the wrong ones.
+        recordJournalEntry(db, entry({ id: 'neu', at: 1_700_009_999 }));
+        recordJournalEntry(db, entry({ id: 'alt', at: 1_700_000_001 }));
+
+        pruneJournal(db, 1);
+
+        expect(readJournal(db).map((row) => row.id)).toEqual(['neu']);
+    });
+
+    it('leaves a short record alone', () => {
+        record(3);
+
+        expect(pruneJournal(db)).toBe(0);
+        expect(readJournal(db).length).toBe(3);
+    });
+
+    it('forgets everything when asked, and says how much it forgot', () => {
+        record(4);
+
+        expect(clearJournal(db)).toBe(4);
+        expect(readJournal(db)).toEqual([]);
     });
 });
