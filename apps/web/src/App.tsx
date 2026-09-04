@@ -153,8 +153,11 @@ function Shell(): React.JSX.Element {
         <div className="shell">
             <nav className="sidebar">
                 <div className="brand">
-                    <strong>Proton Mail Sorter</strong>
-                    <span>Regeln und Ordner verwalten</span>
+                    <img className="brand-mark" src="/logo.svg" alt="" width={28} height={28} />
+                    <div className="stack">
+                        <strong>Proton Mail Sorter</strong>
+                        <span>Regeln und Ordner verwalten</span>
+                    </div>
                 </div>
 
                 {nav_.map((entry) => (

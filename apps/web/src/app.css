@@ -24,8 +24,13 @@
 .brand {
     padding: 4px 10px 16px;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 10px;
+}
+
+.brand-mark {
+    flex: none;
+    border-radius: 7px;
 }
 
 .brand strong {
