@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 import { describePlan } from '@pms/changes';
 
 import { useStore } from '../store.js';
@@ -21,6 +23,29 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
     const { staged, discard, confirm } = useStore();
     const { source } = useMailboxStatus();
     const { phase, offer, reset } = useApply();
+
+    /*
+     * A finished change closes its own dialog.
+     *
+     * It used to sit there on a success message until somebody found the „Schliessen" button, which
+     * reads as a job that has not finished — and after a folder was created, the folder screen
+     * behind it was the thing worth looking at. What the change left behind is not lost: the
+     * backup path and any partial result move to the banner in the shell, which stays until it is
+     * dismissed.
+     */
+    const applied = phase.phase === 'applied';
+    useEffect(() => {
+        if (!applied) {
+            return undefined;
+        }
+        const timer = setTimeout(() => {
+            reset();
+            discard();
+        }, 900);
+        return () => {
+            clearTimeout(timer);
+        };
+    }, [applied, reset, discard]);
 
     if (staged === undefined) {
         return null;

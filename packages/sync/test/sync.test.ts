@@ -6,7 +6,7 @@ import type { MessageMetadata, ProtonFilter, ProtonLabel } from '@pms/proton-api
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { mirrorFilters, mirrorLabels, mirrorMessages } from '../src/mirror.js';
+import { markAdopted, mirrorFilters, mirrorLabels, mirrorMessages } from '../src/mirror.js';
 import { readFilters, readFolderTree, readMessages } from '../src/query.js';
 
 /**
@@ -190,5 +190,44 @@ describe('mirroring messages', () => {
 
         const count = db.prepare('SELECT COUNT(*) AS n FROM message_labels').get() as { n: number };
         expect(count.n).toBe(0);
+    });
+});
+
+/**
+ * Which rules the tool considers its own.
+ *
+ * A filter that turns up at Proton without this tool writing it is not automatically part of the set
+ * the dashboard manages — the „Änderungen" screen asks about it first. That whole screen was empty
+ * against a real account because nothing ever marked a filter unadopted, and a rule written in
+ * Proton's own interface simply joined the list as though it had always been there.
+ *
+ * The first mirror is the exception and adopts everything: a brand new copy has no history to
+ * compare against, and calling somebody's entire existing rule set "unexpected" would teach them to
+ * dismiss the screen on their first day.
+ */
+describe('rules that appeared without us', () => {
+    it('adopts everything on the first mirror, because there is nothing to be surprised by', () => {
+        mirrorFilters(db, [filter('f-1', 1, true), filter('f-2', 2, true)]);
+
+        expect(readFilters(db).map((entry) => entry.adopted)).toEqual([true, true]);
+    });
+
+    it('marks a filter that showed up afterwards as not yet adopted', () => {
+        mirrorFilters(db, [filter('f-1', 1, true)]);
+        mirrorFilters(db, [filter('f-1', 1, true), filter('f-2', 2, true)]);
+
+        const byId = new Map(readFilters(db).map((entry) => [entry.id, entry.adopted]));
+        expect(byId.get('f-1')).toBe(true);
+        expect(byId.get('f-2')).toBe(false);
+    });
+
+    it('keeps an adoption across the next mirror, so the question is asked once', () => {
+        mirrorFilters(db, [filter('f-1', 1, true)]);
+        mirrorFilters(db, [filter('f-1', 1, true), filter('f-2', 2, true)]);
+
+        expect(markAdopted(db, ['f-2'])).toBe(1);
+        mirrorFilters(db, [filter('f-1', 1, true), filter('f-2', 2, true)]);
+
+        expect(readFilters(db).every((entry) => entry.adopted)).toBe(true);
     });
 });

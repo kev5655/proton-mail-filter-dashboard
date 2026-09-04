@@ -183,7 +183,87 @@ second, so a year of mail takes minutes. Ask for more only when you need it.
 pnpm spike --describe-1password    # print the vault item's field names, never their values
 pnpm spike --scrub response.json   # pseudonymise a hand-captured response into a fixture
 pnpm spike --sperre-geklaert       # clear a login block after signing in at mail.proton.me
+pnpm serve --auto-sync 0           # serve without the five-minute background refresh
+pnpm serve --port 5175             # serve somewhere else
 ```
+
+## Tests
+
+```sh
+pnpm test        # 583 unit and component tests — no network, no account, seconds
+pnpm test:e2e    # 26 end-to-end tests in a real browser — about a minute
+```
+
+`pnpm test:e2e` needs Chromium, which `pnpm install:browser` puts in place. Without it the suite
+stops with a message from Playwright naming the missing browser; it is the same download the sign-in
+needs, so if you have signed in once you already have it.
+
+### What the two suites are for
+
+`pnpm test` is the one to run before every commit. It touches no network and opens no browser.
+
+`pnpm test:e2e` starts, per file, a real SQLCipher database, the real local server, the real Vite
+dev proxy and a headless Chromium, then drives the dashboard by clicking it. It exists for the three
+questions the fast suite cannot answer, each of which has already been wrong here:
+
+- **Does anything scroll sideways?** A stylesheet test checks a rule; only a viewport can measure a
+  page. The reported bug was a scrollbar *inside a dialog*, which a check on the document would have
+  missed entirely.
+- **Does the browser reach the server?** Every earlier check used `curl` against the port. Whether
+  the request survives the dev proxy — including the progress stream, which proxies love to buffer
+  into one lump at the end — is a different question.
+- **Do the mail-body defences hold?** `sandbox=""` and a Content-Security-Policy are enforced by a
+  browser and by nothing else. The suite asserts that opening a hostile mail body produces zero
+  outbound requests.
+
+They are kept apart from `pnpm test` because they are slower by two orders of magnitude and can fail
+for reasons outside the code — a missing browser, a loaded machine. Mixing that into the suite
+everyone runs before committing teaches people to ignore a red result.
+
+```sh
+pnpm test:e2e apps/web/e2e/layout.e2e.ts    # one file
+pnpm test:e2e -t "scrolls sideways"         # one test by name
+```
+
+To watch it work, set `PMS_E2E_HEADED=1` — the browser opens visibly and the clicking slows down:
+
+```sh
+PMS_E2E_HEADED=1 pnpm test:e2e apps/web/e2e/flow.e2e.ts
+```
+
+The suite never touches a real account. It seeds its own encrypted database in a temporary
+directory, and its Proton is a stand-in that records what it was asked to write — which is how the
+tests can assert that a refused change produced *no* requests.
+
+## Testing against the real account
+
+Two things need a real Proton account, and both are the account owner's to run.
+
+```sh
+pnpm schreibtest    # one deliberate round trip: create a folder, check it, delete it, check again
+```
+
+This is the smallest thing that exercises the write path end to end. It creates one empty folder
+named `PMS-Schreibtest <date>`, reads the folder list back to confirm Proton really has it, deletes
+it, and reads back again — because a write returning `200` means Proton accepted the request, not
+that anything changed. It asks before it starts, touches no mail, and takes the same backup every
+other write is preceded by. `--behalten` leaves the folder in place.
+
+The other is [TESTPLAN-PRODUKTIV.md](TESTPLAN-PRODUKTIV.md), which lists what only somebody with the
+account can check.
+
+### When something goes wrong
+
+Every run writes a JSON log to `data/logs/pms-<date>.log` — one file per day, more detailed than
+what the terminal shows, and git-ignored along with everything else under `data/`. It is the right
+thing to attach to a bug report:
+
+```sh
+tail -n 200 data/logs/pms-$(date +%F).log
+```
+
+Secrets are redacted by key name when the line is written, not afterwards, so a password or token
+cannot reach the file. `PMS_LOG_FILE=` (empty) turns the file off entirely.
 
 ## How this talks to Proton
 

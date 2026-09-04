@@ -51,3 +51,26 @@ export function loadEnvFile(): { path: string; found: boolean } {
     }
     return { path: envFile, found };
 }
+
+/** Where the JSON log lines go. Git-ignored, one file per day, never rotated away by us. */
+export const LOG_DIR = join(DATA_DIR, 'logs');
+
+/**
+ * The log file for today's runs.
+ *
+ * A file rather than only stderr, because the interesting failures happen while somebody is
+ * clicking in the dashboard and the terminal is showing a prompt: by the time a bug is described,
+ * the line that explains it has scrolled away or was never on screen at all. One file per day keeps
+ * a run findable without a rotation scheme nobody would maintain.
+ *
+ * `PMS_LOG_FILE` overrides it, and an empty value turns the file off — for anyone who would rather
+ * not have their mailbox's shape sitting on disk in yet another place.
+ */
+export function logFilePath(now = new Date()): string | undefined {
+    const override = process.env['PMS_LOG_FILE'];
+    if (override !== undefined) {
+        return override === '' ? undefined : override;
+    }
+    const day = now.toISOString().slice(0, 10);
+    return join(LOG_DIR, `pms-${day}.log`);
+}

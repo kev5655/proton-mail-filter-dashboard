@@ -8,9 +8,11 @@ import {
     createFilter,
     createFolder,
     deleteFilter,
+    deleteFolder,
     reorderFilters,
     setFilterEnabled,
     updateFilter,
+    updateFolder,
     type BackupResult,
 } from '@pms/proton-api/write';
 import { toSieveTree } from '@proton/sieve/toSieveTree';
@@ -62,7 +64,8 @@ export async function backup(http: ProtonHttp, directory: string, now: number): 
 export async function ensureFolder(
     http: ProtonHttp,
     account: Account,
-    name: string
+    name: string,
+    parentId?: string | undefined
 ): Promise<{ created: boolean; id: string }> {
     const existing = account.folders.find((folder) => folder.Name === name);
     if (existing !== undefined) {
@@ -72,8 +75,12 @@ export async function ensureFolder(
     try {
         // Proton requires a colour and offers no "unset". Its own palette starts here, and a
         // folder created by this tool should look like one created by hand.
-        const folder = await createFolder(http, { Name: name, Color: '#8080FF' });
-        log.info({ name }, 'folder created');
+        const folder = await createFolder(http, {
+            Name: name,
+            Color: '#8080FF',
+            ...(parentId === undefined || parentId === '' ? {} : { ParentID: parentId }),
+        });
+        log.info({ name, id: folder.ID }, 'folder created');
         return { created: true, id: folder.ID };
     } catch (cause) {
         throw new AppError('WRITE_FOLDER_FAILED', {
@@ -83,6 +90,75 @@ export async function ensureFolder(
             cause,
         });
     }
+}
+
+/**
+ * Rename a folder at Proton.
+ *
+ * Only the folder. Every rule that files into it names it by *name*, so a rename that stops here
+ * leaves those rules filing into a folder that no longer exists — silently, because Proton does not
+ * check. Rewriting them is `apply.ts`'s job and is part of the same change; this function is one
+ * request and nothing more.
+ */
+export async function renameFolder(
+    http: ProtonHttp,
+    account: Account,
+    from: string,
+    to: string
+): Promise<{ id: string }> {
+    const existing = folderNamed(account, from);
+    try {
+        await updateFolder(http, existing.ID, {
+            Name: to,
+            Color: existing.Color ?? '#8080FF',
+            ...(existing.ParentID === undefined || existing.ParentID === null || existing.ParentID === ''
+                ? {}
+                : { ParentID: existing.ParentID }),
+        });
+        log.info({ id: existing.ID }, 'folder renamed');
+        return { id: existing.ID };
+    } catch (cause) {
+        throw new AppError('WRITE_FOLDER_FAILED', {
+            message: `Der Ordner „${from}" liess sich nicht in „${to}" umbenennen.`,
+            context: { from, to },
+            cause,
+        });
+    }
+}
+
+/**
+ * Delete a folder at Proton.
+ *
+ * Proton keeps the mail — it loses this folder's label and stays reachable under "Alle Nachrichten"
+ * — but it is no longer anywhere the user filed it, and no rule that named this folder will work
+ * again. Which is why a deletion always asks in the terminal, whatever its size.
+ */
+export async function removeFolder(http: ProtonHttp, account: Account, name: string): Promise<{ id: string }> {
+    const existing = folderNamed(account, name);
+    try {
+        await deleteFolder(http, existing.ID);
+        log.info({ id: existing.ID }, 'folder deleted');
+        return { id: existing.ID };
+    } catch (cause) {
+        throw new AppError('WRITE_FOLDER_FAILED', {
+            message: `Der Ordner „${name}" liess sich nicht löschen.`,
+            context: { name },
+            cause,
+        });
+    }
+}
+
+/** The folder by name, or a refusal that says the copy is behind rather than that Proton failed. */
+function folderNamed(account: Account, name: string): ProtonLabel {
+    const existing = account.folders.find((folder) => folder.Name === name);
+    if (existing === undefined) {
+        throw new AppError('APPLY_STATE_STALE', {
+            message: `Den Ordner „${name}" gibt es bei Proton nicht.`,
+            hint: 'Es wurde nichts geschrieben. Einmal synchronisieren und noch einmal ansehen.',
+            context: { name },
+        });
+    }
+    return existing;
 }
 
 /** Proton stores both forms; we send both so their own interface can still edit the rule. */

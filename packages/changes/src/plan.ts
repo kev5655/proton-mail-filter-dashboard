@@ -21,7 +21,16 @@ export type ChangeKind =
     | 'disable-rule'
     | 'create-folder'
     | 'rename-folder'
-    | 'delete-folder';
+    | 'delete-folder'
+    /**
+     * Taking responsibility for a rule that appeared at Proton on its own.
+     *
+     * The only kind that writes nothing to the account. It travels the same route as every other
+     * change — offered, planned, recorded — because the decision it records is a real one: from
+     * here on the tool treats that rule as part of the set it manages, and the diff shows what the
+     * rule already does before anyone agrees to that.
+     */
+    | 'adopt-rule';
 
 export interface PendingChange {
     id: string;
@@ -92,6 +101,10 @@ export function applyChangeToRules(rules: OrderedRule[], change: PendingChange):
             return rules.map((rule) =>
                 rule.id === change.before?.id ? { ...rule, enabled: change.kind === 'enable-rule' } : rule
             );
+
+        // Adopting changes who is responsible for a rule, not what it does.
+        case 'adopt-rule':
+            return rules;
 
         // Folder changes do not alter which rule matches what, only where the mail is put. A rename
         // is the exception, and it is handled by rewriting the rules that point at the old name.

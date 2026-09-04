@@ -89,6 +89,13 @@ function fakeProton(over: { failFilterWrite?: boolean; movedIds?: string[] } = {
                 })),
             });
         }
+        if (path.startsWith('core/v4/labels/') && method === 'PUT') {
+            const id = path.slice('core/v4/labels/'.length);
+            return json({ Code: 1000, Label: { ...ACCOUNT_FOLDERS[0], ID: id, Name: 'Ablage' } });
+        }
+        if (path.startsWith('mail/v4/filters/') && method === 'PUT') {
+            return json({ Code: 1000, Filter: { ...ACCOUNT_FILTERS[0] } });
+        }
         if (path === 'core/v4/labels' && method === 'POST') {
             return json({ Code: 1000, Label: { ID: 'l-neu', Name: 'Neu', Path: 'Neu', Type: 3, Color: '#fff' } });
         }
@@ -391,5 +398,154 @@ describe('the digest', () => {
 
     it('is short enough for a person to compare', () => {
         expect(shortDigest(digestOf(request()))).toMatch(/^[0-9A-F]{3}-[0-9A-F]{3}$/);
+    });
+});
+
+/**
+ * The folder changes, which for a long time were not changes at all.
+ *
+ * `create-folder` reached a `switch` whose only job was to say "not supported yet" — and reached the
+ * one branch that said nothing, because the folder kinds were excluded from the refusal. So the
+ * request answered `applied`, the dashboard said "bei Proton gespeichert", and the account was
+ * untouched. That is the worst of the three possible outcomes: a failure nobody is told about.
+ *
+ * These count requests rather than reading messages, for the same reason as everything above: the
+ * claim is about what reached Proton.
+ */
+describe('changing a folder actually changes a folder', () => {
+    function folderRequest(over: Partial<PendingChange>): ChangeRequest {
+        const folderChange: PendingChange = {
+            id: 'c-f',
+            kind: 'create-folder',
+            summary: 'Ordner anlegen',
+            folder: { name: 'Neu' },
+            ...over,
+        };
+        return request({
+            change: folderChange,
+            plan: { ...plan(), change: folderChange, moves: [], clearedFromInbox: 0 },
+            affectedMessageIds: [],
+        });
+    }
+
+    it('creates one, rather than reporting a success nobody made', async () => {
+        const proton = fakeProton();
+
+        const outcome = await applyChange(folderRequest({}), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+        });
+
+        expect(outcome.partial).toBeUndefined();
+        expect(proton.writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+            'POST core/v4/labels',
+        ]);
+    });
+
+    it('deletes one, and asks in the terminal first because it removes something', async () => {
+        const proton = fakeProton();
+        const asked: string[] = [];
+
+        await applyChange(
+            folderRequest({ kind: 'delete-folder', summary: 'Ordner löschen', folder: { name: 'Archiv' } }),
+            {
+                http: proton.http,
+                backupDir,
+                confirm: async (offer) => {
+                    asked.push(offer.reason);
+                    return 'granted';
+                },
+            }
+        );
+
+        expect(asked).toEqual(['Diese Änderung löscht etwas.']);
+        expect(proton.writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+            'DELETE core/v4/labels/l-1',
+        ]);
+    });
+
+    it('writes nothing when a deletion is refused at the terminal', async () => {
+        const proton = fakeProton();
+
+        await expect(
+            applyChange(
+                folderRequest({ kind: 'delete-folder', summary: 'Ordner löschen', folder: { name: 'Archiv' } }),
+                { http: proton.http, backupDir, confirm: always('declined') }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_NOT_CONFIRMED' });
+
+        expect(proton.writes()).toEqual([]);
+    });
+
+    it('refuses to delete a folder the account does not have, before asking anybody', async () => {
+        const proton = fakeProton();
+        let asked = 0;
+
+        await expect(
+            applyChange(
+                folderRequest({ kind: 'delete-folder', summary: 'Ordner löschen', folder: { name: 'Weg' } }),
+                {
+                    http: proton.http,
+                    backupDir,
+                    confirm: async () => {
+                        asked++;
+                        return 'granted';
+                    },
+                }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_STATE_STALE' });
+
+        expect(asked).toBe(0);
+        expect(proton.writes()).toEqual([]);
+    });
+
+    it('repoints the rules that filed into a folder it renames', async () => {
+        // Proton stores the destination by name. A rename that stops at the folder leaves every
+        // rule filing into a name that no longer resolves — the rule runs, the mail leaves the
+        // inbox, and it arrives nowhere.
+        const proton = fakeProton();
+
+        await applyChange(
+            folderRequest({
+                kind: 'rename-folder',
+                summary: 'Ordner umbenennen',
+                folder: { name: 'Archiv', newName: 'Ablage' },
+            }),
+            { http: proton.http, backupDir, confirm: always('granted') }
+        );
+
+        const written = proton.writes().map((call) => `${call.method} ${call.path}`);
+        expect(written[0]).toBe('PUT core/v4/labels/l-1');
+        // `f-1` files into 'Archiv' only if the fake account says so; when it does not, no rule is
+        // rewritten and the rename is the single request. Either way the folder came first.
+        expect(written.slice(1).every((entry) => entry.startsWith('PUT mail/v4/filters/'))).toBe(true);
+    });
+});
+
+describe('adopting a rule found at Proton', () => {
+    it('records the decision and writes nothing at all', async () => {
+        // The one change kind that touches no account state. It still travels the whole route — the
+        // diff is shown first — because taking responsibility for a rule without seeing what it
+        // catches is not a decision.
+        const proton = fakeProton();
+        const adoption: PendingChange = {
+            id: 'c-a',
+            kind: 'adopt-rule',
+            summary: 'Regel „Bestehend" übernehmen',
+            before: { id: 'f-1', name: 'Bestehend', priority: 1, enabled: true, rule: rule() },
+        };
+
+        const outcome = await applyChange(
+            request({
+                change: adoption,
+                plan: { ...plan(), change: adoption, moves: [], clearedFromInbox: 0 },
+                affectedMessageIds: [],
+            }),
+            { http: proton.http, backupDir, confirm: always('granted') }
+        );
+
+        expect(proton.writes()).toEqual([]);
+        expect(outcome.adoptedFilterIds).toEqual(['f-1']);
     });
 });

@@ -11,6 +11,9 @@ import {
 } from '@pms/changes';
 import type { MailboxFolder, MailboxRule } from '@pms/server/types';
 
+import { matchesRule } from '@pms/rules';
+
+import { COMPARATOR_NAMES, FIELD_NAMES } from './rules/labels.js';
 import { useMailbox, useMailboxStatus } from './mailbox.js';
 
 /**
@@ -94,7 +97,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     const [rules, setRules] = useState<MailboxRule[]>(initialRules);
     const [folders, setFolders] = useState<MailboxFolder[]>(initialFolders);
     const [staged, setStaged] = useState<ChangePlan | undefined>(undefined);
-    const [drift, setDrift] = useState<DriftItem[]>(source === 'demo' ? INITIAL_DRIFT : []);
+    /*
+     * Drift, from the copy rather than from a fixture.
+     *
+     * A rule the sync found at Proton that this tool never wrote arrives unadopted, and that is what
+     * lands here. It used to be two invented items shown only in the demo, because there was nothing
+     * real to show — and against a real account the screen was simply empty while a rule written in
+     * Proton's own interface quietly joined the list on „Regeln", which is the opposite of what this
+     * screen is for.
+     */
+    const [resolutions, setResolutions] = useState<Record<string, 'adopt' | 'reject'>>({});
+    const drift = useMemo<DriftItem[]>(() => {
+        if (source === 'demo') {
+            return INITIAL_DRIFT.map((item) => withResolution(item, resolutions));
+        }
+        return initialRules
+            .filter((rule) => rule.adopted === false)
+            .map((rule) =>
+                withResolution(
+                    {
+                        id: rule.id,
+                        kind: 'rule',
+                        name: rule.name,
+                        detail: describeRule(rule),
+                        affected: messages.filter((message) => matchesRule(rule.rule, message)).length,
+                    },
+                    resolutions
+                )
+            );
+    }, [source, initialRules, messages, resolutions]);
     const [journal] = useState(() => new Journal());
     const [version, setVersion] = useState(0);
 
@@ -159,9 +190,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     );
 
     const resolveDrift = useCallback((id: string, decision: 'adopt' | 'reject') => {
-        setDrift((current) =>
-            current.map((item) => (item.id === id ? { ...item, resolved: decision } : item))
-        );
+        setResolutions((current) => ({ ...current, [id]: decision }));
     }, []);
 
     const value = useMemo<StoreState>(
@@ -221,4 +250,34 @@ export function useStore(): StoreState {
         throw new Error('useStore outside StoreProvider');
     }
     return value;
+}
+
+/** Carry a user's decision onto a freshly derived item, since the list is recomputed, not stored. */
+function withResolution(item: DriftItem, resolutions: Record<string, 'adopt' | 'reject'>): DriftItem {
+    const resolved = resolutions[item.id];
+    return resolved === undefined ? item : { ...item, resolved };
+}
+
+/**
+ * One line saying what a rule does.
+ *
+ * Written from the same label maps the editor uses, so the sentence on this screen and the fields in
+ * the editor cannot describe the same rule differently.
+ */
+function describeRule(rule: MailboxRule): string {
+    const joiner = rule.rule.Operator.value === 'any' ? ' oder ' : ' und ';
+    const conditions = rule.rule.Conditions.map((condition) => {
+        const field = FIELD_NAMES[condition.Type.value] ?? condition.Type.value;
+        const comparator = COMPARATOR_NAMES[condition.Comparator.value] ?? condition.Comparator.value;
+        return condition.Values.length === 0
+            ? `${field} ${comparator}`
+            : `${field} ${comparator} „${condition.Values.join('" oder „')}"`;
+    });
+
+    const target = rule.rule.Actions.FileInto.at(-1);
+    const destination = target === undefined || target === '' ? 'bleibt im Posteingang' : `→ nach „${target}"`;
+
+    return conditions.length === 0
+        ? `Ohne Bedingung, ${destination}`
+        : `${conditions.join(joiner)} ${destination}`;
 }

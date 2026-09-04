@@ -51,8 +51,17 @@ export interface LoggerConfig {
     level?: LogLevel;
     /** Per-module overrides, e.g. `{ 'proton-api': 'debug' }`. */
     moduleLevels?: Partial<Record<string, LogLevel>>;
-    /** Write JSON lines here in addition to stdout. */
+    /** Write JSON lines here in addition to stderr. */
     file?: string;
+    /**
+     * The file's own level, usually more detailed than the terminal's.
+     *
+     * The two streams are read by different people at different times. The terminal is read live,
+     * next to a prompt, and a debug line there splits a sentence someone is in the middle of. The
+     * file is read afterwards, to find out what happened, and the line that explains it is nearly
+     * always one the terminal was right to leave out.
+     */
+    fileLevel?: LogLevel;
 }
 
 let rootConfig: LoggerConfig = {};
@@ -86,15 +95,32 @@ function build(config: LoggerConfig): Logger {
     };
 
     if (config.file !== undefined) {
+        const terminalLevel = config.level ?? 'info';
+        const fileLevel = config.fileLevel ?? terminalLevel;
+        // The logger itself has to pass the more detailed of the two, or the stream never sees the
+        // line it was configured to keep.
         return pino(
-            options,
-            pino.multistream([
-                { stream: process.stderr },
-                { stream: pino.destination({ dest: config.file, mkdir: true, sync: false }) },
-            ])
+            { ...options, level: lower(terminalLevel, fileLevel) },
+            pino.multistream(
+                [
+                    { level: terminalLevel, stream: process.stderr },
+                    {
+                        level: fileLevel,
+                        // Synchronous: these commands are short and end on an error path often
+                        // enough that a buffered last line would be exactly the one that mattered.
+                        stream: pino.destination({ dest: config.file, mkdir: true, sync: true }),
+                    },
+                ],
+                { dedupe: false }
+            )
         );
     }
     return pino(options, process.stderr);
+}
+
+/** The more verbose of two levels — `trace` is lower than `fatal`. */
+function lower(a: LogLevel, b: LogLevel): LogLevel {
+    return LOG_LEVELS.indexOf(a) <= LOG_LEVELS.indexOf(b) ? a : b;
 }
 
 export function configureLogging(config: LoggerConfig): void {

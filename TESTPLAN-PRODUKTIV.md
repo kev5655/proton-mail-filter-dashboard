@@ -8,8 +8,8 @@ Der alte `TESTPLAN.md` ist weg. T-04 und T-05 sind erledigt oder abgeräumt, **T
 (dein Lauf zeigte `cookieMode:true`, `session refreshed` und danach „Gespeicherte Sitzung
 wiederverwendet" — der blind gemachte Fix stimmt), T-12 bleibt zurückgestellt.
 
-**Was ich seit dem letzten Mal selbst geprüft habe** und deshalb nicht hier steht: 569 Tests plus
-24 E2E-Tests im echten Browser (`pnpm test:e2e`),
+**Was ich seit dem letzten Mal selbst geprüft habe** und deshalb nicht hier steht: 583 Tests plus
+26 E2E-Tests im echten Browser (`pnpm test:e2e`),
 nichts übersprungen; der Protokoll-Absturz (mit einem Test, der ihn wieder findet, wenn er
 zurückkommt); das seitliche Scrollen; Blättern und Suchen in allen Listen; die Live-Vorschau des
 Regeleditors gegen den geprüften Matcher über elf Regelformen; der Round-Trip „Regel öffnen und
@@ -27,7 +27,8 @@ Status pro Test: `offen` · `ok` · `Fehler` · `behoben`
 ## Loslegen
 
 ```sh
-pnpm install     # neue Pakete: @pms/apply
+pnpm install
+pnpm schreibtest # neu: prüft den Schreibweg allein, ohne Dashboard — siehe P-01
 pnpm sync        # einmal nötig: die Kopie bekommt dadurch den Konto-Fingerabdruck
 ```
 
@@ -50,63 +51,92 @@ nötig, damit Sync und Schreiben aus dem Dashboard überhaupt gehen.
 
 Das Wichtigste. Bitte in dieser Reihenfolge.
 
-## P-01 · Eine Regel anlegen — und was dabei gefragt wird
+## P-01 · Der Schreibweg — jetzt zuerst ohne Dashboard
 
-**Behoben. Zwei Fehler, beide von mir, und der zweite war eine Fehlentscheidung.**
+**Dein Befund war richtig und mein letzter Fix hat die Hälfte des Problems nicht berührt.**
+Drei Fehler, alle drei gefunden.
 
-**1 — `APPLY_STATE_STALE` bei jeder Regel.** Der Schreibweg vergleicht einen Fingerabdruck des
-Kontos gegen den, auf dem der Diff beruht. Deine lokale Kopie stammt aus einem Sync von *vor* dieser
-Prüfung und trägt gar keinen — verglichen wurde also ein leerer String gegen einen echten, und das
-schlug immer fehl. Eine Wache, die alles abweist, ist keine Wache.
+**1 — Ordner anlegen schrieb nichts und meldete Erfolg.** Der schlimmste der drei. Im Schreibweg
+entschied ein `switch` nach Änderungsart; er kannte nur Regeln. Ordner-Änderungen fielen durch —
+und `create-folder` fiel durch die *Ausnahme* von der Fehlermeldung, also kam der Auftrag als
+„erledigt" zurück, ohne dass je eine Anfrage gestellt wurde. Das Dashboard sagte „bei Proton
+gespeichert", Proton wusste von nichts.
 
-Jetzt wird der Fall benannt statt Proton die Schuld zu geben: *„Die lokale Kopie weiss nicht, wie
-das Konto aussah, als sie gemacht wurde — einmal synchronisieren."* Ein Sync genügt.
+**2 — `delete-folder` gab es gar nicht.** Das war der `APPLY_PARTIAL`, den du gesehen hast. Die
+Rückfrage im Terminal kam, dein `ja` kam an — und dahinter stand kein Code. Immerhin die ehrliche
+Variante des Fehlers: er hat gesagt, dass er nichts kann.
 
-**2 — Du hattest recht mit der Rückfrage.** Ich hatte für *jede* Änderung ein getipptes `ja`
-verlangt. Das ist genau der Fehler, den CLAUDE.md über den Diff-Dialog beschreibt: eine Rückfrage,
-die jedes Mal kommt, wird zur Reflexbewegung, und eine Bestätigung, die niemand liest, schützt
-nichts.
+**3 — Nach der ersten Änderung war jede weitere „veraltet".** Der Fingerabdruck, gegen den geprüft
+wird, steht in der lokalen Kopie und wird beim Sync gesetzt. Ein Schreibvorgang ändert das Konto —
+also stimmte er danach nicht mehr, und die *zweite* Änderung einer Sitzung wurde immer abgewiesen.
+Das ist mit hoher Wahrscheinlichkeit das „ich kann immer noch keine Regeln anlegen": ein Versuch
+vorher hatte den Abgleich schon verstellt. `pnpm serve` gleicht die Kopie jetzt sofort nach jedem
+Schreibvorgang wieder ab — drei GETs, kein neuer Sync.
 
-Bestätigt wird weiterhin **einmal** — im Diff-Dialog, der die Folgen zeigt. Das Terminal fragt nur
-noch, wenn es teuer wäre, sich zu irren:
+Angelegt, umbenannt und gelöscht wird jetzt wirklich, und **Umbenennen zieht die Regeln mit**:
+Proton speichert das Ziel als *Namen*, ein umbenannter Ordner liesse sonst jede Regel ins Leere
+sortieren, ohne Warnung.
 
-- die Änderung **löscht** etwas (Regel oder Ordner), oder
-- sie sortiert **mindestens 20 %** der erfassten Mails um, oder
-- sie betrifft **500 Mails oder mehr**.
+### Zuerst: der Schreibtest ohne Dashboard
 
-Die Schwellen stehen als `IMPACT_SHARE` und `IMPACT_COUNT` in `packages/apply/src/apply.ts`. Wenn
-sich das falsch anfühlt, sind es zwei Zahlen.
-
-**Und der E2E-Test, den du wolltest.** `pnpm test:e2e` fährt jetzt einen echten Browser gegen einen
-echten Server. `apps/web/e2e/flow.e2e.ts` enthält genau deinen Fall: Regel anlegen, klicken,
-gespeichert — ohne Terminal. Dazu einer, der prüft, dass `APPLY_STATE_STALE` bei frischer Kopie
-gar nicht mehr auftaucht, und zwei für die grossen Änderungen, die weiterhin fragen.
-
-**Bitte erneut prüfen:**
+Genau das, worum du gebeten hast — ein Befehl, der einen Ordner anlegt, nachsieht, wieder löscht
+und wieder nachsieht:
 
 ```sh
-pnpm sync        # einmal, damit die Kopie den Fingerabdruck bekommt
-pnpm serve
+pnpm schreibtest
 ```
 
-1. Eine kleine Regel anlegen → muss ohne Terminal-Rückfrage durchgehen.
-2. Eine Regel löschen → **muss** im Terminal nachfragen. Weggehen: nichts darf passieren.
-3. Das `curl` von unten → muss weiterhin `202` liefern und ohne Antwort nichts tun.
+Er fragt einmal, bevor er anfängt. Dann:
+
+1. legt er `PMS-Schreibtest <Datum>` an — leer,
+2. **liest die Ordnerliste zurück** und prüft, ob Proton ihn wirklich hat,
+3. löscht ihn wieder,
+4. liest noch einmal zurück und prüft, ob er weg ist.
+
+Schritt 2 und 4 sind der Punkt: eine `200` heisst, dass Proton die Anfrage angenommen hat, nicht
+dass sich etwas geändert hat. Keine Mail wird angefasst; der Ordner ist leer, solange er existiert.
+`pnpm schreibtest --behalten` lässt ihn stehen.
+
+Er benutzt dieselben vier Funktionen wie das Dashboard, nicht eigene. **Wenn er durchläuft und das
+Dashboard trotzdem nichts speichern kann, liegt der Fehler oberhalb des Schreibwegs** — und das ist
+schon die halbe Diagnose.
+
+### Und Logs, wie du sie wolltest
+
+Jeder Lauf schreibt nach `data/logs/pms-<Datum>.log`. Ausführlicher als das Terminal (`debug` statt
+`info`), eine Datei pro Tag, git-ignoriert. Geheimnisse werden beim Schreiben der Zeile nach
+Feldnamen geschwärzt, nicht hinterher.
 
 ```sh
-curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"requestId":"x","createdAt":1,"change":{"id":"c","kind":"delete-rule","summary":"Test"},"plan":{"moves":[],"clearedFromInbox":0,"returnedToInbox":0,"takenFrom":[]},"affectedMessageIds":[],"applyToExisting":false,"baseVersion":"egal"}' \
-  http://127.0.0.1:5174/api/apply
+tail -n 200 data/logs/pms-$(date +%F).log
 ```
 
-(`delete-rule`, damit es die Rückfrage auslöst. `baseVersion: "egal"` wird jetzt korrekt als
-veraltet abgewiesen — auch das ist ein gültiges Ergebnis.)
+Wenn wieder etwas schiefgeht: die letzten Zeilen davon sind das Nützlichste, was du mir schicken
+kannst. `PMS_LOG_FILE=` (leer) schaltet die Datei ab.
+
+### Bitte in dieser Reihenfolge prüfen
+
+```sh
+pnpm install
+pnpm schreibtest       # 1. der Schreibweg allein
+pnpm sync              # 2. Kopie auffrischen
+pnpm serve             # 3. Terminal 1
+pnpm dev               # 4. Terminal 2 — neu starten, es gibt neue Pakete
+```
+
+1. `pnpm schreibtest` → vier Häkchen, Ordner am Ende weg.
+2. Ordner anlegen im Dashboard → in Proton nachsehen. **Der Dialog muss sich von selbst schliessen.**
+3. Danach *sofort* eine Regel anlegen, ohne neu zu synchronisieren → muss auch durchgehen. Das ist
+   der Fehler Nr. 3 von oben.
+4. Ordner löschen → fragt im Terminal. Einmal ablehnen (nichts darf passieren), einmal `ja`.
+5. Ordner umbenennen, auf den eine Regel zeigt → danach in Proton prüfen, ob die Regel den *neuen*
+   Namen nennt.
 
 Status: `behoben, bitte nachprüfen`
 
 **Befund:**
 
-**Fix:** siehe oben.
+**Fix:**
 
 ---
 
@@ -308,6 +338,109 @@ Status: `offen`
 
 ---
 
+## Deine weiteren Befunde vom letzten Durchgang
+
+**Sync holt nur noch das Neue, und holt es von selbst.** „Jetzt synchronisieren" fragt jetzt nur
+nach dem, was seit dem letzten Lauf dazugekommen ist — mit einer Stunde Überlappung, weil Proton
+nach dem Zeitstempel der Mail sortiert und eine, die *während* des letzten Laufs ankam, sonst für
+immer durchs Raster fiele. Ordner und Filter werden weiterhin jedes Mal vollständig gelesen; das
+sind drei Anfragen, und alles andere wird gegen sie geprüft. Nachrichten werden ergänzt, nie
+ersetzt, also wird die Kopie dadurch nie kleiner.
+
+Damit lohnt sich auch der Timer: `pnpm serve` gleicht **alle 5 Minuten** nach. `pnpm serve
+--auto-sync 0` schaltet das ab, `--auto-sync 15` streckt es.
+
+Status: `neu, bitte prüfen` — die Zahl unter „Mails" sollte nach einem zweiten Sync gleich bleiben
+oder wachsen, nie fallen.
+
+---
+
+**Neue Regeln aus Proton müssen jetzt bestätigt werden.** Du hattest recht: sie wurden stillschweigend
+in „Regeln" aufgenommen, und „Änderungen" war deshalb dauerhaft leer.
+
+Der Mechanismus lag halbfertig in der Datenbank — eine Spalte `adopted`, die niemand je gesetzt hat.
+Jetzt gilt: **der erste Sync übernimmt alles** (eine frische Kopie hat nichts, womit sie vergleichen
+könnte — dein gesamter Regelbestand als „unerwartet" zu melden wäre der schnellste Weg, dir
+beizubringen, den Bildschirm wegzuklicken). Jede Regel, die **danach** bei Proton auftaucht, ohne
+dass dieses Werkzeug sie geschrieben hat, landet unter „Änderungen" und zählt bis zu deiner
+Entscheidung nicht zum verwalteten Bestand.
+
+Drei Antworten, alle über den normalen Weg mit Diff:
+
+- **Übernehmen** — schreibt nichts ans Konto, notiert nur, dass die Regel ab jetzt dazugehört. Der
+  Diff kommt trotzdem zuerst: eine Regel zu übernehmen, ohne zu sehen, was sie fängt, ist keine
+  Entscheidung.
+- **Deaktivieren** — sie bleibt bei Proton stehen, läuft aber nicht mehr.
+- **Löschen** — fragt zusätzlich im Terminal, wie jedes Löschen.
+
+Prüfen: in Proton eine Regel anlegen → `pnpm sync` → sie muss unter „Änderungen" stehen, **nicht**
+unter „Regeln".
+
+Status: `neu, bitte prüfen`
+
+---
+
+**Knöpfe sehen jetzt wie Knöpfe aus.** `button-quiet` war durchsichtig und randlos — „Umbenennen"
+und „Löschen" lasen sich als Text neben einem Ordnernamen, und man musste darüberfahren, um zu
+merken, dass sie etwas tun. Sie haben jetzt eine eigene Fläche und einen echten Rand. Leise heisst
+weniger Betonung als die Hauptaktion, nicht unsichtbar.
+
+Status: `neu, bitte prüfen`
+
+---
+
+**Der Dialog schliesst sich, wenn die Änderung angekommen ist.** Er blieb auf einer Erfolgsmeldung
+stehen, bis jemand „Schliessen" fand — das liest sich wie eine Arbeit, die nicht fertig ist. Was ihn
+überlebt, steht jetzt oben auf dem Bildschirm: was gespeichert wurde, wo die Sicherung liegt, und ob
+das Ergebnis nur teilweise war. Das bleibt, bis du es wegklickst.
+
+Status: `neu, bitte prüfen`
+
+---
+
+**Einen neuen Ordner in der Regel anlegen — geht schon.** Das Feld „Verschieben nach" nimmt jeden
+Namen an; ist er neu, legt der Schreibweg den Ordner an, **bevor** er den Filter schreibt. Diese
+Reihenfolge ist Absicht: ein Filter, der in einen nicht existierenden Ordner sortiert, ist der
+schlimmste Zustand auf der Liste. Der Editor sagt es vorher („Den Ordner gibt es noch nicht. Er wird
+zusammen mit der Regel angelegt."), und im Diff steht es auch.
+
+Wenn dir dabei etwas fehlt, sag mir was — ein Knopf „Ordner anlegen" daneben wäre derselbe Vorgang
+mit einem Klick mehr.
+
+Status: `bitte einmal prüfen, ob es sich so anfühlt`
+
+---
+
+## Nicht gebaut: die Kopie im Posteingang — eine Frage an dich
+
+> *„eine regel die das mail in den ordner verschiebt aber das mail bleibt auch in meiner inbox"*
+
+Das habe ich **nicht** gebaut, und ich sage lieber warum, als etwas zu raten und in den einen Pfad
+zu schreiben, der dein Konto verändert.
+
+Protons Filter kennen nur eine Aktion für „wohin": `fileinto "Name"`. Ob der Name ein **Ordner** oder
+ein **Label** ist, entscheidet Proton beim Auflösen — und nach allem, was die Oberfläche nahelegt,
+ist genau das der Unterschied, den du suchst: ein Ordner *verschiebt*, ein Label *markiert* und die
+Mail bleibt im Posteingang. Ein Duplikat im eigentlichen Sinn gibt es nicht; es gibt eine Mail mit
+zwei Etiketten.
+
+Nur: das ist eine Vermutung über Protons Semantik, und ich habe keine Möglichkeit, sie ohne dein
+Konto zu prüfen. Eine Minute deiner Zeit klärt es:
+
+1. In **Protons eigener Oberfläche** einen Filter anlegen, der ein **Label** vergibt (nicht in einen
+   Ordner verschiebt).
+2. Dir eine Testmail schicken, die er fängt.
+3. Nachsehen: liegt sie **im Posteingang und** unter dem Label? Oder ist sie aus dem Posteingang
+   verschwunden?
+
+**Befund:**
+
+Sobald das feststeht, baue ich es als Schalter in der Regel — „verschieben" gegen „im Posteingang
+lassen und markieren" — mit der richtigen Vorschau. Der Matcher müsste dafür mitlernen, dass ein
+Label kein Ziel ist, sonst behauptet die Vorschau das Falsche.
+
+---
+
 ## Was noch nicht da ist
 
 - **Mailinhalte.** Der Weg dafür ist Proton Mail Bridge. Sie ist auf deinem Rechner entpackt, aber
@@ -324,45 +457,30 @@ Status: `offen`
   erst dann ist S-01 ein Test, der etwas beweist.
 - **Regel verfeinern durch Mail-Entfernen.** Die Naht ist da (die Vorschau-Zeilen haben schon einen
   Platz für Aktionen), gebaut ist es nicht.
-- **Echte Drift-Erkennung.** „Änderungen" zeigt auf einem echten Konto jetzt nichts mehr statt
-  erfundener Einträge. Was fehlt, ist der Vergleich mit dem, was beim letzten Sync bekannt war.
+- **Drift bei Ordnern.** Regeln werden jetzt erkannt; ein in Proton angelegter *Ordner* noch nicht.
 - **Reihenfolge der Regeln ändern.** Bei Filtern ist die Reihenfolge das Ergebnis — das verdient
   einen eigenen Diff und kommt separat.
 
 ---
 
-## Deine weiteren Befunde
-
-**Die Suchfelder standen nicht auf gleicher Höhe.** Behoben. Die rechte Spalte trug einen
-Umschalter und einen längeren Satz über ihrem Feld und war dadurch um genau dessen Höhe nach unten
-verschoben. Beide Spalten haben jetzt denselben Aufbau — Überschrift, eine Zeile, dann die Liste —
-und der Umschalter sitzt in der Überschrift. Ein Rand-Abstand hätte es auch geradegerückt und wäre
-beim nächsten Satz wieder krumm gewesen.
-
-Status: `behoben, bitte nachprüfen`
-
-**Befund:**
-
----
-
-## Neu: E2E-Tests
+## Die Testsuiten
 
 ```sh
-pnpm test:e2e
+pnpm test        # 583 Tests, kein Netz, Sekunden
+pnpm test:e2e    # 26 Tests im echten Browser, gut eine Minute
 ```
 
-24 Tests, echter Browser gegen echten Server durch den echten Proxy. Sie decken drei Dinge ab, die
-die anderen 569 Tests nicht können:
+Beide sind jetzt in `README.md` beschrieben — inklusive einzelner Datei, einzelnem Test und
+`PMS_E2E_HEADED=1`, wenn du zusehen willst.
 
-- **Layout.** Nicht die Stylesheet-Regel, sondern ob wirklich etwas seitlich scrollt — bei fünf
-  Breiten, auf allen acht Bildschirmen und in den Dialogen. Beim Schreiben hat der Test sofort einen
-  echten Fehler gefunden: `.mail-open` liess den Betreff seine volle Breite nehmen (232 px in einem
-  168-px-Knopf), die Ellipse griff nie.
-- **Der Durchstich.** Alle bisherigen Serverprüfungen liefen per `curl` direkt auf den Port. Ob der
-  Browser durch den Vite-Proxy dorthin kommt — und ob der SSE-Strom nicht gepuffert wird, was
-  Proxies gerne tun — war nie geprüft.
-- **Die Mail-Ansicht.** Dass ein Mailinhalt nichts nachladen kann, war bisher eine Aussage über
-  Zeichenketten. `sandbox=""` und die CSP setzt nur ein Browser durch. Die erste Fassung dieser
-  Tests ging durch, ohne je eine Mail zu öffnen — jetzt scheitern sie laut, wenn das passiert.
+Neu dazugekommen und gegengeprüft, indem ich den Fehler wieder eingebaut habe:
 
-Jeder dieser Tests wurde gegengeprüft, indem ich den Fehler wieder eingebaut habe: er schlägt an.
+- **Ordner anlegen zählt die Anfragen.** Der Test scheitert, sobald `create-folder` wieder nichts
+  schickt und Erfolg meldet — genau dein Befund.
+- **Ordner löschen** fragt im Terminal, schreibt bei Ablehnung null Anfragen, und weist einen
+  Ordner ab, den das Konto nicht hat, *bevor* jemand gefragt wird.
+- **Umbenennen** schreibt den Ordner zuerst und die betroffenen Regeln danach.
+- **Übernehmen** erzeugt null Anfragen an Proton und trägt trotzdem die Entscheidung ein.
+- **Inkrementeller Sync** fragt nach dem richtigen Zeitpunkt, macht die Kopie nie kleiner, und
+  behauptet nach einem Teillauf nicht, sie sei vollständig.
+- **Adoption** überlebt den nächsten Sync, damit die Frage genau einmal gestellt wird.

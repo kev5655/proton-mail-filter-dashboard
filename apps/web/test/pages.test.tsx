@@ -207,11 +207,17 @@ describe('changes made in Proton itself', () => {
         expect(text(html)).toContain('Steuern 2026');
     });
 
-    it('rejects by disabling, not deleting', () => {
-        // Someone wrote that rule on purpose. Losing it to a misclick in a review screen would be a
-        // poor trade for tidiness.
-        expect(text(html)).toContain('Ablehnen (deaktivieren)');
-        expect(text(html)).toContain('zweite, ausdrückliche Entscheidung');
+    it('offers disabling alongside deleting, and names both', () => {
+        // Someone wrote that rule on purpose, so „ablehnen" must not silently mean „delete". Both
+        // are offered and both say what they are; deleting additionally asks in the terminal, which
+        // is `weigh`'s job rather than this screen's.
+        expect(text(html)).toContain('Deaktivieren');
+        expect(text(html)).toContain('Löschen');
+    });
+
+    it('says that adopting changes nothing at the account', () => {
+        // The distinction the screen turns on: two of the three answers write, one does not.
+        expect(text(html)).toContain('Übernehmen ändert nichts am Konto');
     });
 });
 

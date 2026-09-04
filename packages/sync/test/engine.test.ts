@@ -44,8 +44,9 @@ function json(body: unknown): Response {
 }
 
 /** A mailbox of `total` messages, served a page at a time like Proton does. */
-function fakeProton(total: number): { http: ProtonHttp; pages: number[] } {
+function fakeProton(total: number): { http: ProtonHttp; pages: number[]; begins: Array<string | null> } {
     const pages: number[] = [];
+    const begins: Array<string | null> = [];
 
     const fetchImpl = (async (input: URL | RequestInfo) => {
         const url = new URL(String(input));
@@ -64,6 +65,7 @@ function fakeProton(total: number): { http: ProtonHttp; pages: number[] } {
             const page = Number(url.searchParams.get('Page') ?? 0);
             const size = Number(url.searchParams.get('PageSize') ?? 100);
             pages.push(page);
+            begins.push(url.searchParams.get('Begin'));
 
             const from = page * size;
             const count = Math.max(0, Math.min(size, total - from));
@@ -85,7 +87,11 @@ function fakeProton(total: number): { http: ProtonHttp; pages: number[] } {
     }) as typeof fetch;
 
     // Pacing is real behaviour, tested in proton-api. Here it would only add minutes.
-    return { http: new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 }), pages };
+    return {
+        http: new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 }),
+        pages,
+        begins,
+    };
 }
 
 describe('syncing a mailbox', () => {
@@ -165,5 +171,63 @@ describe('syncing a mailbox', () => {
 
         expect(result.messages).toBe(0);
         expect(pages).toEqual([0]);
+    });
+});
+
+/**
+ * Fetching only what is new.
+ *
+ * The full run reads a year of mail one paced page at a time, which is minutes. Doing that every
+ * time somebody presses „jetzt synchronisieren" — let alone every five minutes on a timer — asks
+ * Proton for thirteen thousand messages it already gave us. Messages are upserted, so a narrow
+ * window adds to the copy rather than replacing it with a smaller one.
+ *
+ * The window reaches back an hour past the recorded time on purpose. Proton orders by the message's
+ * own timestamp, so a message that arrived during the previous run can carry a timestamp from just
+ * before it started — and a hard boundary would skip it forever rather than once.
+ */
+describe('an incremental sync', () => {
+    it('reads the whole window when there is no previous sync to be incremental against', async () => {
+        const { http, begins } = fakeProton(120);
+
+        await syncAll(db, http, { pageSize: 100, incremental: true });
+
+        expect(begins.every((begin) => begin === null)).toBe(true);
+    });
+
+    it('asks only for what arrived since last time, with an hour of overlap', async () => {
+        const { http } = fakeProton(120);
+        await syncAll(db, http, { pageSize: 100 });
+        const lastSync = Number(getMeta(db, 'lastSyncAt'));
+
+        const second = fakeProton(120);
+        await syncAll(db, second.http, { pageSize: 100, incremental: true });
+
+        const begin = Number(second.begins[0]);
+        expect(begin).toBe(lastSync - 3_600);
+    });
+
+    it('does not shrink the copy it already has', async () => {
+        const { http } = fakeProton(120);
+        await syncAll(db, http, { pageSize: 100 });
+
+        // A second run that finds nothing new must leave all 120 in place, not 0.
+        const second = fakeProton(0);
+        await syncAll(db, second.http, { pageSize: 100, incremental: true });
+
+        expect(readMessages(db, { limit: 500 })).toHaveLength(120);
+    });
+
+    it('does not claim the copy is complete when it only looked at a sliver', async () => {
+        const { http } = fakeProton(250);
+        await syncAll(db, http, { pageSize: 100, maxMessages: 150 });
+        expect(getMeta(db, 'lastSyncTruncated')).toBe('1');
+
+        // The incremental run finds little and finishes; that must not be read as "and by the way,
+        // the copy is now complete" — the 100 messages it never fetched are still missing.
+        const second = fakeProton(10);
+        await syncAll(db, second.http, { pageSize: 100, incremental: true });
+
+        expect(getMeta(db, 'lastSyncTruncated')).toBe('1');
     });
 });

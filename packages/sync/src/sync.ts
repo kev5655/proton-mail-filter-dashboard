@@ -9,7 +9,7 @@ import {
 } from '@pms/proton-api';
 import type { Db } from '@pms/store';
 
-import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from './mirror.js';
+import { getMeta, mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from './mirror.js';
 
 const log = getLogger('sync');
 
@@ -42,6 +42,18 @@ export interface SyncProgress {
 
 export interface SyncOptions {
     window?: SyncWindow;
+    /**
+     * Fetch only what arrived since the last completed sync.
+     *
+     * Messages are upserted, never replaced, so an incremental run adds to the copy rather than
+     * narrowing it. The window starts a little before the recorded time — Proton orders by the
+     * message's own timestamp, and a message that arrived during the previous run can carry a
+     * timestamp from just before it, which a hard boundary would skip forever.
+     *
+     * Folders and filters are always read in full. They are three requests, and they are what every
+     * refusal and every diff is compared against.
+     */
+    incremental?: boolean;
     /** Stops after this many messages. A guard against an unattended run pulling a whole account. */
     maxMessages?: number;
     pageSize?: number;
@@ -61,8 +73,12 @@ export interface SyncResult {
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_MESSAGES = 5_000;
 
+/** How far back an incremental run reaches beyond the last sync. One hour, for clock skew and slow pages. */
+const INCREMENTAL_OVERLAP_SECONDS = 3_600;
+
 export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {}): Promise<SyncResult> {
     const report = options.onProgress ?? ((): void => {});
+    const effective = options.incremental === true ? withIncrementalWindow(db, options) : options;
 
     // Folders and labels first: a message references them, and a rule files into them. Fetching
     // them after the messages would mean a window where the copy names a folder it cannot resolve.
@@ -75,7 +91,7 @@ export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {
     const filterCount = mirrorFilters(db, filters);
     report({ stage: 'filters', done: filterCount, total: filterCount });
 
-    const { messages, truncated } = await syncMessages(db, http, options, report);
+    const { messages, truncated } = await syncMessages(db, http, effective, report);
 
     // What the account looked like at this moment.
     //
@@ -87,10 +103,38 @@ export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {
     // Recorded, not just returned. Whether the copy is complete outlives the run that made it, and
     // anything reading the database later — the dashboard above all — has to be able to say "these
     // are the mails I know about" rather than implying it has the account.
-    setMeta(db, 'lastSyncTruncated', truncated ? '1' : '0');
-    log.info({ labels: labelCount, filters: filterCount, messages, truncated }, 'sync complete');
+    // An incremental run only ever looked at part of the mailbox, so it must not claim the copy is
+    // complete — nor claim it is truncated when the full run before it was not.
+    if (options.incremental !== true) {
+        setMeta(db, 'lastSyncTruncated', truncated ? '1' : '0');
+    } else if (truncated) {
+        setMeta(db, 'lastSyncTruncated', '1');
+    }
+    log.info(
+        { labels: labelCount, filters: filterCount, messages, truncated, incremental: options.incremental === true },
+        'sync complete'
+    );
 
     return { labels: labelCount, filters: filterCount, messages, truncated };
+}
+
+/**
+ * The same options, with the window narrowed to what has happened since last time.
+ *
+ * Falls back to the caller's window when there is no recorded sync: a first run has nothing to be
+ * incremental against, and quietly fetching only the last hour would leave an almost empty copy
+ * that looks like a full one.
+ */
+function withIncrementalWindow(db: Db, options: SyncOptions): SyncOptions {
+    const last = Number(getMeta(db, 'lastSyncAt') ?? NaN);
+    if (!Number.isFinite(last)) {
+        log.info({}, 'no previous sync recorded; reading the full window');
+        return options;
+    }
+
+    const begin = Math.max(0, Math.floor(last) - INCREMENTAL_OVERLAP_SECONDS);
+    log.info({ begin }, 'incremental sync');
+    return { ...options, window: { ...options.window, begin } };
 }
 
 async function syncMessages(
@@ -142,4 +186,37 @@ async function syncMessages(
     }
 
     return { messages: done, truncated: false };
+}
+
+/**
+ * Bring the filters and folders back in step, without touching the messages.
+ *
+ * Run straight after a change lands at Proton. Two things depend on it, and both were broken while
+ * it did not exist:
+ *
+ *  - **The fingerprint.** Every write is refused when the account no longer matches the copy the
+ *    plan was built on. Writing a filter changes the account, so without this the *next* change was
+ *    always refused as stale — which is what "I still cannot create a rule" turned out to be.
+ *  - **The dashboard.** It renders the mirror. A rule saved at Proton and absent from the mirror
+ *    reads as a save that did not happen.
+ *
+ * Three GETs. Messages are left alone deliberately: a filter moves mail asynchronously, so reading
+ * them here would record a half-finished state as if it were the result.
+ */
+export async function refreshAccountObjects(
+    db: Db,
+    http: ProtonHttp
+): Promise<{ folders: number; filters: number; version: string }> {
+    const folders = await getFolders(http);
+    const labels = await getLabels(http);
+    const filters = await getFilters(http);
+
+    mirrorLabels(db, { folders, labels });
+    mirrorFilters(db, filters);
+
+    const version = fingerprintAccount(filters, folders);
+    setMeta(db, 'accountVersion', version);
+    log.info({ folders: folders.length, filters: filters.length }, 'account objects refreshed');
+
+    return { folders: folders.length, filters: filters.length, version };
 }

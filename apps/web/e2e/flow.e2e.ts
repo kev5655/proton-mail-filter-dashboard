@@ -135,8 +135,10 @@ describe('saving a rule', () => {
 
         await harness.page.getByRole('button', { name: /Bei Proton speichern/ }).click();
 
+        // The dialog closes itself when the change lands, so the assertion is on the banner that
+        // outlives it — which is also the thing a user sees a minute later.
         await expect
-            .poll(async () => harness.page.locator('.viewer').innerText(), { timeout: 20_000 })
+            .poll(async () => harness.page.locator('.apply-result').innerText(), { timeout: 20_000 })
             .toContain('Bei Proton gespeichert');
 
         expect(harness.confirmations).toEqual([]);
@@ -144,13 +146,16 @@ describe('saving a rule', () => {
     });
 
     it('never reports a stale account for a copy that was just synced', async () => {
-        // The exact error Kevin saw. It must not appear at all on a fresh mirror.
-        await stageARule();
+        // The exact error that made every change impossible. On a fresh mirror the change goes
+        // through instead — asserting on the success is stronger than asserting on the absence of
+        // one particular error message, which a different failure would satisfy just as well.
+        harness.resetWrites();
+        await stageARule('absender1@');
         await harness.page.getByRole('button', { name: /Bei Proton speichern/ }).click();
 
         await expect
-            .poll(async () => harness.page.locator('.viewer').innerText(), { timeout: 20_000 })
-            .not.toContain('APPLY_STATE_STALE');
+            .poll(async () => harness.page.locator('.apply-result').innerText(), { timeout: 20_000 })
+            .toContain('Bei Proton gespeichert');
     });
 
     it('shows the diff before anything is offered', async () => {
@@ -187,7 +192,7 @@ describe('saving a rule', () => {
         await harness.page.getByRole('button', { name: /Bei Proton speichern/ }).click();
 
         await expect
-            .poll(async () => harness.page.locator('.viewer').innerText(), { timeout: 20_000 })
+            .poll(async () => harness.page.locator('.apply-result').innerText(), { timeout: 20_000 })
             .toContain('Bei Proton gespeichert');
 
         expect(harness.protonWrites()).toEqual(['POST mail/v4/filters']);
@@ -207,5 +212,59 @@ describe('the log page', () => {
         await harness.page.getByRole('button', { name: 'Regeln', exact: false }).first().click();
         await harness.page.waitForTimeout(200);
         expect(await harness.page.locator('.main').innerText()).toContain('Regeln');
+    });
+});
+
+describe('creating a folder', () => {
+    /*
+     * The screen half of the change that reported success and did nothing.
+     *
+     * `create-folder` reached the write path, fell through a `switch` that only knew about rules,
+     * and came back applied — the dashboard said "bei Proton gespeichert" and the account never
+     * heard of the folder. That half is nailed down in `apply.test.ts`, which counts the requests
+     * the real path makes; the harness here has its own Proton and cannot speak to it.
+     *
+     * What this covers is the rest: that the folder screen stages a `create-folder` at all, that it
+     * is offered rather than applied in the browser, and that the dialog leaves when the change
+     * lands — it used to sit on a success message until somebody found the close button.
+     */
+    it('offers one, and closes the dialog when it lands', async () => {
+        harness.resetWrites();
+        await open('Ordner');
+
+        await harness.page.getByPlaceholder('Neuer Ordner').fill('E2E-Ordner');
+        await harness.page.getByRole('button', { name: 'Anlegen', exact: true }).click();
+        await harness.page.waitForTimeout(300);
+
+        await harness.page.getByRole('button', { name: /Bei Proton speichern/ }).click();
+
+        await expect
+            .poll(async () => harness.page.locator('.apply-result').innerText(), { timeout: 20_000 })
+            .toContain('Bei Proton gespeichert');
+
+        expect(harness.protonWrites()).toEqual(['POST core/v4/labels']);
+        // The dialog is gone, so the folder list behind it is what you are looking at.
+        await expect.poll(async () => harness.page.locator('.overlay').count(), { timeout: 10_000 }).toBe(0);
+    });
+
+    it('asks in the terminal before deleting one, and writes nothing when refused', async () => {
+        harness.resetWrites();
+        harness.setConfirmAnswer('declined');
+        await open('Ordner');
+
+        await harness.page
+            .getByRole('button', { name: 'Löschen', exact: true })
+            .first()
+            .click();
+        await harness.page.waitForTimeout(300);
+        await harness.page.getByRole('button', { name: /Bei Proton speichern/ }).click();
+
+        await expect
+            .poll(async () => harness.page.locator('.viewer').innerText(), { timeout: 20_000 })
+            .toContain('Nicht geschrieben');
+
+        expect(harness.confirmations.at(-1)?.answer).toBe('declined');
+        expect(harness.protonWrites()).toEqual([]);
+        harness.setConfirmAnswer('granted');
     });
 });

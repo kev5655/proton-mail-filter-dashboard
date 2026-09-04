@@ -55,6 +55,7 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
             priority: filter.priority,
             enabled: filter.enabled,
             authoredAs: filter.authoredAs,
+            adopted: filter.adopted,
             rule: simple,
         });
     }

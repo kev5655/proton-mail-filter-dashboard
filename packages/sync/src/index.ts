@@ -1,5 +1,6 @@
-export { syncAll, type SyncOptions, type SyncProgress, type SyncResult, type SyncWindow } from './sync.js';
+export { refreshAccountObjects, syncAll, type SyncOptions, type SyncProgress, type SyncResult, type SyncWindow } from './sync.js';
 export {
+    markAdopted,
     mirrorFilters,
     mirrorLabels,
     mirrorMessages,

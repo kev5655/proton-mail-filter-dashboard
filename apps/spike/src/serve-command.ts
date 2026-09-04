@@ -3,11 +3,12 @@ import { join } from 'node:path';
 
 import { applyChange, confirmAtTerminal, digestOf, shortDigest, type ChangeRequest } from '@pms/apply';
 import { AppError } from '@pms/core/errors';
+import { getLogger } from '@pms/core/logger';
 import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase } from '@pms/store';
-import { getMeta, syncAll } from '@pms/sync';
+import { getMeta, markAdopted, refreshAccountObjects, syncAll } from '@pms/sync';
 
-import { DATA_DIR } from './paths.js';
+import { DATA_DIR, logFilePath } from './paths.js';
 import { connect } from './session.js';
 
 /**
@@ -30,7 +31,12 @@ import { connect } from './session.js';
  * It runs until interrupted, because the dashboard needs it for as long as it is open.
  */
 
+const log = getLogger('serve');
+
 const DATABASE = join(DATA_DIR, 'mailbox.db');
+
+/** How often the copy refreshes itself, in minutes. `--auto-sync 0` turns it off. */
+const DEFAULT_AUTO_SYNC_MINUTES = 5;
 
 export async function runServe(argv: readonly string[]): Promise<void> {
     const port = Number(value(argv, '--port') ?? process.env['PMS_SERVER_PORT'] ?? 5174);
@@ -53,10 +59,20 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     const db = await openDatabase({ path: DATABASE, passphrase });
 
     try {
+        /*
+         * Synchronising from the dashboard, and on a timer.
+         *
+         * Incremental by default: the first run pulls the year, every run after it asks only for
+         * what has arrived since. Messages are upserted, so the copy grows rather than narrowing —
+         * and a run that used to take minutes takes a few seconds, which is what makes a timer
+         * reasonable at all. Folders and filters are read in full every time regardless; they are
+         * three requests and everything else is compared against them.
+         */
         const sync = new SyncChannel(async (report) => {
             const result = await syncAll(db, http, {
                 window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
                 maxMessages: 20_000,
+                incremental: true,
                 onProgress: report,
             });
             return result;
@@ -97,6 +113,27 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     // asked about a second time, and the copy grows with every sync.
                     mailboxSize: (db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
                 });
+                /*
+                 * Bring the copy back in step before answering.
+                 *
+                 * Not a nicety. The fingerprint the next change is checked against is the one in
+                 * this database, and the write just made it wrong — so without this, the second
+                 * change of any session was always refused as stale. It also means the dashboard's
+                 * reload shows the rule that was just saved instead of the state before it.
+                 *
+                 * A failure here is reported, never swallowed: the account did change, and a copy
+                 * that silently disagrees with it is worse than one that says it is behind.
+                 */
+                try {
+                    await refreshAccountObjects(db, http);
+                    // A rule this tool wrote, or one the user just adopted, is not a surprise the
+                    // next time the account is read. Marked after the refresh, which rewrites the
+                    // table wholesale.
+                    markAdopted(db, outcome.adoptedFilterIds);
+                } catch (cause) {
+                    log.warn({ cause }, 'the change landed but the local copy could not be refreshed');
+                }
+
                 return {
                     backupPath: outcome.backupPath,
                     ...(outcome.partial === undefined ? {} : { partial: outcome.partial.message }),
@@ -111,6 +148,31 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             apply,
         });
 
+        /*
+         * Keeping the copy current without anybody asking.
+         *
+         * Only worth doing because the sync is incremental: a few requests for whatever arrived in
+         * the last five minutes, at the pace `ProtonHttp` imposes anyway. It skips its turn while a
+         * sync is already running — `SyncChannel.start` refuses a second one — and it is a timer
+         * rather than a promise chain so that Ctrl+C ends it immediately.
+         *
+         * `--auto-sync 0` turns it off. Some people would rather their mailbox be read when they
+         * say so, and that is a reasonable thing to want.
+         */
+        const autoSyncMinutes = Number(value(argv, '--auto-sync') ?? DEFAULT_AUTO_SYNC_MINUTES);
+        const autoSync =
+            Number.isFinite(autoSyncMinutes) && autoSyncMinutes > 0
+                ? setInterval(
+                      () => {
+                          const refused = sync.start();
+                          if (refused !== undefined) {
+                              log.debug({ refused }, 'auto-sync skipped');
+                          }
+                      },
+                      autoSyncMinutes * 60_000
+                  )
+                : undefined;
+
         const lastSync = getMeta(db, 'lastSyncAt');
         console.log(
             lastSync === undefined
@@ -123,11 +185,23 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             '  Grosse Änderungen fragen hier im Terminal nach — alles, was löscht oder einen\n' +
                 '  grossen Teil des Postfachs umsortiert. Kleine gelten mit der Bestätigung im Dashboard.'
         );
+        console.log(
+            autoSync === undefined
+                ? '  Automatisch synchronisiert wird nicht (--auto-sync 0).'
+                : `  Alle ${String(autoSyncMinutes)} Minuten wird nachgeholt, was seit dem letzten Mal dazugekommen ist.`
+        );
+        const logFile = logFilePath();
+        if (logFile !== undefined) {
+            console.log(`  Protokoll: ${logFile}`);
+        }
         console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
         console.log('  Beenden mit Ctrl+C.\n');
 
         await new Promise<void>((resolve) => {
             const stop = (): void => {
+                if (autoSync !== undefined) {
+                    clearInterval(autoSync);
+                }
                 console.log('\nServer beendet.\n');
                 void server.close().then(resolve);
             };

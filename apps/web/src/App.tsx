@@ -12,7 +12,7 @@ import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { TriagePage } from './pages/TriagePage.js';
-import { ApplyProvider } from './apply.js';
+import { ApplyProvider, useApply } from './apply.js';
 import { ModelProvider } from './llm.js';
 import { MailboxProvider, useMailbox, useMailboxStatus, useReloadMailbox } from './mailbox.js';
 import { SyncPanel } from './components/SyncPanel.js';
@@ -57,6 +57,40 @@ function Sources(): React.JSX.Element {
             </StoreProvider>
             </ApplyProvider>
         </SyncProvider>
+    );
+}
+
+/**
+ * What the last change left behind, after its dialog has gone.
+ *
+ * The dialog closes when the change lands, because a finished job should not need dismissing. Two
+ * things outlive it and are worth reading afterwards: where the backup went, and whether the result
+ * was only partial. A partial result is stated as one — never rounded up to a success.
+ */
+function AppliedBanner(): React.JSX.Element | null {
+    const { result, dismissResult } = useApply();
+    if (result === undefined) {
+        return null;
+    }
+
+    return (
+        <div
+            className={result.partial === undefined ? 'notice notice-info apply-result' : 'notice notice-warning apply-result'}
+        >
+            <div className="stack">
+                <strong>
+                    {result.partial === undefined ? 'Bei Proton gespeichert:' : 'Nur teilweise geschrieben:'}{' '}
+                    {result.summary}
+                </strong>
+                {result.partial !== undefined && <span>{result.partial}</span>}
+                <span className="faint">
+                    Sicherung aller Filter und Ordner: <code>{result.backupPath}</code>
+                </span>
+            </div>
+            <button type="button" className="button button-quiet" onClick={dismissResult}>
+                Verstanden
+            </button>
+        </div>
     );
 }
 
@@ -125,6 +159,8 @@ function Shell(): React.JSX.Element {
             </nav>
 
             <main className="main">
+                <AppliedBanner />
+
                 {/*
                  * The boundary that matters. A screen that throws used to unmount the root and
                  * take the sidebar with it, leaving no way back; keyed on the page, so switching

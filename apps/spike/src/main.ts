@@ -13,12 +13,13 @@ import {
 } from '@pms/proton-api';
 
 import { credentialConfig } from './credentials.js';
-import { FIXTURE_DIR, loadEnvFile } from './paths.js';
+import { FIXTURE_DIR, loadEnvFile, logFilePath } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 import { clearLockout, connect } from './session.js';
 import { runServe } from './serve-command.js';
 import { runSync } from './sync-command.js';
+import { runWriteProbe } from './write-probe.js';
 import { describeItem } from '@pms/credentials';
 
 /**
@@ -109,7 +110,11 @@ async function describeCredentialItem(): Promise<void> {
 
 async function main(): Promise<void> {
     const env = loadEnvFile();
-    configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+    const logFile = logFilePath();
+    configureLogging({
+        level: (process.env['LOG_LEVEL'] as 'info') ?? 'info',
+        ...(logFile === undefined ? {} : { file: logFile, fileLevel: 'debug' }),
+    });
 
     // Said once, up front. A setting that was never read looks exactly like a setting that was read
     // and ignored, and the difference is usually a `.env` sitting one directory over.
@@ -119,6 +124,11 @@ async function main(): Promise<void> {
 
     if (process.argv.includes('--sync')) {
         await runSync(process.argv);
+        return;
+    }
+
+    if (process.argv.includes('--schreibtest')) {
+        await runWriteProbe(process.argv);
         return;
     }
 

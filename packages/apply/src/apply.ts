@@ -4,8 +4,21 @@ import { inverseOf, verifyMoves, type JournalEntry, type MovedMessage, type Veri
 import type { ProtonHttp } from '@pms/proton-api';
 import { fingerprintAccount, getMessages } from '@pms/proton-api';
 
+import type { PendingChange } from '@pms/changes';
+import type { SimpleObject } from '@proton/sieve/filterModel';
+
 import { digestOf, shortDigest, type ChangeRequest } from './request.js';
-import { backup, ensureFolder, readAccount, removeFilter, setEnabled, writeFilter, type Account } from './steps.js';
+import {
+    backup,
+    ensureFolder,
+    readAccount,
+    removeFilter,
+    removeFolder,
+    renameFolder,
+    setEnabled,
+    writeFilter,
+    type Account,
+} from './steps.js';
 
 const log = getLogger('apply');
 
@@ -99,6 +112,15 @@ export interface ApplyContext {
 export interface ApplyOutcome {
     entry: JournalEntry;
     backupPath: string;
+    /**
+     * Filters the local copy should now regard as ours.
+     *
+     * A rule this tool wrote is not a surprise the next time the account is read, and neither is one
+     * the user has just adopted. Without this every rule the dashboard created would come back on
+     * the „Änderungen" screen asking to be confirmed — which is the reflex-confirmation problem, in
+     * the one place whose whole job is to be worth reading.
+     */
+    adoptedFilterIds: string[];
     /** Set when some steps landed and others did not — the state that matters most. */
     partial: AppError | undefined;
 }
@@ -227,6 +249,13 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
         partial = performed.problem;
     }
 
+    if (performed.rewrittenRules !== undefined && performed.rewrittenRules.length > 0) {
+        log.info(
+            { rules: performed.rewrittenRules.map((rule) => rule.name) },
+            'rules repointed at the renamed folder'
+        );
+    }
+
     log.info(
         {
             change: request.change.kind,
@@ -237,7 +266,15 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
         'change applied'
     );
 
-    return { entry, backupPath: saved.path, partial };
+    return {
+        entry,
+        backupPath: saved.path,
+        partial,
+        adoptedFilterIds: [
+            ...(performed.filterId === undefined ? [] : [performed.filterId]),
+            ...(performed.adoptedFilterIds ?? []),
+        ],
+    };
 }
 
 /** Everything that can be refused before anyone is asked to approve it. */
@@ -250,6 +287,17 @@ function preflight(request: ChangeRequest, account: Account): void {
             throw new AppError('FOLDER_ALREADY_EXISTS', {
                 message: `Den Ordner „${name}" gibt es schon.`,
                 hint: 'Es wurde nichts geschrieben.',
+                context: { name },
+            });
+        }
+    }
+
+    if (request.change.kind === 'delete-folder' || request.change.kind === 'rename-folder') {
+        const name = request.change.folder?.name;
+        if (name !== undefined && !account.folders.some((folder) => folder.Name === name)) {
+            throw new AppError('APPLY_STATE_STALE', {
+                message: `Den Ordner „${name}" gibt es bei Proton nicht mehr.`,
+                hint: 'Es wurde nichts geschrieben. Neu synchronisieren.',
                 context: { name },
             });
         }
@@ -280,6 +328,10 @@ const SYSTEM_FOLDERS = new Set(['posteingang', 'inbox', 'papierkorb', 'trash', '
 interface Performed {
     folders: Array<{ name: string; id: string }>;
     filterId: string | undefined;
+    /** Rules repointed by a rename, so the report can say the change reached further than one folder. */
+    rewrittenRules?: Array<{ id: string; name: string }>;
+    /** Rules the user just took responsibility for. Nothing was written for these. */
+    adoptedFilterIds?: string[];
     /** Set when some steps landed and a later one did not. Deliberately not rolled back. */
     problem: AppError | undefined;
 }
@@ -296,6 +348,9 @@ async function perform(request: ChangeRequest, account: Account, http: ProtonHtt
     const performed: Performed = { folders: [], filterId: undefined, problem: undefined };
     const change = request.change;
 
+    // A rule's target folder, created first if it is not there yet. This is also the only path by
+    // which a folder typed into the rule editor comes into existence, which is deliberate: naming a
+    // folder in a rule *is* asking for it.
     const target = change.after?.rule.Actions.FileInto.at(-1);
     if (target !== undefined && target !== '') {
         const folder = await ensureFolder(http, account, target);
@@ -337,16 +392,69 @@ async function perform(request: ChangeRequest, account: Account, http: ProtonHtt
                 break;
             }
 
-            default:
-                // Folder-only changes are already done by `ensureFolder` above, or are not
-                // supported yet. Silence here would hide the second case, so it is named.
-                if (change.kind !== 'create-folder') {
-                    throw new AppError('APPLY_PARTIAL', {
-                        message: `„${change.kind}" kann noch nicht auf das Konto geschrieben werden.`,
-                        hint: 'Es wurde nichts weiter geschrieben.',
-                        context: { kind: change.kind },
+            /*
+             * The folder-only changes.
+             *
+             * These used to fall through to the "not supported yet" branch below — except
+             * `create-folder`, which fell through the *exception* to it and so reported success
+             * without a request ever being made. A folder appeared in the dashboard and not in the
+             * account, which is the worst of the three possible outcomes: it is the one nobody
+             * checks.
+             */
+            case 'create-folder': {
+                const name = folderName(change);
+                const folder = await ensureFolder(http, account, name, change.folder?.parent);
+                if (folder.created) {
+                    performed.folders.push({ name, id: folder.id });
+                }
+                break;
+            }
+
+            case 'rename-folder': {
+                const from = folderName(change);
+                const to = change.folder?.newName?.trim() ?? '';
+                if (to === '') {
+                    throw new AppError('APPLY_MALFORMED', {
+                        message: 'Für das Umbenennen fehlt der neue Name.',
+                        hint: 'Es wurde nichts geschrieben.',
+                        context: { folder: from },
                     });
                 }
+                await renameFolder(http, account, from, to);
+                // The folder is renamed; every rule naming it still says the old name and would
+                // file into nothing. Proton does not check this and does not warn about it.
+                performed.rewrittenRules = await rewriteTargets(http, account, from, to);
+                break;
+            }
+
+            case 'delete-folder': {
+                const name = folderName(change);
+                await removeFolder(http, account, name);
+                break;
+            }
+
+            /*
+             * Adopting writes nothing.
+             *
+             * It records that the user has taken responsibility for a rule Proton already runs. The
+             * account is not touched — which is exactly why it must still come through here: the
+             * decision goes into the journal beside the ones that did write, and the diff has
+             * already shown what the rule does.
+             */
+            case 'adopt-rule':
+                performed.adoptedFilterIds = change.before === undefined ? [] : [change.before.id];
+                break;
+
+            default: {
+                // Every kind is handled above. This stays so that adding one to `ChangeKind`
+                // without adding it here fails loudly instead of reporting a success nobody made.
+                const unhandled: never = change.kind;
+                throw new AppError('APPLY_PARTIAL', {
+                    message: `„${String(unhandled)}" kann noch nicht auf das Konto geschrieben werden.`,
+                    hint: 'Es wurde nichts weiter geschrieben.',
+                    context: { kind: String(unhandled) },
+                });
+            }
         }
     } catch (cause) {
         if (performed.folders.length === 0) {
@@ -364,6 +472,61 @@ async function perform(request: ChangeRequest, account: Account, http: ProtonHtt
     }
 
     return performed;
+}
+
+/** The folder a folder-change names, or a refusal rather than a request against `undefined`. */
+function folderName(change: PendingChange): string {
+    const name = change.folder?.name?.trim() ?? '';
+    if (name === '') {
+        throw new AppError('APPLY_MALFORMED', {
+            message: 'Die Änderung nennt keinen Ordner.',
+            hint: 'Es wurde nichts geschrieben.',
+            context: { kind: change.kind },
+        });
+    }
+    return name;
+}
+
+/**
+ * Point every rule that filed into `from` at `to`.
+ *
+ * Part of the rename, not a courtesy. Proton stores the destination as a name, so a renamed folder
+ * leaves each rule filing into a name that no longer resolves — the rule still runs, the mail still
+ * leaves the inbox, and it arrives nowhere. The count is reported so the change says how far it
+ * reached rather than implying it was only one folder.
+ */
+async function rewriteTargets(
+    http: ProtonHttp,
+    account: Account,
+    from: string,
+    to: string
+): Promise<Array<{ id: string; name: string }>> {
+    const rewritten: Array<{ id: string; name: string }> = [];
+
+    for (const filter of account.filters) {
+        const simple = filter.Simple;
+        if (simple === undefined || !simple.Actions.FileInto.includes(from)) {
+            continue;
+        }
+        // Proton's stored `Simple` is validated structurally rather than against the compiler's
+        // enums, so the cast is where the two meet. Only the destination string changes.
+        const next = {
+            ...simple,
+            Actions: {
+                ...simple.Actions,
+                FileInto: simple.Actions.FileInto.map((entry) => (entry === from ? to : entry)),
+            },
+        } as unknown as SimpleObject;
+        await writeFilter(http, {
+            id: filter.ID,
+            name: filter.Name,
+            rule: next,
+            enabled: filter.Status === 1,
+        });
+        rewritten.push({ id: filter.ID, name: filter.Name });
+    }
+
+    return rewritten;
 }
 
 /** Where a set of messages is, straight from Proton. */

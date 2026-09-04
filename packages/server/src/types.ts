@@ -47,6 +47,17 @@ export interface MailboxRule {
     enabled: boolean;
     /** Sieve-authored rules cannot be edited in Proton's own interface any more. */
     authoredAs: 'tree' | 'sieve';
+    /**
+     * False for a rule that turned up at Proton without this tool doing it.
+     *
+     * The first sync adopts everything the account already had — that is the starting position, not
+     * a surprise. Afterwards a rule written in Proton's own interface arrives unadopted, and the
+     * „Änderungen" screen asks about it before it counts as part of the set. Without this the rule
+     * simply appeared among the others, as though it had always been there.
+     *
+     * Optional because the demo mailbox has no Proton to drift from; absent means adopted.
+     */
+    adopted?: boolean;
     rule: SimpleObject;
 }
 

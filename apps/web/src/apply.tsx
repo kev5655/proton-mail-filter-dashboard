@@ -15,6 +15,14 @@ import { log } from './log.js';
  * than the one on this screen, the two do not match and there is something to notice.
  */
 
+/** What a finished change left behind, kept after the dialog has closed. */
+export interface ApplyResult {
+    summary: string;
+    backupPath: string;
+    partial: string | undefined;
+    at: number;
+}
+
 export type ApplyPhase =
     | { phase: 'idle' }
     | { phase: 'offering' }
@@ -27,6 +35,15 @@ interface ApplyContextValue {
     /** Offer a staged change. Resolves when the offer was accepted for consideration, not applied. */
     offer: (change: PendingChange, plan: ChangePlan, applyToExisting: boolean) => void;
     reset: () => void;
+    /**
+     * The last change that actually landed.
+     *
+     * Outlives the dialog on purpose. The dialog closes when the change is done — leaving it open
+     * on a success message makes a finished job look unfinished — but where the backup went, and
+     * whether the result was partial, are things somebody may want to read a minute later.
+     */
+    result: ApplyResult | undefined;
+    dismissResult: () => void;
 }
 
 const Context = createContext<ApplyContextValue | undefined>(undefined);
@@ -39,6 +56,7 @@ export function ApplyProvider({
     onApplied?: (() => void) | undefined;
 }): React.JSX.Element {
     const [phase, setPhase] = useState<ApplyPhase>({ phase: 'idle' });
+    const [result, setResult] = useState<ApplyResult | undefined>(undefined);
 
     const offer = useCallback(
         (change: PendingChange, plan: ChangePlan, applyToExisting: boolean) => {
@@ -84,7 +102,9 @@ export function ApplyProvider({
                         shortDigest: body.shortDigest ?? '???-???',
                     });
 
-                    await watch(body.requestId, setPhase, onApplied);
+                    await watch(body.requestId, setPhase, onApplied, (applied) => {
+                        setResult({ ...applied, summary: change.summary, at: Date.now() });
+                    });
                 } catch {
                     setPhase({
                         phase: 'failed',
@@ -101,7 +121,14 @@ export function ApplyProvider({
         setPhase({ phase: 'idle' });
     }, []);
 
-    const value = useMemo<ApplyContextValue>(() => ({ phase, offer, reset }), [phase, offer, reset]);
+    const dismissResult = useCallback(() => {
+        setResult(undefined);
+    }, []);
+
+    const value = useMemo<ApplyContextValue>(
+        () => ({ phase, offer, reset, result, dismissResult }),
+        [phase, offer, reset, result, dismissResult]
+    );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;
 }
@@ -131,7 +158,8 @@ async function currentVersion(): Promise<string> {
 async function watch(
     requestId: string,
     setPhase: (phase: ApplyPhase) => void,
-    onApplied: (() => void) | undefined
+    onApplied: (() => void) | undefined,
+    onResult: (result: { backupPath: string; partial: string | undefined }) => void
 ): Promise<void> {
     for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -155,6 +183,7 @@ async function watch(
                 backupPath: state.backupPath ?? '',
                 partial: state.partial,
             });
+            onResult({ backupPath: state.backupPath ?? '', partial: state.partial });
             onApplied?.();
             return;
         }

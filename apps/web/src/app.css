@@ -205,16 +205,43 @@
     background: var(--bg);
 }
 
+/*
+ * The quiet button is still a button.
+ *
+ * It used to be transparent with no border, which made „Umbenennen" and „Löschen" read as labels
+ * sitting next to a folder name — you had to hover to discover they did anything. Quiet means less
+ * emphasis than the primary action, not invisible: a surface a shade off the page and a real border
+ * are the two things that say „this is pressable" before the pointer arrives.
+ */
 .button-quiet {
-    background: transparent;
-    color: var(--text-muted);
-    border-color: transparent;
-    padding: 6px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border-color: var(--border);
+    padding: 6px 10px;
 }
 
 .button-quiet:hover {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border-strong);
+}
+
+/*
+ * The result of the last change, above whichever screen is showing.
+ *
+ * Its dialog closes itself when the change lands; this is what stays. It sits at the top of the
+ * main column rather than floating, because a floating toast that disappears takes the backup path
+ * with it.
+ */
+.apply-result {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.apply-result code {
+    overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- rule + mail lists */

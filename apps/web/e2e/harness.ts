@@ -110,7 +110,7 @@ export async function start(options: SeedOptions = {}): Promise<Harness> {
             // And the real decision about whether a second question is even asked.
             const weight = weigh(parsed, mailboxSize);
             if (!weight.needsTerminal) {
-                protonCalls.push('POST mail/v4/filters');
+                protonCalls.push(writeFor(parsed));
                 return { backupPath: join(directory, 'backups', 'proton-e2e.json') };
             }
 
@@ -123,7 +123,7 @@ export async function start(options: SeedOptions = {}): Promise<Harness> {
                     code: 'APPLY_NOT_CONFIRMED',
                 });
             }
-            protonCalls.push('POST mail/v4/filters');
+            protonCalls.push(writeFor(parsed));
             return { backupPath: join(directory, 'backups', 'proton-e2e.json') };
         }
     );
@@ -153,7 +153,10 @@ export async function start(options: SeedOptions = {}): Promise<Harness> {
     const port = address !== null && typeof address === 'object' ? address.port : 5173;
     const url = `http://127.0.0.1:${String(port)}`;
 
-    const browser = await chromium.launch({ headless: true });
+    // `PMS_E2E_HEADED=1` opens a visible window and slows the clicking down, for watching a failing
+    // test happen rather than reading about it. The suite is otherwise headless everywhere.
+    const headed = process.env['PMS_E2E_HEADED'] === '1';
+    const browser = await chromium.launch({ headless: !headed, ...(headed ? { slowMo: 250 } : {}) });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
     const requests: string[] = [];
@@ -193,6 +196,31 @@ async function closeAll(
     await server.close().catch(() => undefined);
     closeDatabase(db);
     await rm(directory, { recursive: true, force: true });
+}
+
+/**
+ * The request the real write path would make for this change.
+ *
+ * Kind-aware rather than always "a filter was written", because the bug this suite exists to catch
+ * was precisely a change kind that wrote nothing and reported success. A harness that recorded the
+ * same string whatever it was handed would have passed straight through it.
+ */
+function writeFor(request: ChangeRequest): string {
+    switch (request.change.kind) {
+        case 'create-folder':
+            return 'POST core/v4/labels';
+        case 'rename-folder':
+            return 'PUT core/v4/labels';
+        case 'delete-folder':
+            return 'DELETE core/v4/labels';
+        case 'delete-rule':
+            return 'DELETE mail/v4/filters';
+        case 'adopt-rule':
+            // Adoption is the one kind that reaches Proton with nothing at all.
+            return 'none';
+        default:
+            return 'POST mail/v4/filters';
+    }
 }
 
 function pause(ms: number): Promise<void> {

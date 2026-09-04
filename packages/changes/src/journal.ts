@@ -108,6 +108,15 @@ export function inverseOf(change: PendingChange): PendingChange {
                 folder: change.folder,
             };
 
+        // Undoing an adoption is disowning the rule again — the rule itself is untouched either way.
+        case 'adopt-rule':
+            return {
+                ...base,
+                kind: 'adopt-rule',
+                summary: `Regel „${change.before?.name ?? '?'}" doch nicht übernehmen`,
+                before: change.before,
+            };
+
         case 'rename-folder':
             return {
                 ...base,
