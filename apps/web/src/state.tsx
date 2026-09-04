@@ -16,7 +16,7 @@ import type { ListableMessage } from './components/MailList.js';
  * be taken on trust.
  */
 
-export type Page = 'rules' | 'triage' | 'folders' | 'changes' | 'history' | 'log';
+export type Page = 'rules' | 'triage' | 'categories' | 'folders' | 'changes' | 'history' | 'log';
 
 export interface Navigation {
     page: Page;

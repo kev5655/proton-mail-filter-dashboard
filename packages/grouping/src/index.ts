@@ -1,5 +1,6 @@
 export {
     groupMessages,
+    CATEGORY_IDS,
     CATEGORY_LABELS,
     INBOX_LABEL,
     type GroupableMessage,

@@ -4,6 +4,7 @@ import { DiffDialog } from './components/DiffDialog.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { MailViewer } from './components/MailViewer.js';
 import { SelectionDialog } from './components/SelectionDialog.js';
+import { CategoriesPage } from './pages/CategoriesPage.js';
 import { ChangesPage } from './pages/ChangesPage.js';
 import { FoldersPage } from './pages/FoldersPage.js';
 import { HistoryPage } from './pages/HistoryPage.js';
@@ -45,6 +46,7 @@ function Sources(): React.JSX.Element {
 const PAGE_LABELS: Record<Page, string> = {
     triage: 'Vorschläge',
     rules: 'Regeln',
+    categories: 'Kategorien',
     folders: 'Ordner',
     changes: 'Änderungen',
     history: 'Verlauf',
@@ -53,7 +55,7 @@ const PAGE_LABELS: Record<Page, string> = {
 
 function Shell(): React.JSX.Element {
     const { nav, goTo, selected, selectedFrom, clearSelection, open, setOpen } = useAppState();
-    const { groups } = useMailbox();
+    const { groups, categories } = useMailbox();
     const status = useMailboxStatus();
     const { rules, folders, drift, journal } = useStore();
     const [buildingRule, setBuildingRule] = useState(false);
@@ -64,6 +66,7 @@ function Shell(): React.JSX.Element {
     const nav_: Array<{ id: Page; label: string; count: number }> = [
         { id: 'triage', label: PAGE_LABELS.triage, count: groups.length },
         { id: 'rules', label: PAGE_LABELS.rules, count: rules.length },
+        { id: 'categories', label: PAGE_LABELS.categories, count: categories.length },
         { id: 'folders', label: PAGE_LABELS.folders, count: folders.length },
         { id: 'changes', label: PAGE_LABELS.changes, count: drift.filter((item) => item.resolved === undefined).length },
         { id: 'history', label: PAGE_LABELS.history, count: journal.length },
@@ -108,6 +111,7 @@ function Shell(): React.JSX.Element {
                 <ErrorBoundary area={PAGE_LABELS[nav.page]} resetKey={nav.page}>
                     {nav.page === 'rules' && <RulesPage />}
                     {nav.page === 'triage' && <TriagePage />}
+                    {nav.page === 'categories' && <CategoriesPage />}
                     {nav.page === 'folders' && <FoldersPage />}
                     {nav.page === 'changes' && <ChangesPage />}
                     {nav.page === 'history' && <HistoryPage />}

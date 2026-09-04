@@ -3,7 +3,7 @@ import { toSieveTree } from '@proton/sieve/toSieveTree';
 
 import { INBOX } from '@pms/demo';
 import type { MailboxFolder, MailboxMessage, MailboxRule } from '@pms/server/types';
-import { groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
+import { CATEGORY_IDS, CATEGORY_LABELS, groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
 import {
     analyseRules,
     matchesRule,
@@ -50,6 +50,25 @@ export interface Outcome {
     matching: OrderedRule[];
 }
 
+/**
+ * One of Proton's own categories, as it appears in this mailbox.
+ *
+ * Proton sorts these itself once a message has been filed there by hand, so none of them needs a
+ * rule. The screen exists to make that visible — and to show where a *user* rule is doing work
+ * Proton already does, which is the only actionable thing on it.
+ */
+export interface CategorySummary {
+    id: string;
+    label: string;
+    messages: MailboxMessage[];
+    inInbox: number;
+    topSenders: Array<{ address: string; count: number }>;
+    /** Own rules that also move mail Proton already categorised — usually redundant. */
+    alsoMovedByRules: Array<{ ruleId: string; ruleName: string; destination: string; count: number }>;
+    /** True for a label id that is not in `CATEGORY_LABELS`. Reported, never hidden. */
+    unknown: boolean;
+}
+
 export interface MailboxData extends MailboxInput {
     inboxMessages: MailboxMessage[];
     groups: ScoredGroup[];
@@ -60,6 +79,8 @@ export interface MailboxData extends MailboxInput {
     outcomes: Map<string, Outcome>;
     /** The rule that decides where this message goes, when one does. */
     caughtBy: (messageId: string) => { ruleId: string; ruleName: string; destination: string } | undefined;
+    /** Proton's own categories present in this mailbox, in Proton's order, unknown ids last. */
+    categories: CategorySummary[];
     /** Every message of a group, not the five samples the grouping keeps for a preview. */
     messagesInGroup: (group: ScoredGroup) => MailboxMessage[];
     analysisFor: (ruleId: string) => RuleAnalysis | undefined;
@@ -191,6 +212,73 @@ export function buildMailbox(input: MailboxInput): MailboxData {
     // Groups are stable for the life of this mailbox, so resolving one is worth remembering.
     const groupMembers = new Map<string, MailboxMessage[]>();
 
+    /*
+     * Proton's own categories.
+     *
+     * They arrive as ordinary entries in `LabelIDs`, mixed in with folders and labels, so the only
+     * thing separating them is the id. The ids are unverified — see `CATEGORY_LABELS` — which is
+     * why a label that looks like a category but is not in the map is still reported, marked
+     * unknown. Dropping it would hide exactly the evidence needed to correct the map.
+     */
+    const knownFolderIds = new Set(folders.map((folder) => folder.ID));
+    const byCategory = new Map<string, MailboxMessage[]>();
+
+    for (const message of messages) {
+        for (const labelId of message.LabelIDs) {
+            const isKnownCategory = labelId in CATEGORY_LABELS;
+            // A category id is numeric, two digits, and is not one of this account's own folders.
+            const looksLikeCategory = /^\d{1,2}$/.test(labelId) && !knownFolderIds.has(labelId);
+            if (!isKnownCategory && !(looksLikeCategory && !SYSTEM_LOCATIONS.has(labelId))) {
+                continue;
+            }
+            const list = byCategory.get(labelId);
+            if (list === undefined) {
+                byCategory.set(labelId, [message]);
+            } else {
+                list.push(message);
+            }
+        }
+    }
+
+    const categories: CategorySummary[] = [...byCategory.entries()]
+        .map(([id, list]) => {
+            const senders = new Map<string, number>();
+            for (const message of list) {
+                senders.set(message.Sender.Address, (senders.get(message.Sender.Address) ?? 0) + 1);
+            }
+
+            // Which of the user's own rules also move this mail. Proton has already sorted it, so
+            // a rule doing the same work is one more thing to keep in step for no gain.
+            const byRule = new Map<string, { ruleId: string; ruleName: string; destination: string; count: number }>();
+            for (const message of list) {
+                const owner = outcomes.get(message.ID)?.decidedBy;
+                const destination = outcomes.get(message.ID)?.destination;
+                if (owner === undefined || destination === undefined) {
+                    continue;
+                }
+                const existing = byRule.get(owner.id);
+                if (existing === undefined) {
+                    byRule.set(owner.id, { ruleId: owner.id, ruleName: owner.name, destination, count: 1 });
+                } else {
+                    existing.count++;
+                }
+            }
+
+            return {
+                id,
+                label: CATEGORY_LABELS[id] ?? `Unbekannte Kategorie ${id}`,
+                messages: list,
+                inInbox: list.filter((message) => message.LabelIDs.includes(INBOX)).length,
+                topSenders: [...senders.entries()]
+                    .map(([address, count]) => ({ address, count }))
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 5),
+                alsoMovedByRules: [...byRule.values()].sort((a, b) => b.count - a.count),
+                unknown: !(id in CATEGORY_LABELS),
+            };
+        })
+        .sort((a, b) => order(a.id) - order(b.id) || b.messages.length - a.messages.length);
+
     const suggestions: Suggestion[] = groups.map((group) => {
         const folder = proposeFolder(group);
         const { rule, explanation } = ruleFromGroup(
@@ -234,6 +322,8 @@ export function buildMailbox(input: MailboxInput): MailboxData {
 
         byId,
         outcomes,
+
+        categories,
 
         caughtBy: (messageId) => {
             const outcome = outcomes.get(messageId);
@@ -298,4 +388,18 @@ export function buildMailbox(input: MailboxInput): MailboxData {
                 )
             ),
     };
+}
+
+/**
+ * Proton's system *locations*, which look like category ids but are not.
+ *
+ * Every message carries several of these — inbox, all mail, sent — and they have nothing to do
+ * with the categories the user sees as tabs in Proton's own mailbox.
+ */
+const SYSTEM_LOCATIONS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '12', '15']);
+
+/** Proton's display order, with anything unrecognised after it rather than mixed in. */
+function order(id: string): number {
+    const index = (CATEGORY_IDS as readonly string[]).indexOf(id);
+    return index === -1 ? CATEGORY_IDS.length : index;
 }

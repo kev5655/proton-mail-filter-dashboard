@@ -57,15 +57,26 @@ export interface MessageGroup {
 
 export const INBOX_LABEL = '0';
 
-/** Proton's category labels, which arrive on every message and cost nothing to use. */
+/**
+ * Proton's category labels, which arrive on every message and cost nothing to use.
+ *
+ * The names are Proton's own German ones, so a screen here and a screen there say the same thing.
+ * The **ids are not verified** against a real account — they were written down from observation and
+ * nothing in the vendored code or the fixtures confirms them. Anything reading this map has to cope
+ * with an id it does not know rather than dropping the message, which is why `CATEGORY_IDS` exists
+ * as the ordered list of what we claim to recognise: everything outside it is reported as unknown.
+ */
 export const CATEGORY_LABELS: Record<string, string> = {
-    '20': 'Social',
+    '20': 'Soziale Medien',
     '21': 'Werbung',
-    '22': 'Updates',
+    '22': 'Aktualisierungen',
     '24': 'Standard',
     '25': 'Newsletter',
     '26': 'Transaktionen',
 };
+
+/** Display order, which is Proton's own rather than alphabetical. */
+export const CATEGORY_IDS = ['24', '25', '21', '26', '22', '20'] as const;
 
 export interface GroupingOptions {
     /** Below this, a sender is not worth its own rule and is folded into its domain. */
