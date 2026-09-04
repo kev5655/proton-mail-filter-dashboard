@@ -446,54 +446,6 @@ export function SettingsPage(): React.JSX.Element {
             <ProtonConnection />
 
             <div className="card">
-                <h2>Anmelden</h2>
-                <p className="faint">
-                    Die Anmeldung läuft in einem echten Browser-Fenster, und das ist kein Umweg: Proton
-                    schickt bei jeder Anmeldung eine Anti-Missbrauchs-Prüfung mit, die ihr eigenes
-                    Skript in der Seite erzeugt. Ohne sie lehnt Proton ab, egal ob die Zugangsdaten
-                    stimmen. Ein Passkey braucht ohnehin einen echten Browser.
-                </p>
-
-                {/*
-                 * Three modes, and only one of them can have a password manager in it. Said here
-                 * rather than discovered: somebody who picks „Playwright-Chromium" and then wonders
-                 * where their 1Password extension went has been misled by an interface that offered
-                 * a choice without its consequence.
-                 */}
-                <ul className="plain-list">
-                    <li>
-                        <strong>Chrome mit deinem Profil</strong> — der einzige Modus, in dem deine
-                        1Password-Erweiterung überhaupt existiert, weil sie in diesem Profil steckt
-                        und nicht in einem frisch angelegten. Auch der einzige, in dem ein Passkey
-                        funktioniert. <code>PMS_BROWSER_CHANNEL=chrome</code> und{' '}
-                        <code>PMS_BROWSER_PROFILE=…</code>
-                    </li>
-                    <li>
-                        <strong>Playwright-Chromium, sichtbar</strong> — sauber getrennt vom
-                        Alltagsbrowser, ohne Erweiterungen. Passwort von Hand.
-                    </li>
-                    <li>
-                        <strong>Unsichtbar</strong> — für die erste Anmeldung nicht brauchbar: es gibt
-                        niemanden, der tippt, und ein Passkey hat nichts zum Bestätigen. Das
-                        Auffrischen einer bestehenden Sitzung braucht ohnehin keinen Browser.
-                    </li>
-                </ul>
-
-                <p className="notice notice-warning">
-                    <strong>Der Preis des Profil-Modus:</strong> die Proton-Cookies liegen danach in
-                    Chromes eigenem Speicher, nicht nur in unserer verschlüsselten Datei. Das war
-                    schon immer so und steht bisher nur in <code>.env.example</code> — es gehört
-                    hierher.
-                </p>
-
-                <p className="faint">
-                    Diese drei Werte liest der Server beim Start, bevor es diese Seite gibt. Sie
-                    gehören deshalb in <code>.env</code> und nicht hierher — ein Feld, das nichts
-                    bewirkt, wäre schlimmer als keines.
-                </p>
-            </div>
-
-            <div className="card">
                 <h2>Postfach</h2>
                 <p className="faint">
                     {status.source === 'demo'

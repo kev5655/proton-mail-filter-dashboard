@@ -55,7 +55,7 @@ function Register(): React.JSX.Element {
 
     return (
         <form
-            className="stack"
+            className="form-stack"
             onSubmit={(event) => {
                 event.preventDefault();
                 setError(undefined);
@@ -192,7 +192,7 @@ function Unlock(): React.JSX.Element {
 
     return (
         <form
-            className="stack"
+            className="form-stack"
             onSubmit={(event) => {
                 event.preventDefault();
                 submit();
@@ -206,7 +206,7 @@ function Unlock(): React.JSX.Element {
             </p>
 
             {status.withinGrace && (
-                <div className="notice notice-info">
+                <div className="notice notice-info form-stack">
                     <p>
                         Der Schlüssel wird noch gehalten — die Nachfrist läuft. Du kommst ohne
                         Passwort zurück, und die Verbindung zu Proton besteht weiter.
@@ -246,7 +246,7 @@ function Unlock(): React.JSX.Element {
             </label>
 
             {status.requiresTotp && (
-                <label className="field">
+                <label className="field field-narrow">
                     <span>Code aus der Authenticator-App</span>
                     <input
                         type="text"
@@ -264,12 +264,11 @@ function Unlock(): React.JSX.Element {
 
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
-            <button type="submit" className="button" disabled={password === '' || busy}>
-                {busy ? 'Wird geprüft …' : 'Aufschliessen'}
-            </button>
-
-            {status.hasPasskeys && (
-                <>
+            <div className="row">
+                <button type="submit" className="button" disabled={password === '' || busy}>
+                    {busy ? 'Wird geprüft …' : 'Aufschliessen'}
+                </button>
+                {status.hasPasskeys && (
                     <button
                         type="button"
                         className="button button-secondary"
@@ -278,12 +277,15 @@ function Unlock(): React.JSX.Element {
                     >
                         Passwort und Passkey
                     </button>
-                    <p className="faint">
-                        Der Passkey kommt zum Passwort dazu, er ersetzt es nicht: aus einer
-                        WebAuthn-Signatur lässt sich kein Schlüssel gewinnen, und der Schlüssel ist
-                        genau das, was das Passwort aufschliesst.
-                    </p>
-                </>
+                )}
+            </div>
+
+            {status.hasPasskeys && (
+                <p className="faint">
+                    Der Passkey kommt zum Passwort dazu, er ersetzt es nicht: aus einer
+                    WebAuthn-Signatur lässt sich kein Schlüssel gewinnen, und der Schlüssel ist genau
+                    das, was das Passwort aufschliesst.
+                </p>
             )}
         </form>
     );

@@ -101,7 +101,7 @@ function ChangePassword(): React.JSX.Element {
     const usable = current !== '' && next.length >= 8 && !mismatch && repeat !== '';
 
     return (
-        <section className="settings-block">
+        <section className="settings-block form-stack">
             <h3>Passwort ändern</h3>
             <p className="faint">
                 Der Schlüssel bleibt derselbe, nur seine Verpackung wird erneuert. Nichts wird neu
@@ -177,7 +177,7 @@ function Totp(): React.JSX.Element {
 
     if (status.requiresTotp) {
         return (
-            <section className="settings-block">
+            <section className="settings-block form-stack">
                 <h3>Zwei-Faktor</h3>
                 <p className="faint">
                     Eingeschaltet. Der Code wird bei jedem Aufschliessen verlangt — und er ist mit
@@ -219,7 +219,7 @@ function Totp(): React.JSX.Element {
     }
 
     return (
-        <section className="settings-block">
+        <section className="settings-block form-stack">
             <h3>Zwei-Faktor einschalten</h3>
             <p className="faint">
                 Ein Code aus einer Authenticator-App, zusätzlich zum Passwort. Er wird erst
@@ -255,7 +255,7 @@ function Totp(): React.JSX.Element {
                     <p className="faint">
                         <code>{enrolment.uri}</code>
                     </p>
-                    <label className="field">
+                    <label className="field field-narrow">
                         <span>Code aus der App</span>
                         <input
                             type="text"
@@ -313,7 +313,7 @@ function Passkeys(): React.JSX.Element {
     const [label, setLabel] = useState('');
 
     return (
-        <section className="settings-block">
+        <section className="settings-block form-stack">
             <h3>Passkeys</h3>
             <p className="faint">
                 Ein Passkey kommt <strong>zum Passwort dazu</strong>, er ersetzt es nicht: WebAuthn
@@ -403,7 +403,7 @@ function Grace(): React.JSX.Element {
     const usable = minutes.trim() !== '' && Number.isFinite(parsed) && parsed >= 0 && parsed <= 1440;
 
     return (
-        <section className="settings-block">
+        <section className="settings-block form-stack">
             <h3>Nachfrist beim Sperren</h3>
             <p className="faint">
                 So lange wird der Schlüssel nach dem Sperren noch gehalten. Innerhalb dieser Zeit
@@ -412,7 +412,7 @@ function Grace(): React.JSX.Element {
                 sie ab, und dann ist gesperrt auch wirklich zu.
             </p>
 
-            <label className="field">
+            <label className="field field-narrow">
                 <span>Minuten</span>
                 <input
                     type="text"
@@ -454,7 +454,7 @@ function Lock(): React.JSX.Element {
     const { busy, error, run } = useAction();
 
     return (
-        <section className="settings-block">
+        <section className="settings-block form-stack">
             <h3>Sperren</h3>
             <p className="faint">
                 „Sperren" hält den Schlüssel für die Nachfrist. „Sofort sperren" wirft ihn weg,

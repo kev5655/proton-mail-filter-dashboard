@@ -1238,6 +1238,60 @@
     color: var(--danger);
 }
 
+/*
+ * A column of form controls with one rhythm.
+ *
+ * Buttons and `.row` carry no margin of their own, and for a long time none was needed: everywhere
+ * they were first used they sat inside a container with its own `gap`. Placed straight under an
+ * input or a notice they ended up flush against it, which is what a button under a text field looks
+ * like when nobody has said how far apart they should be.
+ *
+ * The gap lives on the container rather than on the button, so the answer stays in one place: a
+ * margin on `.button` would be wrong inside every `.row` that already spaces its children.
+ */
+.form-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+/* Margins would add to the gap and make the rhythm depend on which element came first. */
+.form-stack > .field,
+.form-stack > .notice,
+.form-stack > p,
+.form-stack > h1,
+.form-stack > h3,
+.form-stack > .plain-list {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Buttons take only the width they need; everything else fills the column. */
+.form-stack > .field,
+.form-stack > .notice,
+.form-stack > p,
+.form-stack > h1,
+.form-stack > h3,
+.form-stack > .plain-list {
+    align-self: stretch;
+}
+
+/*
+ * A capped field, because a card is wider than any of these answers.
+ *
+ * A password box the full width of a settings card reads as a place to write a sentence. The cap is
+ * on the field rather than on the input so the label and its explanation wrap with it.
+ */
+.form-stack > .field {
+    max-width: 420px;
+}
+
+/* Six digits, or a number of minutes. A wide box invites a wide answer. */
+.form-stack > .field-narrow {
+    max-width: 220px;
+}
+
 /* A block inside a settings card: its own heading, separated from the one above it. */
 .settings-block {
     margin-top: 22px;
@@ -1252,4 +1306,15 @@
 .settings-block h3 {
     font-size: 14px;
     margin: 0 0 4px;
+}
+
+/*
+ * A button or a line of buttons placed straight into a card, with nothing to space it.
+ *
+ * Not the first child: a row at the top of a card is the card's own heading line, and pushing that
+ * down would read as the card having two different paddings.
+ */
+.card > .button:not(:first-child),
+.card > .row:not(:first-child) {
+    margin-top: 12px;
 }
