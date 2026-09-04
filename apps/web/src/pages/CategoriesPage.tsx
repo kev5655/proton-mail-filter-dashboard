@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { MailList } from '../components/MailList.js';
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { useSettings } from '../llm.js';
 import { protonMailUrl } from '../proton-link.js';
 import { useAppState } from '../state.js';
 
@@ -20,12 +21,15 @@ import { useAppState } from '../state.js';
  */
 export function CategoriesPage(): React.JSX.Element {
     const { categories, inboxMessages } = useMailbox();
+    const settings = useSettings();
     const { source } = useMailboxStatus();
     const { setOpen, goTo } = useAppState();
     const [openId, setOpenId] = useState<string | undefined>(undefined);
 
     const linkFor =
-        source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
+        source === 'proton'
+            ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
+            : undefined;
 
     const categorised = categories.reduce((total, entry) => total + entry.messages.length, 0);
 
@@ -131,7 +135,7 @@ export function CategoriesPage(): React.JSX.Element {
                                 onOpen={setOpen}
                                 search
                                 selectAll
-                                pageSize={10}
+                                pageSize={settings.display.pageSize}
                                 {...(linkFor === undefined ? {} : { linkFor })}
                             />
                         )}

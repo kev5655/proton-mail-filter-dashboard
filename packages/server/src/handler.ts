@@ -97,7 +97,11 @@ export function route(
                 },
             };
         }
-        const refused = sync.start();
+        // The dashboard may ask for a different auto-sync rhythm while it is at it. Carried on this
+        // request rather than on a route of its own, so the promise of exactly two non-GET routes
+        // stays literally true.
+        const asked = (body as { intervalMinutes?: unknown } | undefined)?.intervalMinutes;
+        const refused = sync.start(typeof asked === 'number' ? asked : undefined);
         return refused === undefined
             ? { status: 202, body: { started: true } }
             : { status: 409, body: { error: refused, code: 'SERVER_SYNC_BUSY' } };

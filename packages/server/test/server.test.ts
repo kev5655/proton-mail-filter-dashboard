@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ApplyChannel } from '../src/apply-channel.js';
 import { route } from '../src/handler.js';
-import { SyncChannel } from '../src/sync-channel.js';
+import { isUsableInterval, SyncChannel } from '../src/sync-channel.js';
 import { serveMailbox } from '../src/serve.js';
 import { buildSnapshot } from '../src/snapshot.js';
 
@@ -323,5 +323,72 @@ describe('the offer answers whether a terminal question is coming', () => {
         expect(reply.status).toBe(202);
         expect(reply.body).toMatchObject({ needsTerminal: false });
         expect(reply.body).not.toHaveProperty('waiting');
+    });
+});
+
+
+/**
+ * The auto-sync rhythm, carried on the request that already exists.
+ *
+ * A timer on the machine the user is sitting at does not deserve a third non-GET route — the
+ * promise that there are exactly two is a constraint on the design, not an accident — so the
+ * interval rides on `POST /api/sync`. What matters is that a value the server will not honour is
+ * refused rather than quietly clamped: a number typed by a person and a number chosen by a server
+ * should never silently differ.
+ */
+describe('asking for a different auto-sync interval', () => {
+    function channelSeeing(seen: Array<number | undefined>): SyncChannel {
+        return new SyncChannel(
+            async () => summary(),
+            ({ intervalMinutes }) => {
+                seen.push(intervalMinutes);
+            }
+        );
+    }
+
+    it('passes a sensible interval through to whoever owns the timer', () => {
+        const seen: Array<number | undefined> = [];
+        const reply = route('POST', '/api/sync', db, { sync: channelSeeing(seen) }, { intervalMinutes: 15 });
+
+        expect(reply.status).toBe(202);
+        expect(seen).toEqual([15]);
+    });
+
+    it('treats 0 as off rather than as nonsense', () => {
+        const seen: Array<number | undefined> = [];
+        const reply = route('POST', '/api/sync', db, { sync: channelSeeing(seen) }, { intervalMinutes: 0 });
+
+        expect(reply.status).toBe(202);
+        expect(seen).toEqual([0]);
+    });
+
+    it('refuses a nonsensical one, and starts nothing', () => {
+        const seen: Array<number | undefined> = [];
+        const channel = channelSeeing(seen);
+        const reply = route('POST', '/api/sync', db, { sync: channel }, { intervalMinutes: -3 });
+
+        expect(reply.status).toBe(409);
+        expect(seen).toEqual([]);
+        expect(channel.state.state).toBe('idle');
+    });
+
+    it('runs without one, because most syncs are just syncs', () => {
+        const seen: Array<number | undefined> = [];
+        const reply = route('POST', '/api/sync', db, { sync: channelSeeing(seen) });
+
+        expect(reply.status).toBe(202);
+        expect(seen).toEqual([undefined]);
+    });
+
+    it.each([
+        [0, true],
+        [1, true],
+        [1440, true],
+        [1441, false],
+        [-1, false],
+        [1.5, false],
+        [Number.NaN, false],
+    ])('judges %s as %s', (minutes, usable) => {
+        expect(isUsableInterval(minutes)).toBe(usable);
     });
 });

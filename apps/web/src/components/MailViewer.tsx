@@ -4,6 +4,7 @@ import { bodyFor } from '@pms/demo';
 import { buildFrameDocument, sanitizeMailHtml } from '@pms/mail-view';
 
 import { useMailboxStatus } from '../mailbox.js';
+import { useSettings } from '../llm.js';
 import { protonMailUrl } from '../proton-link.js';
 import type { ListableMessage } from './MailList.js';
 
@@ -39,6 +40,7 @@ export function MailViewer({
 }): React.JSX.Element {
     const [allowImages, setAllowImages] = useState(false);
     const { source } = useMailboxStatus();
+    const settings = useSettings();
 
     // Only the demo has bodies, and not for every message even there. Inventing one was the whole
     // bug this component just had.
@@ -93,7 +95,7 @@ export function MailViewer({
                             <div style={{ marginTop: 8 }}>
                                 <a
                                     className="button button-secondary"
-                                    href={protonMailUrl(message)}
+                                    href={protonMailUrl(message, settings.proton)}
                                     target="_blank"
                                     rel="noreferrer noopener"
                                 >

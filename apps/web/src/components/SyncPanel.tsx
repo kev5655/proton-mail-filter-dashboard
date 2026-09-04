@@ -1,3 +1,4 @@
+import { useSettings } from '../llm.js';
 import { useMailboxStatus } from '../mailbox.js';
 import { STAGE_NAMES, useSync } from '../sync.js';
 
@@ -12,6 +13,7 @@ import { STAGE_NAMES, useSync } from '../sync.js';
 export function SyncPanel(): React.JSX.Element | null {
     const mailbox = useMailboxStatus();
     const { status, connected, start, refusal } = useSync();
+    const settings = useSettings();
 
     if (mailbox.source === 'demo') {
         return null;
@@ -31,7 +33,9 @@ export function SyncPanel(): React.JSX.Element | null {
                     type="button"
                     className="button button-secondary"
                     disabled={running || !connected || !status.available}
-                    onClick={start}
+                    // The wanted interval travels with the run, so the setting takes hold at a
+                    // moment the user can see rather than at one they have to trust.
+                    onClick={() => start(settings.sync.autoSyncMinutes)}
                 >
                     {running ? 'Synchronisiert …' : 'Jetzt synchronisieren'}
                 </button>

@@ -70,15 +70,55 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          * reasonable at all. Folders and filters are read in full every time regardless; they are
          * three requests and everything else is compared against them.
          */
-        const sync = new SyncChannel(async (report) => {
-            const result = await syncAll(db, http, {
-                window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
-                maxMessages: 20_000,
-                incremental: true,
-                onProgress: report,
-            });
-            return result;
-        });
+        /*
+         * The timer, restarted by every run rather than ticking on its own schedule.
+         *
+         * A sync at 4:59 used to be chased by the automatic one at 5:00, which `SyncChannel`
+         * refused and this file logged at `debug` — invisible, harmless, and pointless. Restarting
+         * on each run means the interval means what it says: this long *since the last sync*.
+         *
+         * The dashboard may also ask for a different interval, which rides on the sync request
+         * because the promise is exactly two non-GET routes and a local timer is not worth the
+         * third. It holds for this process only, and the settings screen says so — a value that
+         * looks permanent and is gone after Ctrl+C would be worse than an honest sentence.
+         */
+        let autoSyncMinutes = 0;
+        let autoSync: ReturnType<typeof setInterval> | undefined;
+
+        const restartAutoSync = (): void => {
+            if (autoSync !== undefined) {
+                clearInterval(autoSync);
+                autoSync = undefined;
+            }
+            if (autoSyncMinutes <= 0) {
+                return;
+            }
+            autoSync = setInterval(() => {
+                const refused = sync.start();
+                if (refused !== undefined) {
+                    log.debug({ refused }, 'auto-sync skipped');
+                }
+            }, autoSyncMinutes * 60_000);
+        };
+
+        const sync: SyncChannel = new SyncChannel(
+            async (report) => {
+                const result = await syncAll(db, http, {
+                    window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
+                    maxMessages: 20_000,
+                    incremental: true,
+                    onProgress: report,
+                });
+                return result;
+            },
+            ({ intervalMinutes }) => {
+                if (intervalMinutes !== undefined && intervalMinutes !== autoSyncMinutes) {
+                    log.info({ from: autoSyncMinutes, to: intervalMinutes }, 'auto-sync interval changed');
+                    autoSyncMinutes = intervalMinutes;
+                }
+                restartAutoSync();
+            }
+        );
 
         /*
          * The offer side of writing.
@@ -199,19 +239,10 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          * `--auto-sync 0` turns it off. Some people would rather their mailbox be read when they
          * say so, and that is a reasonable thing to want.
          */
-        const autoSyncMinutes = Number(value(argv, '--auto-sync') ?? DEFAULT_AUTO_SYNC_MINUTES);
-        const autoSync =
-            Number.isFinite(autoSyncMinutes) && autoSyncMinutes > 0
-                ? setInterval(
-                      () => {
-                          const refused = sync.start();
-                          if (refused !== undefined) {
-                              log.debug({ refused }, 'auto-sync skipped');
-                          }
-                      },
-                      autoSyncMinutes * 60_000
-                  )
-                : undefined;
+        const requested = Number(value(argv, '--auto-sync') ?? DEFAULT_AUTO_SYNC_MINUTES);
+        autoSyncMinutes = Number.isFinite(requested) && requested > 0 ? requested : 0;
+        restartAutoSync();
+
 
         const lastSync = getMeta(db, 'lastSyncAt');
         console.log(

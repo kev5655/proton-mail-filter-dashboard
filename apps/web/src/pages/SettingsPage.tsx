@@ -72,6 +72,12 @@ export function SettingsPage(): React.JSX.Element {
                                 }
                                 aria-label="Ollama-Adresse"
                             />
+                            <span className="faint">
+                                <code>/ollama</code> geht über diese Seite an dein lokales Ollama.
+                                Eine vollständige Adresse ist für ein Ollama auf einem anderen
+                                Rechner — dort muss dann <code>OLLAMA_ORIGINS</code> diese Seite
+                                erlauben.
+                            </span>
                         </label>
                         <label className="stack">
                             <span className="faint">Modell</span>
@@ -100,12 +106,37 @@ export function SettingsPage(): React.JSX.Element {
                     </span>
                 </div>
 
+                {/*
+                 * Two different failures behind one word.
+                 *
+                 * „Nicht erreichbar." covered both "nothing is listening" and "Ollama is running
+                 * and refused to talk to this page", and the second one is invisible from here: a
+                 * blocked cross-origin request arrives as the same network error as a dead port.
+                 * Somebody whose model was running perfectly was told it was unreachable, with a
+                 * hint telling them to start it.
+                 */}
                 {state === 'unavailable' && form.llm.mode === 'ollama' && (
                     <p className="notice notice-warning">
-                        Unter {form.llm.baseUrl} antwortet nichts. Läuft <code>ollama serve</code>, und
-                        ist das Modell geladen? Ein Modell holen:{' '}
-                        <code>ollama pull {form.llm.model}</code>. Ohne Modell funktioniert alles
-                        andere weiter.
+                        Unter <code>{form.llm.baseUrl}</code> antwortet nichts.
+                        {form.llm.baseUrl.startsWith('/') ? (
+                            <>
+                                {' '}
+                                Läuft <code>ollama serve</code>? Ein Modell holen:{' '}
+                                <code>ollama pull {form.llm.model}</code>. Läuft Ollama auf einem
+                                anderen Port, gehört er in <code>PMS_OLLAMA_URL</code>, bevor{' '}
+                                <code>pnpm dev</code> startet.
+                            </>
+                        ) : (
+                            <>
+                                {' '}
+                                Zwei mögliche Gründe, und von hier aus sehen sie gleich aus: dort
+                                läuft nichts — oder Ollama läuft und lehnt diese Seite ab, weil ihre
+                                Adresse nicht in <code>OLLAMA_ORIGINS</code> steht. Am einfachsten{' '}
+                                <code>/ollama</code> eintragen, dann fragt die Seite ihren eigenen
+                                Ursprung und die Frage stellt sich nicht.
+                            </>
+                        )}{' '}
+                        Ohne Modell funktioniert alles andere weiter.
                     </p>
                 )}
             </div>
@@ -180,6 +211,47 @@ export function SettingsPage(): React.JSX.Element {
             </div>
 
             <div className="card">
+                <h2>Automatisch synchronisieren</h2>
+                <p className="faint">
+                    Wie oft <code>pnpm serve</code> nachholt, was seit dem letzten Mal dazugekommen
+                    ist. Ein Sync von Hand stellt die Uhr ebenfalls neu — der Abstand gilt also ab
+                    der letzten Synchronisation, nicht ab dem Start.
+                </p>
+
+                <label className="stack" style={{ maxWidth: 220 }}>
+                    <span className="faint">Minuten (0 schaltet ab)</span>
+                    <input
+                        type="number"
+                        min={0}
+                        max={1440}
+                        className="text-input"
+                        value={form.sync.autoSyncMinutes}
+                        onChange={(event) =>
+                            setForm({
+                                ...form,
+                                sync: { autoSyncMinutes: Math.max(0, Number(event.target.value) || 0) },
+                            })
+                        }
+                        aria-label="Minuten zwischen automatischen Synchronisationen"
+                    />
+                </label>
+
+                {/*
+                 * Two limits, both of them the truth rather than a caveat.
+                 *
+                 * The value travels to the server on the next manual sync, because the server has
+                 * no writable configuration and is not getting one for a timer — and it lives in
+                 * that `pnpm serve` process, so Ctrl+C ends it. A number that looks permanent and
+                 * quietly is not would be the more comfortable lie and the worse one.
+                 */}
+                <p className="notice notice-info">
+                    Gilt <strong>ab dem nächsten Sync von Hand</strong> und nur, solange dieses{' '}
+                    <code>pnpm serve</code> läuft. Dauerhaft:{' '}
+                    <code>pnpm serve --auto-sync {form.sync.autoSyncMinutes}</code>.
+                </p>
+            </div>
+
+            <div className="card">
                 <h2>Postfach</h2>
                 <p className="faint">
                     {status.source === 'demo'
@@ -197,9 +269,25 @@ export function SettingsPage(): React.JSX.Element {
                 )}
             </div>
 
+            {/*
+             * Say that something is waiting to be saved.
+             *
+             * Nothing here takes effect on change — a reachability probe per keystroke would hammer
+             * a service while somebody is halfway through typing a port. But the only sign of that
+             * was a greyed-out button going live, which is easy to miss and reads as a setting that
+             * simply does not work: „ich habe Ollama eingeschaltet und es ist trotzdem aus".
+             */}
+            {dirty && (
+                <p className="notice notice-warning" style={{ marginTop: 16 }}>
+                    <strong>Noch nicht gespeichert.</strong> Änderungen an dieser Seite gelten erst
+                    nach <em>Speichern</em> — bis dahin arbeitet das Dashboard mit den vorherigen
+                    Werten weiter.
+                </p>
+            )}
+
             <div className="row" style={{ marginTop: 16 }}>
                 <button type="button" className="button" disabled={!dirty} onClick={save}>
-                    Speichern
+                    {dirty ? 'Speichern' : 'Gespeichert'}
                 </button>
                 {dirty && (
                     <button type="button" className="button button-quiet" onClick={() => setForm(settings)}>

@@ -22,7 +22,7 @@ interface SyncContext {
     status: SyncStatus;
     /** Connected to the stream. False means the server is not there, or not reachable. */
     connected: boolean;
-    start: () => void;
+    start: (intervalMinutes?: number) => void;
     /** Set when starting was refused — a run already going, or a server that cannot sync. */
     refusal: string | undefined;
 }
@@ -81,11 +81,25 @@ export function SyncProvider({
         };
     }, [onFinished]);
 
-    const start = useCallback(() => {
+    /**
+     * Start a sync, and tell the server what rhythm to keep afterwards.
+     *
+     * The interval rides on this request rather than on one of its own: the server promises exactly
+     * two non-GET routes, and a local timer is not worth spending the third on. It also means the
+     * setting takes hold at a moment the user can see — the next manual sync — rather than at some
+     * point they have to trust.
+     */
+    const start = useCallback((intervalMinutes?: number) => {
         setRefusal(undefined);
         void (async () => {
             try {
-                const response = await fetch(START, { method: 'POST' });
+                const response = await fetch(START, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(
+                        intervalMinutes === undefined ? {} : { intervalMinutes }
+                    ),
+                });
                 if (!response.ok) {
                     const body = (await response.json()) as { error?: string };
                     setRefusal(body.error ?? `Der Server antwortete mit ${String(response.status)}.`);

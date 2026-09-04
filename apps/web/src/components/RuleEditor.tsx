@@ -4,6 +4,7 @@ import type { MailboxMessage, MailboxRule } from '@pms/server/types';
 import { FilterStatement } from '@proton/sieve/filterModel';
 
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { useSettings } from '../llm.js';
 import { protonMailUrl } from '../proton-link.js';
 import {
     emptyCondition,
@@ -58,6 +59,7 @@ export function RuleEditor({
     onOpenMail: (message: MailboxMessage) => void;
 }): React.JSX.Element {
     const { messages, folders, caughtBy, categoryCoverage } = useMailbox();
+    const settings = useSettings();
     const { source } = useMailboxStatus();
     const [showAllOthers, setShowAllOthers] = useState(false);
     const [showSieve, setShowSieve] = useState(false);
@@ -158,7 +160,9 @@ export function RuleEditor({
     const locked = stillSieve;
 
     const linkFor =
-        source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
+        source === 'proton'
+            ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
+            : undefined;
 
     const noteFor = (message: { ID: string }): MailNote | undefined => {
         const owner = caughtBy(message.ID);
@@ -396,7 +400,7 @@ export function RuleEditor({
                             messages={matched}
                             onOpen={onOpenMail as (message: { ID: string }) => void}
                             search
-                            pageSize={10}
+                            pageSize={settings.display.pageSize}
                             selectable={false}
                             annotate={noteFor}
                             emptyText="Noch nichts — die Regel trifft im erfassten Zeitraum keine Mail."
@@ -430,7 +434,7 @@ export function RuleEditor({
                             messages={others}
                             onOpen={onOpenMail as (message: { ID: string }) => void}
                             search
-                            pageSize={10}
+                            pageSize={settings.display.pageSize}
                             selectable={false}
                             annotate={noteFor}
                             emptyText="Nichts Verwandtes, das die Regel verfehlt."

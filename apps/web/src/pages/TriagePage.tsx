@@ -7,6 +7,7 @@ import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
 import { log } from '../log.js';
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { useSettings } from '../llm.js';
 import { protonMailUrl } from '../proton-link.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
@@ -20,12 +21,15 @@ import { useStore } from '../store.js';
  */
 export function TriagePage(): React.JSX.Element {
     const { inboxMessages, suggestions, messagesInGroup, caughtBy } = useMailbox();
+    const settings = useSettings();
     const { source } = useMailboxStatus();
     const { setOpen } = useAppState();
 
     // Only for the real mailbox: a demo message id points at nothing in anyone's account.
     const linkFor =
-        source === 'proton' ? (message: { ID: string; Subject: string }) => protonMailUrl(message) : undefined;
+        source === 'proton'
+            ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
+            : undefined;
     const { stage, rules } = useStore();
     const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
@@ -307,7 +311,7 @@ export function TriagePage(): React.JSX.Element {
                                 onOpen={setOpen}
                                 search
                                 selectAll
-                                pageSize={10}
+                                pageSize={settings.display.pageSize}
                                 annotate={noteFor}
                                 {...(linkFor === undefined ? {} : { linkFor })}
                             />
