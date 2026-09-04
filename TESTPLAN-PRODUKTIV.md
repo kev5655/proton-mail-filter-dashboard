@@ -599,3 +599,137 @@ Weiter änderungen:
 - Wen ich mauell einsync gemcht habe resete die 5min zurück. Ich denke die 5min sollte man auch einstellen sollen über die einstellungen.
 - Es soll auch möglich sein wen wir regelnd definiere das wir labels dazufügen könne. Entweder manuell das ich sie auswählen kann oder mit ein llm button der labels für die regel vorschlägt. Ich denke wir sollte auch die Regen aufteilen in Regen die gebauen wurde für emails in odener zu verschiben und regeln die dafür das sind labels auf mails zu packen. Ich denke wir machen mal ein erste einfach version und dan scahuen wir weiter. Was mein Problme ist ist. Es fählt mir schwer labels zu bestimmen für mails desshabl llm hilfe mit lokalem model. Bitte zeige auch and das es das feature gibt und mit tool tip wo man es aktivieren kann mit link dazu. Das kannst du bei allen sachen machen die irgende welche llm umterstützung haben sollten.
 - Noch ein änderungen zu den vorschlägen: Ich denke ich habe das schon erwäht mit den filter das ich so emails schneller suchen kann. Fals nicht hier: Ich möchte ein globaler filter. Der alle unterkategorien filtert wie: "Nach Absender", "Nach Betreff" oder "Nach Organisation" dan aber auch noch spezifischer filte die direkt die kategorien filter also kann ich global nach post filte und dan auf der kategorie noch mals nach finace oder so und beide werden angewant.
+
+---
+
+# Zweiter Durchgang: deine Befunde, abgearbeitet
+
+Alles aus deiner Liste ist gebaut, ausser dem Login über die Website — der kommt als eigener Schritt
+danach. Was du prüfen musst, steht hier; was ich selbst geprüft habe, steht darunter.
+
+**Achtung, zwei Namen haben sich geändert:** `pnpm schreibtest` heisst jetzt `pnpm write-test`,
+`--behalten` heisst `--keep`, `--sperre-geklaert` heisst `--lockout-cleared`. Alte Namen gibt es
+nicht mehr — zwei Namen für dasselbe ist die Sorte Freundlichkeit, die später jemanden verwirrt.
+
+## V-01 · Der Verlauf, der vorher keiner war
+
+Er war nicht kaputt, er war nie angeschlossen: der Schreibweg hat jedes Mal einen korrekten Eintrag
+gebaut, und der Prozess, der ihn aufrief, hat ihn weggeworfen. Es gab keine Tabelle dafür, und
+`undoChange` hatte im ganzen Projekt keinen einzigen Aufrufer.
+
+1. Eine Regel anlegen und bestätigen. **Unter „Verlauf" muss sie jetzt stehen** — mit Datum,
+   Mailzahl und dem Pfad der Sicherung.
+2. `pnpm serve` beenden und neu starten, Dashboard neu laden. **Der Eintrag muss noch da sein.**
+   (Er liegt in der verschlüsselten lokalen Datenbank, nicht im Browser-Tab.)
+3. „Protokoll" ist kein eigener Reiter mehr — es ist die untere Hälfte von „Verlauf". Oben, was am
+   Konto geändert wurde; unten, was das Werkzeug in diesem Tab getan hat. Das ist die einzige Spur,
+   wenn eine Änderung den Server gar nicht erst erreicht.
+
+**Wichtig:** Änderungen von *vor* dieser Version wurden nicht aufgezeichnet und lassen sich deshalb
+auch nicht zurücknehmen. Die Sicherungen unter `data/backups/` liegen alle noch.
+
+## V-02 · Rückgängig — der eigentliche Test
+
+Der gefährlichste Test in dieser Datei. Bitte auf einem Wegwerf-Ordner.
+
+1. Regel anlegen, die Mail verschiebt, bestätigen.
+2. **Vorher von Hand** eine fremde Mail in den Zielordner legen.
+3. Im Verlauf „Rückgängig". Diff ansehen: es müssen **genau die Mails** drinstehen, die die Regel
+   bewegt hat — jede mit ihrem eigenen Vorher-Ort, nicht alle mit demselben.
+4. Im Terminal `ja`.
+5. In Proton nachsehen: Filter weg, die bewegten Mails zurück — **und die von Hand eingelegte liegt
+   noch dort.** Wenn nicht, sofort aufhören und mir Bescheid geben.
+
+Der Diff kommt aus dem Protokoll, nicht aus einer Simulation. Das ist der ganze Unterschied zwischen
+„diese zwanzig Mails zurücklegen" und „diesen Ordner leeren".
+
+## V-03 · Bis hierhin zurück
+
+Drei Änderungen hintereinander machen, dann bei der ältesten „Bis hierhin zurück (3)".
+
+- Ein Diff, eine Rückfrage — nicht drei.
+- Danach im Verlauf: **drei einzelne Undo-Einträge**, nicht einer. Das ist Absicht: ein Rücklauf,
+  der auf halbem Weg stehenbleibt, muss trotzdem ablesbar sein.
+- Bricht ein Schritt ab, hört es dort auf und sagt wo. **Es wird nichts wieder vorgespult** — das
+  wäre eine zweite unbeaufsichtigte Schreibserie im Fehlerpfad.
+
+Ein Undo lässt sich nicht rückgängig machen. Ein Redo ist eine andere Handlung, braucht einen
+eigenen Diff, und zwei Einträge, die sich über den Kontostand uneinig sind, will niemand.
+
+## V-04 · Bestand einsortieren — macht Proton, nicht wir
+
+`applyFiltersToExisting` gab es seit Monaten, exportiert und von niemandem aufgerufen — während das
+Terminal „Bestehende Mail wird mit einbezogen" versprach. Danach wartete die Nachkontrolle dreimal
+auf Bewegungen, die nicht kommen konnten, und meldete ein Teilergebnis.
+
+Im Diff steht jetzt ein Häkchen **„Auch die N vorhandenen Mails einsortieren lassen"**.
+
+- Mit Haken: liegen die alten Mails danach im Ordner?
+- Ohne Haken: bleiben sie liegen, und die Regel gilt nur für Neues?
+- Kommt der `VERIFY_PARTIAL_MOVE` von früher noch?
+
+## V-05 · Labels statt Ordner
+
+Im Regeleditor gibt es jetzt zwei Knöpfe: **„In einen Ordner verschieben"** und **„Mit einem Label
+markieren"**.
+
+1. Eine Regel mit Label-Ziel bauen. Die Vorschau darf **nicht** behaupten, die Mail verlasse den
+   Posteingang.
+2. Speichern, in Proton nachsehen: ist es ein Label geworden und kein Ordner?
+3. Eine Testmail schicken, die die Regel fängt. **Liegt sie im Posteingang und trägt das Label?**
+4. Ein Label und einen Ordner mit demselben Namen anlegen (Proton erlaubt das) und eine Regel auf
+   den Namen bauen. Der Editor warnt. Was macht Proton?
+
+**Nebenbefund, den du sehen wirst:** echte Labels wurden bisher als „unbekannte Kategorie" gemeldet,
+weil eine Label-ID genauso aussieht wie eine Kategorie-ID und wir die Label-Liste weggeworfen haben.
+Unter „Kategorien" sollten deine Labels jetzt verschwunden sein.
+
+## V-06 · Ollama
+
+Der Schalter war nie per env abgeschaltet — es gibt im Browser überhaupt keine env-Variable. Es war
+die Voreinstellung, plus vermutlich Ollamas Origin-Prüfung: eine Seite auf `localhost:5173` darf
+`127.0.0.1:11434` von Haus aus nicht fragen, und der Browser meldet das als denselben Netzwerkfehler
+wie einen toten Port. Das Dashboard sagte dir also „nicht erreichbar" über ein laufendes Modell.
+
+Die Adresse steht jetzt auf `/ollama` und geht über den Dev-Server. In den Einstellungen:
+Ollama wählen → **Speichern** (es steht jetzt auch dran, dass noch nichts gespeichert ist) →
+„Verbindung prüfen".
+
+Danach: im Regeleditor mit Label-Ziel „Label vorschlagen lassen". Es darf **nur aus deinen
+vorhandenen Labels wählen**. Ein neues erfindet es nur, wenn du das Häkchen setzt, höchstens eines,
+und es steht getrennt mit „gibt es noch nicht".
+
+## V-07 · Die kleinen Sachen
+
+- **Ordner anlegen** → erscheint er sofort in der Liste, ohne Sync?
+- **Umbenennen** → kein Browser-Prompt mehr, sondern ein Dialog, der sagt, wie viele Regeln mitgezogen
+  werden.
+- **Blättern** → springt der „Weiter"-Knopf auf der letzten Seite noch?
+- **Umschalter „nur verwandte / alle übrigen"** → springt das UI noch?
+- **Eine Regel in Proton deaktivieren**, syncen → steht hier „deaktiviert" statt „aktiv"?
+- **Sieve-Regel umwandeln** → verschwindet der Hinweis, und steht danach, dass es erst nach
+  *Vormerken* bei Proton ankommt?
+- **Eine Regel in Proton anlegen**, syncen → sie steht in „Regeln" als **„nicht bestätigt"**, ist
+  nicht bearbeitbar, und ein Klick führt nach „Änderungen".
+- **Änderung senden** → dreht sich ein Ladekreis im Knopf?
+- **Kleine Änderung** → steht jetzt **nicht** mehr „die Rückfrage kommt im Terminal", wenn keine kommt?
+- **Vorschläge** → einklappbar, und der Filter oben filtert alle drei Abschnitte gleichzeitig?
+- **Auto-Sync** → Intervall in den Einstellungen setzen, dann einmal von Hand syncen. Ab da gilt es.
+  Es steht auch dran, dass es nur bis zum nächsten `pnpm serve` hält.
+- **Logo** → eigenes, keins von Proton. Wenn es dir nicht gefällt, sag es, das ist billig zu ändern.
+
+## Was ich diesmal selbst geprüft habe
+
+765 Tests plus 26 im echten Browser, alles grün, nichts übersprungen. Jede neue Zusicherung
+gegengeprüft, indem ich den Fehler wieder eingebaut habe — darunter:
+
+- Ohne die bedingungslose Terminal-Rückfrage für Undo und Zurückspulen scheitern drei Tests.
+- Ohne die Kategorie-Zeile in `previousFolderOf` landet eine Mail im Posteingang statt in ihrer
+  alten Kategorie.
+- Wird die Label-Liste wieder weggelassen, meldet der Test das Label als unbekannte Kategorie.
+- Sucht `ensureFolder` wieder in der falschen Liste, entsteht ein zweites Label neben dem
+  vorhandenen — und ein gleichnamiger Ordner wird für das Label gehalten.
+- Ohne die Füllzeilen springt der Pager auf der letzten Seite.
+- Ohne die Seiten-Rückstellung bleibt die Seitenzahl beim Umschalten stehen. Der erste Test dafür
+  war wertlos — er mountete neu und fing dadurch ohnehin bei Seite eins an; er tauscht jetzt die
+  Mails unter einer stehenden Liste.

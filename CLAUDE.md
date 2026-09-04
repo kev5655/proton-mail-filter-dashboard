@@ -9,7 +9,9 @@ tell Proton what to do. There are exactly **two** exceptions, and each is narrow
 it moves only message IDs somebody named, never a folder, a sender or a query:
 
 1. **Undo**, which moves back exactly the message IDs a rule moved, from the undo journal's
-   per-message snapshot — never a message the journal does not name.
+   per-message snapshot — never a message the journal does not name. Reachable from the dashboard as
+   `undo-entry` (one change) and `rewind-to` (a chain, newest first, stopping at the first failure);
+   both go the ordinary route and both demand the terminal unconditionally.
 2. **Moving into one of Proton's categories** (`move-to-category`), which moves exactly the IDs the
    user selected and then saw listed in the diff. It exists because a category cannot be a filter's
    destination: Proton files mail into „Werbung" or „Transaktionen" itself and offers no endpoint
@@ -24,6 +26,13 @@ takes `messageIds: string[]` — "only explicit ids" as a signature, not as a pr
 checks that too. `category-service.ts` has no way to obtain an id: it reads through an injected
 `readCurrent`, and the test checks for the absence. If you are about to add a write path anywhere
 else, that is the signal to stop.
+
+**Proton moving mail on our behalf is not a third exception, and the distinction is load-bearing.**
+`applyFiltersToExisting` (`POST mail/v4/messages/apply-filters`) hands Proton the message ids the
+diff listed and asks it to apply *its own* filters to them. We do not select mail and put it
+somewhere; the service runs the rules it already has. That is what lets a new rule tidy up the
+backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
+because for months the terminal announced it and nothing did it.
 
 **The second exception created no new HTTP route.** It travels over the existing `POST /api/apply`
 like every other change. The capability itself is handed to `applyChange` as
@@ -168,7 +177,7 @@ packages/grouping/      Subject templates, grouping, and the triage ranking
 packages/demo/          A synthetic mailbox, so the interface can be built without an account
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
-packages/changes/       Diff, undo journal, category moves and post-write verification
+packages/changes/       Diff, the change record, category moves and post-write verification
 packages/store/         The encrypted local database
 packages/sync/          Mirroring Proton into it, and reading it back
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
@@ -274,6 +283,17 @@ against a specific failure. The journal records what verification *observed*, ne
 intended: undo works from that record, so a journal built from intentions would move back mail that
 never moved. Nothing is rolled back automatically — deleting a folder moves the mail inside it, and
 an error path is the worst place to do that unwatched.
+
+**The record of what was changed.** `journal_entries` in the encrypted local database, written by
+`pnpm serve` after each apply and read back into the snapshot the dashboard already fetches. It
+holds message ids and label ids and nothing else — the diff had subjects and senders and did not
+need to keep them, and what is not stored cannot leak out of a bug report. `moved` is filled from
+what verification *observed*, never from what the plan intended: undo works from that record, so a
+record built from intentions would move back mail that never moved.
+
+A change is named by `describeChange` and by nothing else. There is no `summary` field: there was,
+written by hand at ten call sites, which produced two wordings for one act depending on which screen
+staged it. The diff, the terminal question and the history have to agree, so the name is derived.
 
 **Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
 `ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the
