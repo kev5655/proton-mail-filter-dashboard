@@ -252,6 +252,9 @@ importers:
       '@pms/core':
         specifier: workspace:*
         version: link:../core
+      '@pms/grouping':
+        specifier: workspace:*
+        version: link:../grouping
       '@pms/proton-api':
         specifier: workspace:*
         version: link:../proton-api

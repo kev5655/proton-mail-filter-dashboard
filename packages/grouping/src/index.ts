@@ -1,8 +1,11 @@
 export {
     groupMessages,
+    categoryIdsOf,
     CATEGORY_IDS,
     CATEGORY_LABELS,
     INBOX_LABEL,
+    PROTON_CATEGORY_ORDER,
+    SYSTEM_LOCATIONS,
     type GroupableMessage,
     type GroupingOptions,
     type GroupKind,

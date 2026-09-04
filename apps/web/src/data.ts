@@ -3,7 +3,14 @@ import { toSieveTree } from '@proton/sieve/toSieveTree';
 
 import { INBOX } from '@pms/demo';
 import type { MailboxFolder, MailboxMessage, MailboxRule } from '@pms/server/types';
-import { CATEGORY_IDS, CATEGORY_LABELS, groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
+import {
+    categoryIdsOf,
+    CATEGORY_IDS,
+    CATEGORY_LABELS,
+    groupMessages,
+    scoreGroups,
+    type ScoredGroup,
+} from '@pms/grouping';
 import {
     analyseRules,
     matchesRule,
@@ -120,9 +127,17 @@ function proposeFolder(group: ScoredGroup): string {
     if (haystack.includes('rechnung') || haystack.includes('abrechnung')) {
         return 'Kosten Bestellung';
     }
-    if (group.categories.includes('Newsletter') || group.categories.includes('Werbung')) {
-        return 'Newsletter';
-    }
+
+    /*
+     * There used to be a branch here proposing a folder named "Newsletter" *because* Proton had
+     * already filed the group under Newsletter or Werbung. That is the duplicate filter this tool
+     * exists to prevent, suggested by the tool itself: a rule that moves mail Proton already sorts,
+     * into a folder that duplicates a category the user can already click.
+     *
+     * The category is still worth knowing — it is shown beside the suggestion, and the rule editor
+     * says how much of the match Proton already handles — but it must not be the *reason* for a
+     * destination.
+     */
 
     const organisation = (group.match.domain ?? group.match.sender?.split('@')[1] ?? 'Diverses').split('.')[0];
     return organisation === undefined || organisation === ''
@@ -215,22 +230,20 @@ export function buildMailbox(input: MailboxInput): MailboxData {
     /*
      * Proton's own categories.
      *
-     * They arrive as ordinary entries in `LabelIDs`, mixed in with folders and labels, so the only
-     * thing separating them is the id. The ids are unverified — see `CATEGORY_LABELS` — which is
-     * why a label that looks like a category but is not in the map is still reported, marked
-     * unknown. Dropping it would hide exactly the evidence needed to correct the map.
+     * They arrive as ordinary entries in `LabelIDs`, mixed in with folders and labels, so the id is
+     * the only thing separating them. `categoryIdsOf` is the single definition of which ids count —
+     * shared with the sync engine, which writes the same judgement into the history. Two copies of
+     * this rule is how `16` and `40` came to be missing from one of them, and a snoozed message was
+     * reported to the user as an unknown category.
+     *
+     * An unrecognised id is still reported, marked unknown. Dropping it would hide exactly the
+     * evidence needed to correct the map.
      */
     const knownFolderIds = new Set(folders.map((folder) => folder.ID));
     const byCategory = new Map<string, MailboxMessage[]>();
 
     for (const message of messages) {
-        for (const labelId of message.LabelIDs) {
-            const isKnownCategory = labelId in CATEGORY_LABELS;
-            // A category id is numeric, two digits, and is not one of this account's own folders.
-            const looksLikeCategory = /^\d{1,2}$/.test(labelId) && !knownFolderIds.has(labelId);
-            if (!isKnownCategory && !(looksLikeCategory && !SYSTEM_LOCATIONS.has(labelId))) {
-                continue;
-            }
+        for (const labelId of categoryIdsOf(message.LabelIDs, knownFolderIds)) {
             const list = byCategory.get(labelId);
             if (list === undefined) {
                 byCategory.set(labelId, [message]);
@@ -389,14 +402,6 @@ export function buildMailbox(input: MailboxInput): MailboxData {
             ),
     };
 }
-
-/**
- * Proton's system *locations*, which look like category ids but are not.
- *
- * Every message carries several of these — inbox, all mail, sent — and they have nothing to do
- * with the categories the user sees as tabs in Proton's own mailbox.
- */
-const SYSTEM_LOCATIONS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '12', '15']);
 
 /** Proton's display order, with anything unrecognised after it rather than mixed in. */
 function order(id: string): number {

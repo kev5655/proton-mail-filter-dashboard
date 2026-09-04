@@ -58,13 +58,30 @@ export interface MessageGroup {
 export const INBOX_LABEL = '0';
 
 /**
- * Proton's category labels, which arrive on every message and cost nothing to use.
+ * Proton's category labels — the tabs their own mailbox shows above the inbox.
  *
- * The names are Proton's own German ones, so a screen here and a screen there say the same thing.
- * The **ids are not verified** against a real account — they were written down from observation and
- * nothing in the vendored code or the fixtures confirms them. Anything reading this map has to cope
- * with an id it does not know rather than dropping the message, which is why `CATEGORY_IDS` exists
- * as the ordered list of what we claim to recognise: everything outside it is reported as unknown.
+ * **Verified**, which they were not before. The ids come from `MAILBOX_LABEL_IDS` in Proton's own
+ * `@proton/shared`, which ships minified inside the desktop client:
+ *
+ * ```
+ * $ strings /usr/lib/proton-mail/resources/app.asar | grep -o 'CATEGORY_[A-Z]*="[0-9]*"'
+ * ```
+ *
+ * Read from proton-mail 1.13.3 (Debian package, binary dated 2026-06-11) on 2026-09-04. Recording
+ * the version matters more than recording the values: it is what makes a future divergence
+ * something anyone can check rather than argue about.
+ *
+ * Two things that look like mistakes and are not:
+ *
+ *  - **There is no 23.** The sequence has a hole. Anybody "completing" it would be inventing a
+ *    category Proton does not have.
+ *  - **A category is not a label type.** `LABEL_TYPE` runs 1, 2, 3, 4 and none of them means
+ *    category; these are fixed system label ids that ride along in a message's `LabelIDs` exactly
+ *    like the inbox or the archive. There is nothing to fetch — reading them costs no endpoint.
+ *
+ * Anything consuming this map still has to cope with an id it does not know rather than dropping
+ * the message: Proton can add a category tomorrow, and the mailbox is the only evidence we would
+ * get.
  */
 export const CATEGORY_LABELS: Record<string, string> = {
     '20': 'Soziale Medien',
@@ -75,8 +92,69 @@ export const CATEGORY_LABELS: Record<string, string> = {
     '26': 'Transaktionen',
 };
 
-/** Display order, which is Proton's own rather than alphabetical. */
+/**
+ * Proton's own order, from the `MAIL_CATEGORIES` array next to the ids in the same bundle.
+ *
+ * Kept separately from `CATEGORY_IDS` because the two are different claims. This one is a fact
+ * about Proton; the other is our display choice. Collapsing them would make a future refresh look
+ * like a bug in our layout.
+ */
+export const PROTON_CATEGORY_ORDER = ['24', '20', '21', '25', '26', '22'] as const;
+
+/** Our display order: the ones a person acts on first, then the rest. */
 export const CATEGORY_IDS = ['24', '25', '21', '26', '22', '20'] as const;
+
+/**
+ * Proton's system *locations*, which look like category ids and are not.
+ *
+ * Every message carries several — inbox, all mail, sent — and they have nothing to do with the
+ * category tabs. They live here, beside the map they must stay disjoint from, because the previous
+ * arrangement had this list in `apps/web` and the category map in this package: two lists in two
+ * packages that had to agree, and did not. `16` (snoozed) and `40` (soft-deleted) were missing from
+ * the copy, so a snoozed message was reported to the user as an unknown category.
+ *
+ * From the same bundle as `CATEGORY_LABELS`.
+ */
+export const SYSTEM_LOCATIONS: ReadonlySet<string> = new Set([
+    '0', // inbox
+    '1', // all drafts
+    '2', // all sent
+    '3', // trash
+    '4', // spam
+    '5', // all mail
+    '6', // archive
+    '7', // sent
+    '8', // drafts
+    '9', // outbox
+    '10', // starred
+    '12', // scheduled
+    '15', // almost all mail
+    '16', // snoozed
+    '40', // soft deleted
+]);
+
+/**
+ * The category ids on a message, by the one definition the whole project uses.
+ *
+ * Extracted so the sync engine and the dashboard cannot disagree about what a category is. They ask
+ * the same question at different moments — the mirror while writing history, the dashboard while
+ * rendering it — and a second implementation would eventually answer differently.
+ *
+ * An id we do not recognise is kept when it is shaped like a category and is neither a system
+ * location nor one of this account's own folders. Reporting it as unknown is the only way the map
+ * above ever gets corrected; silently dropping it would make Proton's next category invisible.
+ */
+export function categoryIdsOf(
+    labelIds: readonly string[],
+    knownFolderIds: ReadonlySet<string>
+): string[] {
+    return labelIds.filter((labelId) => {
+        if (labelId in CATEGORY_LABELS) {
+            return true;
+        }
+        return /^\d{1,2}$/.test(labelId) && !SYSTEM_LOCATIONS.has(labelId) && !knownFolderIds.has(labelId);
+    });
+}
 
 export interface GroupingOptions {
     /** Below this, a sender is not worth its own rule and is folded into its domain. */

@@ -4,6 +4,7 @@ export {
     mirrorFilters,
     mirrorLabels,
     mirrorMessages,
+    recordCategoryObservations,
     getMeta,
     setMeta,
     type Snapshot,

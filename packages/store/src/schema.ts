@@ -93,4 +93,53 @@ export const MIGRATIONS: readonly Migration[] = [
             ) STRICT;
         `,
     },
+    {
+        summary: 'category history, so Proton\'s own sorting can be observed over time',
+        sql: `
+            -- Which of Proton's categories a message carried, and when that stopped being true.
+            --
+            -- Proton sorts inbox mail into categories by itself and keeps doing it once a message
+            -- has been filed. That behaviour has no interface, no filter and no list: it is only
+            -- visible in its effect. And its effect is unrecoverable from the rest of this
+            -- database, because \`mirrorMessages\` clears and rewrites \`message_labels\` on every
+            -- sync — after which what a message carried yesterday is simply gone.
+            --
+            -- So this table remembers. It is the only thing in the mirror that is not a copy of a
+            -- current Proton state, and it is deliberately append-mostly: rows are opened and
+            -- closed, never rewritten, because a history that is edited is not a history.
+            CREATE TABLE message_categories (
+                message_id  TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+                category_id TEXT NOT NULL,
+                -- Sync timestamps, not message timestamps. The question is when *we looked*.
+                first_seen  INTEGER NOT NULL,
+                last_seen   INTEGER NOT NULL,
+                -- Set by the first sync that saw the message without this category.
+                gone_at     INTEGER,
+                PRIMARY KEY (message_id, category_id)
+            ) STRICT;
+
+            CREATE INDEX message_categories_seen ON message_categories (first_seen);
+
+            -- The same observation aggregated per sender and per sync.
+            --
+            -- Derivable from the table above by joining against messages, and stored anyway: the
+            -- screen that shows "what does Proton do with this sender" would otherwise scan the
+            -- whole message table on every render, and the aggregate is what every question on
+            -- that screen is actually about.
+            CREATE TABLE category_observations (
+                sender_address TEXT NOT NULL,
+                -- Kept alongside the address rather than derived on read, so "what does Proton do
+                -- with this whole domain" is a query rather than a scan plus string surgery.
+                sender_domain  TEXT NOT NULL,
+                category_id    TEXT NOT NULL,
+                observed_at    INTEGER NOT NULL,
+                message_count  INTEGER NOT NULL,
+                PRIMARY KEY (sender_address, category_id, observed_at)
+            ) STRICT;
+
+            CREATE INDEX category_observations_at ON category_observations (observed_at);
+            CREATE INDEX category_observations_domain
+                ON category_observations (sender_domain, observed_at);
+        `,
+    },
 ];

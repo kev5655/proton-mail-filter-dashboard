@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@pms/core": "workspace:*",
+    "@pms/grouping": "workspace:*",
     "@pms/proton-api": "workspace:*",
     "@pms/store": "workspace:*"
   }
