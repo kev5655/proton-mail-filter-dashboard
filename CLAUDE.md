@@ -85,8 +85,9 @@ the module that performs it.
 
 `packages/server/` is the same idea one layer out, and the guarantee there has a precise shape:
 
-> **HTTP is an offer, not a trigger. No change reaches Proton without a `ja` typed at the terminal
-> where `pnpm serve` runs.**
+> **HTTP is an offer, not a trigger. No change reaches Proton without a second answer from a
+> person — a `ja` typed at the terminal where `pnpm serve` runs, or, for a deletion, the app
+> password re-entered in the dashboard beside the diff.**
 
 The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
 parses a request cannot reach the code that performs one. They meet through a channel object handed
@@ -97,6 +98,38 @@ records an offer and answers `202` while nothing has happened yet.
 
 `packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
 One file to read when someone asks what this tool can change.
+
+### Where the second question is asked, and why deleting moved
+
+`weigh()` decides both, and it now returns a *place* rather than a boolean:
+
+- **`terminal`** for everything that moves mail — a category move, an undo, a rewind — and for any
+  change that resorts a large share of the mailbox. A keystroke in the window where `pnpm serve`
+  runs cannot be produced by anything speaking HTTP, and that is worth the walk.
+- **`password`** for a deletion. The app password, re-entered in the dashboard next to the diff that
+  says what disappears.
+
+The exchange is real and is stated here rather than implied. A password can be produced by anything
+that knows it; a terminal keystroke cannot be produced over HTTP at all. What it buys is that the
+person deleting a folder sees, at that moment, what is inside it and where that mail goes — and a
+confirmation performed in another window, away from the thing being confirmed, is one people learn
+to perform without reading. That is the failure `apply.ts` is built against, and the terminal was
+starting to cause it.
+
+It kept its teeth by being a secret rather than a gesture: the password is checked by the same
+`Vault` that holds the key to the mailbox, through the same Argon2id derivation an unlock uses, so a
+wrong one is refused and guessing is slow by construction. **Where there is no account, the terminal
+keeps the deletion** — an installation with no password to ask for has nothing to check an answer
+against, and then the gesture is all there is.
+
+Two placement rules follow, and both are checked:
+
+- **The password never travels on `/api/apply`.** A `ChangeRequest` is digested, journalled and
+  reported; nothing carrying a password may end up in a record. It goes to `/api/account` as
+  `confirm-change`, which is where the account's secrets already live.
+- **The grant is keyed by request id and expires.** „The user typed their password recently" would
+  confirm whatever arrived next; five minutes of silence answers `expired`, and the change is
+  refused rather than left armed for as long as the server runs.
 
 ### The password is the key, not a door
 
@@ -259,7 +292,7 @@ packages/store/         The encrypted local database
 packages/sync/          Mirroring Proton into it, and reading it back
 packages/account/       The app's own account: the password that is the key to the local data
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
-packages/apply/         The one path that writes to Proton, behind a terminal confirmation
+packages/apply/         The one path that writes to Proton, behind a second confirmation
 apps/spike/             M0 read-only probe, plus `--sync` and `--serve`
 apps/web/               The dashboard. Reads the real mirror when the server runs, else the demo.
 ```
@@ -278,7 +311,7 @@ pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
 pnpm sync               # mirror the account into the local encrypted database
 pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
-                        # and for confirming changes — it asks in *this* terminal
+                        # and for confirming changes that move mail — it asks in *this* terminal
 pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
 ```
 

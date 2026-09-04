@@ -249,6 +249,22 @@ export class Vault {
         return this.#graceUntil !== undefined && this.#masterSecret !== undefined;
     }
 
+    /**
+     * Whether this is the password, without changing anything.
+     *
+     * Used where a second confirmation has to be a *secret* rather than a gesture — deleting a
+     * folder, for one. It goes through the same unwrapping as an unlock, so there is no separate
+     * password check that could drift out of step with the real one, and a wrong password fails
+     * here exactly as it fails there.
+     *
+     * It costs a full Argon2id derivation, which is the point: the same slowness that makes a
+     * stolen file useless makes this unpleasant to guess at.
+     */
+    verifyPassword(password: string): void {
+        const record = this.#requireRecord();
+        unwrapMasterKey(record.wrapped, deriveKek(password, record.kdf));
+    }
+
     /** Change the password: the master key stays, only its wrapping is redone. */
     async changePassword(current: string, next: string): Promise<void> {
         const record = this.#requireRecord();

@@ -59,60 +59,87 @@ export interface ConfirmationOffer {
     shortDigest: string;
     /** Why this one is being asked about when most are not. */
     reason: string;
+    /** Where the answer has to come from. The runner routes on this; it never decides it. */
+    place: Exclude<ConfirmationPlace, 'none'>;
 }
 
 /**
- * Which changes are asked about twice.
+ * Which changes are asked about twice, and where the second question is asked.
  *
  * Every change is already confirmed once: the diff dialog shows the consequences and the user
- * clicks a button naming them. Asking again in a terminal for every small rule turns that second
- * question into a reflex, and a confirmation people answer without reading protects nothing — which
- * is the same argument CLAUDE.md makes for never skipping the diff.
+ * clicks a button naming them. Asking again for every small rule turns the second question into a
+ * reflex, and a confirmation people answer without reading protects nothing — which is the same
+ * argument CLAUDE.md makes for never skipping the diff.
  *
- * So the second question is kept for the changes where being wrong is expensive: one that resorts a
- * large share of the mailbox, and one that removes something. A rule catching a handful of mails is
- * visible, checkable and undoable; a rule catching a fifth of the account, or a deletion, is not so
- * easily walked back.
+ * So the second question is kept for the changes where being wrong is expensive. What changed is
+ * *where* it is asked, and only for deletions:
+ *
+ *  - **`terminal`** — a keystroke where `pnpm serve` runs, in a place no HTTP request can reach.
+ *    Kept for everything that moves mail: a category move, an undo, a rewind, and any change that
+ *    resorts a large share of the mailbox.
+ *  - **`password`** — the app password, re-entered in the dashboard, next to a preview of what is
+ *    about to disappear. Deletions only.
+ *
+ * The exchange is deliberate and worth stating plainly, because it is a real one. A terminal
+ * keystroke cannot be produced by anything speaking HTTP; a password can, by anything that knows
+ * it. What it gains is that the person deleting a folder sees, at that moment, which mail is inside
+ * it and where that mail will end up — and a confirmation somebody has to walk to another window
+ * for is one they learn to perform without reading, which is the failure this whole file is built
+ * against.
+ *
+ * It is also a secret rather than a gesture: a stray local process can `POST /api/apply`, but it
+ * cannot produce the password, and a wrong one is refused by the same `Vault` that holds the key to
+ * the mailbox. Where there is no account — an installation with no password to ask for — the
+ * terminal keeps the deletion, because then the gesture is all there is.
  */
 export const IMPACT_SHARE = 0.2;
 export const IMPACT_COUNT = 500;
 
-export function weigh(
-    request: ChangeRequest,
-    mailboxSize: number
-): { needsTerminal: boolean; reason: string } {
+/** Where the second question is asked, when there is one. */
+export type ConfirmationPlace = 'none' | 'password' | 'terminal';
+
+export interface Weight {
+    /** True for anything that needs a second confirmation, wherever it is asked. */
+    needsTerminal: boolean;
+    place: ConfirmationPlace;
+    reason: string;
+}
+
+export function weigh(request: ChangeRequest, mailboxSize: number): Weight {
     const moves = request.plan.moves.length;
+    const terminal = (reason: string): Weight => ({ needsTerminal: true, place: 'terminal', reason });
 
     // Before the size rules, and unconditional. This is the change kind that moves mail, the second
     // exception to the first sentence of CLAUDE.md, and it should cost a keystroke every single
     // time — including for one message. The thresholds below exist to keep the terminal question
     // worth reading; exempting the one kind that touches somebody's mail would defeat that.
     if (request.change.kind === 'move-to-category') {
-        return { needsTerminal: true, reason: 'Diese Änderung verschiebt Mail.' };
+        return terminal('Diese Änderung verschiebt Mail.');
     }
     // Likewise unconditional, and for the same reason: an undo moves mail back and removes a rule.
     // It is also the change most likely to be reached for in a hurry.
     if (request.change.kind === 'undo-entry') {
-        return { needsTerminal: true, reason: 'Diese Änderung nimmt eine frühere zurück und verschiebt Mail.' };
+        return terminal('Diese Änderung nimmt eine frühere zurück und verschiebt Mail.');
     }
     if (request.change.kind === 'rewind-to') {
-        return { needsTerminal: true, reason: 'Diese Änderung nimmt mehrere frühere zurück und verschiebt Mail.' };
+        return terminal('Diese Änderung nimmt mehrere frühere zurück und verschiebt Mail.');
     }
     if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
-        return { needsTerminal: true, reason: 'Diese Änderung löscht etwas.' };
+        return {
+            needsTerminal: true,
+            place: 'password',
+            reason: 'Diese Änderung löscht etwas.',
+        };
     }
     if (moves >= IMPACT_COUNT) {
-        return { needsTerminal: true, reason: `Diese Änderung sortiert ${String(moves)} Mails um.` };
+        return terminal(`Diese Änderung sortiert ${String(moves)} Mails um.`);
     }
     if (mailboxSize > 0 && moves / mailboxSize >= IMPACT_SHARE) {
         const percent = Math.round((moves / mailboxSize) * 100);
-        return {
-            needsTerminal: true,
-            reason: `Diese Änderung betrifft ${String(percent)} % der erfassten Mails.`,
-        };
+        return terminal(`Diese Änderung betrifft ${String(percent)} % der erfassten Mails.`);
     }
 
-    return { needsTerminal: false, reason: '' };
+    return { needsTerminal: false, place: 'none', reason: '' };
 }
 
 export interface ApplyContext {
@@ -223,21 +250,27 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     // 3 — the grant, when the change is big enough to deserve a second one
     const weight = weigh(request, context.mailboxSize ?? 0);
     if (weight.needsTerminal) {
+        const where = weight.place === 'password' ? 'password' : 'terminal';
         const verdict = await context.confirm({
             request,
             shortDigest: shortDigest(digestOf(request)),
             reason: weight.reason,
+            place: where,
         });
+        // Named for where it was actually asked. „Die Rückfrage im Terminal ist abgelaufen" in
+        // front of somebody who was looking at a password field is a message that sends them to
+        // the wrong window.
+        const asked = where === 'password' ? 'im Dashboard' : 'im Terminal';
         if (verdict === 'expired') {
             throw new AppError('APPLY_CONFIRMATION_EXPIRED', {
-                message: 'Die Rückfrage im Terminal ist abgelaufen.',
-                hint: 'Es wurde nichts geschrieben. Die Änderung im Dashboard erneut bestätigen.',
+                message: `Die Rückfrage ${asked} ist abgelaufen.`,
+                hint: 'Es wurde nichts geschrieben. Die Änderung erneut bestätigen.',
                 context: { change: request.change.kind },
             });
         }
         if (verdict !== 'granted') {
             throw new AppError('APPLY_NOT_CONFIRMED', {
-                message: 'Die Änderung wurde im Terminal abgelehnt.',
+                message: `Die Änderung wurde ${asked} abgelehnt.`,
                 hint: 'Es wurde nichts geschrieben.',
                 context: { change: request.change.kind },
             });

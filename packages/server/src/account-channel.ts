@@ -90,6 +90,14 @@ export interface AccountRunner {
     lock: (immediate: boolean) => void;
     /** Come back in while the key is still held. Refused once it is gone. */
     resume: () => Promise<void>;
+    /**
+     * Grant one pending change, against the app password.
+     *
+     * On this surface rather than on `/api/apply`, and that placement is the point: a password
+     * belongs to the account, and a `ChangeRequest` is digested, journalled and reported. Nothing
+     * that carries a password may end up in a record somebody can read back.
+     */
+    confirmChange: (requestId: string, password: string) => Promise<void>;
     changePassword: (current: string, next: string) => Promise<void>;
     /** Mint a secret and its otpauth URI. Nothing is stored until a code proves it arrived. */
     beginTotp: () => Promise<{ secret: string; uri: string }>;
@@ -166,6 +174,20 @@ export class AccountChannel {
 
                 case 'resume':
                     await this.#runner.resume();
+                    return this.#ok();
+
+                /*
+                 * The second confirmation for a deletion, which used to be a keystroke at a
+                 * terminal.
+                 *
+                 * The exchange is written down in `weigh()`: a password can be produced by
+                 * anything that knows it, where a terminal keystroke cannot be produced over HTTP
+                 * at all — but the person deleting a folder now sees, at that moment, what is
+                 * inside it and where that mail goes. A confirmation somebody has to walk to
+                 * another window for is one they learn to perform without reading.
+                 */
+                case 'confirm-change':
+                    await this.#runner.confirmChange(text(input['requestId']), text(input['password']));
                     return this.#ok();
 
                 case 'change-password':

@@ -1,4 +1,4 @@
-export { applyChange, weigh, IMPACT_COUNT, IMPACT_SHARE, type ApplyContext, type ApplyOutcome, type ConfirmationOffer, type ConfirmationVerdict } from './apply.js';
+export { applyChange, weigh, IMPACT_COUNT, IMPACT_SHARE, type ApplyContext, type ApplyOutcome, type ConfirmationOffer, type ConfirmationPlace, type ConfirmationVerdict, type Weight } from './apply.js';
 export { digestOf, shortDigest, type ChangeRequest } from './request.js';
 export { confirmAtTerminal } from './confirm.js';
 /*

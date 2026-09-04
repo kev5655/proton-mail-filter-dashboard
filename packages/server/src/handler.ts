@@ -96,6 +96,7 @@ export function route(
                       // in the terminal, and promising that question for every change taught the
                       // reader to disbelieve it.
                       needsTerminal: outcome.needsTerminal,
+                      place: outcome.place,
                       reason: outcome.reason,
                       ...(outcome.needsTerminal ? { waiting: 'Bestätigung im Terminal' } : {}),
                   },

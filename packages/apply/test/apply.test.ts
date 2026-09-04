@@ -608,6 +608,7 @@ describe('moving mail into one of Protons categories', () => {
 
         expect(weigh(one, 10_000)).toEqual({
             needsTerminal: true,
+            place: 'terminal',
             reason: 'Diese Änderung verschiebt Mail.',
         });
     });

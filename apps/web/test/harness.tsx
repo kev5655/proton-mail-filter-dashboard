@@ -1,3 +1,4 @@
+import { AccountProvider } from '../src/account.js';
 import { ApplyProvider } from '../src/apply.js';
 import { ModelProvider } from '../src/llm.js';
 import { MailboxProvider } from '../src/mailbox.js';
@@ -22,6 +23,7 @@ export function Providers({
     withStore?: boolean;
 }): React.JSX.Element {
     return (
+        <AccountProvider>
         <MailboxProvider>
             <AppStateProvider>
                 <ModelProvider>
@@ -31,5 +33,6 @@ export function Providers({
                 </ModelProvider>
             </AppStateProvider>
         </MailboxProvider>
+        </AccountProvider>
     );
 }

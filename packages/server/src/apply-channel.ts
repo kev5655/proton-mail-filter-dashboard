@@ -26,18 +26,23 @@ export type OfferRunner = (request: unknown) => Promise<{ backupPath: string; pa
 /**
  * What the offer step worked out about a change, before anybody was asked about it.
  *
- * `needsTerminal` travels back to the dashboard so it can stop claiming a terminal question that is
- * not coming. The rule that decides it lives in `@pms/apply`, which the browser may not import —
- * it pulls the Proton client with it — so the answer is computed here, where the decision is made
- * anyway, and carried in the `202`.
+ * `needsTerminal` and `place` travel back to the dashboard so it can stop claiming a terminal
+ * question that is not coming — and, for a deletion, ask its own. The rule that decides both lives
+ * in `@pms/apply`, which the browser may not import (it pulls the Proton client with it), so the
+ * answer is computed here, where the decision is made anyway, and carried in the `202`.
  */
 export interface Described {
     id: string;
     summary: string;
     shortDigest: string;
-    /** Whether a typed „ja" at the terminal is required for this particular change. */
+    /** Whether this particular change is asked about a second time at all. */
     needsTerminal: boolean;
-    /** Why, when it is. Empty otherwise. */
+    /**
+     * Where that second question is asked: at the terminal, or in the dashboard against the app
+     * password. `'none'` when there is no second question.
+     */
+    place: 'none' | 'password' | 'terminal';
+    /** Why, when there is one. Empty otherwise. */
     reason: string;
 }
 
@@ -45,6 +50,7 @@ export interface Offered {
     id: string;
     shortDigest: string;
     needsTerminal: boolean;
+    place: 'none' | 'password' | 'terminal';
     reason: string;
 }
 
@@ -137,6 +143,7 @@ export class ApplyChannel {
             id: described.id,
             shortDigest: described.shortDigest,
             needsTerminal: described.needsTerminal,
+            place: described.place,
             reason: described.reason,
         };
     }

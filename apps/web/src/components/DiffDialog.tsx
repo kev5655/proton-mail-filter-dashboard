@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { describeChange, describePlan } from '@pms/changes';
 
+import { useAccount } from '../account.js';
 import { useStore } from '../store.js';
 import { useApply } from '../apply.js';
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
@@ -205,7 +206,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                  * six characters shown here are the same ones printed there — if they differ, the
                  * terminal is asking about something other than what is on this screen.
                  */}
-                {phase.phase === 'waiting' && phase.needsTerminal && (
+                {phase.phase === 'waiting' && phase.place === 'terminal' && (
                     <div className="notice notice-info">
                         <strong>Warte auf Bestätigung im Terminal.</strong> Dort, wo{' '}
                         <code>pnpm serve</code> läuft, steht jetzt eine Rückfrage
@@ -213,6 +214,14 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                         Prüfziffer: <code>{phase.shortDigest}</code>. Ohne getipptes „ja" passiert
                         nichts.
                     </div>
+                )}
+
+                {phase.phase === 'waiting' && phase.place === 'password' && (
+                    <ConfirmWithPassword
+                        requestId={phase.requestId}
+                        shortDigest={phase.shortDigest}
+                        reason={phase.reason}
+                    />
                 )}
 
                 {phase.phase === 'waiting' && !phase.needsTerminal && (
@@ -293,7 +302,9 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                         {phase.phase === 'offering'
                             ? 'Wird übermittelt …'
                             : phase.phase === 'waiting'
-                            ? 'Warte auf das Terminal …'
+                            ? phase.place === 'password'
+                                ? 'Warte auf dein Passwort …'
+                                : 'Warte auf das Terminal …'
                             : movesMail
                               ? `${moves.length} Mails verschieben`
                               : moves.length > 0
@@ -323,10 +334,93 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                            * asking it teaches people to disbelieve the sentence, which is the one
                            * thing it cannot afford.
                            */
-                          'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Bei grösseren Änderungen kommt zusätzlich eine Rückfrage im Terminal.'}{' '}
+                          'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Beim Löschen wird gleich hier noch einmal nach deinem Passwort gefragt; bei Änderungen, die Mail verschieben, kommt eine Rückfrage im Terminal.'}{' '}
                     Die Änderung lässt sich im Verlauf einzeln rückgängig machen.
                 </p>
             </div>
         </div>
     );
+}
+
+/**
+ * The second confirmation for a deletion, asked here instead of at a terminal.
+ *
+ * This used to be a typed „ja" in the window where `pnpm serve` runs. That is a stronger gesture in
+ * exactly one way — nothing speaking HTTP can produce it — and weaker in every other: it happens in
+ * a different window, away from the diff, so the thing being confirmed is not on screen at the
+ * moment of confirming. A confirmation performed somewhere else is one people learn to perform
+ * without reading.
+ *
+ * So it moved here, and it kept its teeth by becoming a secret rather than a gesture: the app
+ * password, checked by the same `Vault` that holds the key to the mailbox. A wrong one is refused,
+ * a slow one is refused by Argon2id being slow, and an installation with no account still gets the
+ * terminal, because there the gesture is all there is.
+ *
+ * The password goes to the account surface and never to `/api/apply` — a `ChangeRequest` is
+ * digested, journalled and reported, and nothing that carries a password may end up in a record.
+ */
+function ConfirmWithPassword({
+    requestId,
+    shortDigest,
+    reason,
+}: {
+    requestId: string;
+    shortDigest: string;
+    reason: string;
+}): React.JSX.Element {
+    const { perform } = useAccount();
+    const [password, setPassword] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | undefined>();
+
+    return (
+        <div className="notice notice-warning form-stack">
+            <strong>Zum Löschen bitte dein Passwort.</strong>
+            <p>
+                {reason === '' ? 'Diese Änderung löscht etwas.' : reason} Was oben steht, ist genau
+                das, was passiert — es steht hier, damit du es beim Bestätigen noch siehst.
+                Prüfziffer: <code>{shortDigest}</code>.
+            </p>
+
+            <label className="field field-narrow">
+                <span>Passwort</span>
+                <input
+                    type="password"
+                    className="text-input"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => {
+                        setPassword(event.target.value);
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' && password !== '' && !busy) {
+                            event.preventDefault();
+                            send();
+                        }
+                    }}
+                />
+            </label>
+
+            {error !== undefined && <p className="notice notice-danger">{error}</p>}
+
+            <button type="button" className="button" disabled={password === '' || busy} onClick={send}>
+                {busy ? 'Wird geprüft …' : 'Löschen bestätigen'}
+            </button>
+        </div>
+    );
+
+    function send(): void {
+        setError(undefined);
+        setBusy(true);
+        void perform({ action: 'confirm-change', requestId, password })
+            .then(() => {
+                setPassword('');
+            })
+            .catch((cause: Error) => {
+                setError(cause.message);
+            })
+            .finally(() => {
+                setBusy(false);
+            });
+    }
 }

@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useState } from 'react';
 
 import { buildIncidentReport, snapshot, subscribe } from '../log.js';
+import { describeEvent } from '../log-text.js';
 
 /**
  * What the tool did, in the order it did it.
@@ -18,6 +19,15 @@ import { buildIncidentReport, snapshot, subscribe } from '../log.js';
 export function ActivityLog(): React.JSX.Element {
     const entries = useSyncExternalStore(subscribe, snapshot, snapshot);
     const [copied, setCopied] = useState(false);
+    /**
+     * The event keys, off by default.
+     *
+     * They are what a bug report needs and the wrong thing to read first: „apply.applied" and
+     * „partial=false" answered a question nobody asked, while the one somebody did ask — was my
+     * rule saved? — was not on the screen at all. The keys stay one click away, and the exported
+     * report carries them whether this is on or not.
+     */
+    const [technical, setTechnical] = useState(false);
 
     async function copyReport(): Promise<void> {
         await navigator.clipboard.writeText(buildIncidentReport('0.1.0'));
@@ -28,14 +38,26 @@ export function ActivityLog(): React.JSX.Element {
     return (
         <>
             <p className="faint">
-                Ereignisse, Fehlercodes und Zahlen — keine Mailinhalte. Der Export ist so gebaut,
-                dass er ohne Nachbearbeitung weitergegeben werden kann. Er lebt in diesem Tab und
-                ist beim Neuladen weg; was am Konto geändert wurde, steht oben und bleibt.
+                Was in diesem Tab passiert ist, in Sätzen. Der kopierte Bericht enthält dieselben
+                Ereignisse als Fehlercodes und Zahlen — keine Mailinhalte, keine Adressen, keine
+                Ordnernamen, damit er ohne Nachbearbeitung weitergegeben werden kann. Diese Liste
+                lebt im Tab und ist beim Neuladen weg; was am Konto geändert wurde, steht oben und
+                bleibt.
             </p>
 
             <div className="row" style={{ marginBottom: 12 }}>
                 <button type="button" className="button" onClick={() => void copyReport()}>
                     {copied ? 'In die Zwischenablage kopiert' : 'Bericht kopieren'}
+                </button>
+                <button
+                    type="button"
+                    className="button button-quiet"
+                    aria-pressed={technical}
+                    onClick={() => {
+                        setTechnical(!technical);
+                    }}
+                >
+                    {technical ? 'Technische Details ausblenden' : 'Technische Details'}
                 </button>
                 <span className="faint">{entries.length} Einträge</span>
             </div>
@@ -48,8 +70,8 @@ export function ActivityLog(): React.JSX.Element {
                         <thead>
                             <tr>
                                 <th>Zeit</th>
-                                <th>Ereignis</th>
-                                <th>Kontext</th>
+                                <th>Was passiert ist</th>
+                                {technical && <th>Ereignis</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -59,23 +81,27 @@ export function ActivityLog(): React.JSX.Element {
                                         {new Date(entry.at).toLocaleTimeString('de-CH')}
                                     </td>
                                     <td>
-                                        <span
-                                            className={
-                                                entry.level === 'error'
-                                                    ? 'badge badge-danger'
-                                                    : entry.level === 'warn'
-                                                      ? 'badge badge-warning'
-                                                      : 'badge badge-neutral'
-                                            }
-                                        >
-                                            {entry.event}
-                                        </span>
+                                        {entry.level !== 'info' && (
+                                            <span
+                                                className={
+                                                    entry.level === 'error'
+                                                        ? 'badge badge-danger'
+                                                        : 'badge badge-warning'
+                                                }
+                                            >
+                                                {entry.level === 'error' ? 'Fehler' : 'Achtung'}
+                                            </span>
+                                        )}{' '}
+                                        {describeEvent(entry)}
                                     </td>
-                                    <td className="faint">
-                                        {Object.entries(entry.context)
-                                            .map(([key, value]) => `${key}=${String(value)}`)
-                                            .join(' ')}
-                                    </td>
+                                    {technical && (
+                                        <td className="faint">
+                                            <code>{entry.event}</code>{' '}
+                                            {Object.entries(entry.context)
+                                                .map(([key, value]) => `${key}=${String(value)}`)
+                                                .join(' ')}
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>

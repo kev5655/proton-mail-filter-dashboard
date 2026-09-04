@@ -74,17 +74,33 @@ describe('the sentence about the terminal', () => {
 
     it('no longer promises a terminal question for every change', () => {
         expect(source).not.toContain('Die Rückfrage kommt im Terminal, nicht hier.');
-        expect(source).toContain('Bei grösseren Änderungen kommt zusätzlich eine Rückfrage im Terminal.');
+        // And it names both second questions, because there are two and they are answered in
+        // different places: a password here for a deletion, the terminal for anything that moves
+        // mail. A sentence that mentioned only one would send somebody to the wrong window.
+        expect(source).toContain('noch einmal nach deinem Passwort gefragt');
+        expect(source).toContain('kommt eine Rückfrage im Terminal');
     });
 
     it('still promises the backup, which really is unconditional', () => {
         expect(source).toContain('vollständige Sicherung aller Filter und Ordner');
     });
 
-    it('shows the waiting notice only when the server said one is coming', () => {
-        // `needsTerminal` rides in the 202 next to the check digits. Without the guard the notice
-        // would appear for every change and be wrong for most of them.
-        expect(source).toContain("phase.phase === 'waiting' && phase.needsTerminal");
+    it('shows each waiting notice only where that question is actually asked', () => {
+        /*
+         * `place` rides in the 202 next to the check digits, and there are three answers rather
+         * than two. Without the guard the terminal notice appeared for every change and was wrong
+         * for most of them; with only a boolean it would now appear for a deletion, which asks
+         * here instead — and somebody would sit watching a terminal that says nothing.
+         */
+        expect(source).toContain("phase.phase === 'waiting' && phase.place === 'terminal'");
+        expect(source).toContain("phase.phase === 'waiting' && phase.place === 'password'");
         expect(source).toContain("phase.phase === 'waiting' && !phase.needsTerminal");
+    });
+
+    it('sends the password to the account surface, never to the apply route', () => {
+        // A `ChangeRequest` is digested, journalled and reported. Nothing carrying a password may
+        // end up in a record somebody can read back.
+        expect(source).toContain("action: 'confirm-change'");
+        expect(source).not.toMatch(/fetch\('\/api\/apply'[\s\S]{0,400}password/);
     });
 });

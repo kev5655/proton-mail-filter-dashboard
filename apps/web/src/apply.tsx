@@ -30,8 +30,10 @@ export type ApplyPhase =
           phase: 'waiting';
           requestId: string;
           shortDigest: string;
-          /** Whether a typed „ja" is genuinely coming, as decided by `weigh` on the server. */
+          /** Whether a second question is genuinely coming, as decided by `weigh` on the server. */
           needsTerminal: boolean;
+          /** Where it is asked. `'password'` means this dialog asks it, not a terminal. */
+          place: 'none' | 'password' | 'terminal';
           /** Why it is, when it is. */
           reason: string;
       }
@@ -91,6 +93,7 @@ export function ApplyProvider({
                         requestId?: string;
                         shortDigest?: string;
                         needsTerminal?: boolean;
+                        place?: 'none' | 'password' | 'terminal';
                         reason?: string;
                         error?: string;
                         code?: string;
@@ -113,6 +116,10 @@ export function ApplyProvider({
                         // Absent means an older server, and „it will ask" is the safer of the two
                         // wrong answers: it tells the user to go and look.
                         needsTerminal: body.needsTerminal ?? true,
+                        // An older server says nothing about where, and „go and look at the
+                        // terminal" is the safer of the two wrong answers: waiting for a password
+                        // field that never arrives would strand the change.
+                        place: body.place ?? (body.needsTerminal === false ? 'none' : 'terminal'),
                         reason: body.reason ?? '',
                     });
 

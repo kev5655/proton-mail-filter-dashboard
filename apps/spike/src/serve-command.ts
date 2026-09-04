@@ -284,7 +284,50 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             };
         };
 
-        const confirm = confirmAtTerminal();
+        /*
+         * Deletions are confirmed in the dashboard, against the app password.
+         *
+         * A promise per pending change, resolved by `confirm-change` on the account surface once
+         * the `Vault` has accepted the password. The reasoning for moving this off the terminal is
+         * in `weigh()`; what happens here is only the plumbing, and two properties of it matter.
+         *
+         * It expires. A grant that waited forever would leave a change armed for as long as the
+         * server runs, which is exactly the shape of an offer nobody remembers making.
+         *
+         * And it is keyed by the request id, so the password answers *that* change and no other.
+         * A blanket „the user typed their password recently" would confirm whatever arrived next.
+         */
+        const pendingGrants = new Map<string, (verdict: 'granted' | 'declined' | 'expired') => void>();
+        const GRANT_TIMEOUT_MS = 5 * 60_000;
+
+        const confirmInDashboard = (offer: { request: { requestId: string } }): Promise<'granted' | 'declined' | 'expired'> =>
+            new Promise((resolve) => {
+                const id = offer.request.requestId;
+                const timer = setTimeout(() => {
+                    pendingGrants.delete(id);
+                    resolve('expired');
+                }, GRANT_TIMEOUT_MS);
+                pendingGrants.set(id, (verdict) => {
+                    clearTimeout(timer);
+                    pendingGrants.delete(id);
+                    resolve(verdict);
+                });
+            });
+
+        const atTerminal = confirmAtTerminal();
+
+        /*
+         * Where the second question is asked, decided by `weigh` and routed here.
+         *
+         * The terminal is kept for everything that moves mail, and it is also the fallback when
+         * there is no account: an installation with no password to ask for has nothing to check a
+         * dashboard answer against, and then the keystroke is all there is.
+         */
+        const confirm: typeof atTerminal = async (offer) =>
+            offer.place === 'password' && vault.state.registered
+                ? confirmInDashboard(offer)
+                : atTerminal(offer);
+
         const apply = new ApplyChannel(
             (request) => {
                 const parsed = asChangeRequest(request);
@@ -309,6 +352,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     summary: describeChange(parsed.change),
                     shortDigest: shortDigest(digestOf(parsed)),
                     needsTerminal: weight.needsTerminal,
+                    place: weight.place,
                     reason: weight.reason,
                 };
             },
@@ -647,6 +691,20 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 await vault.unlock(input);
                 uiLocked = false;
                 await openLocalData();
+            },
+            confirmChange: async (requestId, password) => {
+                const waiting = pendingGrants.get(requestId);
+                if (waiting === undefined) {
+                    throw new AppError('APPLY_CONFIRMATION_EXPIRED', {
+                        message: 'Zu dieser Bestätigung wartet keine Änderung.',
+                        hint: 'Sie ist abgelaufen oder wurde schon beantwortet. Es wurde nichts geschrieben.',
+                        context: { requestId },
+                    });
+                }
+                // The password first, and only then the grant. Verifying afterwards would mean a
+                // wrong password had already released the change.
+                vault.verifyPassword(password);
+                waiting('granted');
             },
             resume: async () => {
                 if (!vault.withinGrace) {

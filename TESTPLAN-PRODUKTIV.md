@@ -873,3 +873,45 @@ Das Aufschliessen kann **keine** Proton-Anmeldung auslösen. Es übernimmt eine 
 und sonst nichts; gibt es keine, steht im Dashboard „nicht verbunden" und du drückst selbst auf
 Anmelden. Ein Passwortfeld, das einen Login-Versuch auslösen kann, hätte `LoginGuard` hinter eine
 Texteingabe gestellt — und genau die Wiederholung war es, die dieses Konto einmal gesperrt hat.
+
+---
+
+## V-11 · Löschen bestätigt sich jetzt im Dashboard
+
+Bisher fragte das Terminal bei jedem Löschen nach einem getippten „ja". Das ist weg. Stattdessen
+fragt der Löschen-Dialog direkt neben dem Diff nach deinem App-Passwort.
+
+### Warum das nicht einfach schwächer ist
+
+Ein Tastendruck im Terminal lässt sich über HTTP nicht erzeugen, ein Passwort schon — von allem, was
+es kennt. Dafür siehst du beim Bestätigen, *was* verschwindet und wohin die Mail darin geht; eine
+Bestätigung in einem anderen Fenster, weg von der Sache, lernt man auszuführen ohne zu lesen. Und es
+ist ein Geheimnis statt einer Geste: geprüft wird gegen dieselbe `Vault`, die den Schlüssel zum
+Postfach hält, über dieselbe langsame Ableitung.
+
+**Was im Terminal bleibt:** alles, was Mail verschiebt — eine Kategorie-Verschiebung, Rückgängig,
+Zurückspulen — und jede Änderung, die einen grossen Teil des Postfachs umsortiert. Wenn du die auch
+im Dashboard haben willst, sag es.
+
+### Zu prüfen
+
+- Ordner löschen: kommt das Passwortfeld im Dialog, mit der Prüfziffer daneben?
+- Falsches Passwort: klare Absage, und **nichts** gelöscht?
+- Fünf Minuten warten und dann bestätigen: läuft es ab und sagt es das?
+- Ohne Konto (falls du das je testest): fragt dann wieder das Terminal?
+- Eine Regel anlegen: **keine** zweite Frage, weder hier noch im Terminal.
+- Eine Mail in eine Kategorie verschieben: Rückfrage **im Terminal**, wie bisher.
+
+---
+
+## V-12 · Das Protokoll in Sätzen
+
+Unter „Verlauf", untere Hälfte. Statt `apply.applied` und `partial=false` steht dort jetzt
+„Änderung bei Proton gespeichert." Die technischen Schlüssel sind einen Klick weit weg
+(„Technische Details") und stecken unverändert im kopierten Bericht — ein Bericht, den jemand
+hübsch gemacht hat, ist ein Bericht, in dem niemand mehr suchen kann.
+
+### Zu prüfen
+
+- Sagt jede Zeile etwas, das du ohne Vorwissen verstehst?
+- Fehlt irgendwo ein Satz — also steht dort noch ein Schlüssel wie `foo.bar`? Dann sag mir welcher.

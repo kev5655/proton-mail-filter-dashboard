@@ -35,6 +35,7 @@ function runner(overrides: Partial<AccountRunner> = {}): AccountRunner {
         register: async () => undefined,
         unlock: async () => undefined,
         resume: async () => undefined,
+        confirmChange: async () => undefined,
         lock: () => undefined,
         changePassword: async () => undefined,
         beginTotp: async () => ({ secret: 'AAAA', uri: 'otpauth://x' }),

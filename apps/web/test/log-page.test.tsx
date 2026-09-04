@@ -42,10 +42,12 @@ describe('the log page', () => {
     it('renders without looping, on an empty log', () => {
         mount(<ActivityLog />);
 
-        expect(container.textContent).toContain('Ereignisse, Fehlercodes und Zahlen');
+        expect(container.textContent).toContain('Was in diesem Tab passiert ist, in Sätzen');
     });
 
     it('renders the entries and survives new ones arriving', () => {
+        // An event with no sentence of its own falls back to its key, which is how a missing
+        // sentence stays visible instead of becoming an empty row.
         log('warn', 'sync.truncated', { count: 2000 });
         mount(<ActivityLog />);
 
@@ -117,5 +119,32 @@ describe('the error boundary', () => {
         // A message can quote a subject line, and the log is meant to be handed over unedited.
         const report = container.textContent ?? '';
         expect(report).not.toContain('kaputt');
+    });
+});
+
+describe('what a row says', () => {
+    it('describes the event instead of printing its key and flags', () => {
+        // The complaint this answers: the screen said `apply.applied` and `partial=false`, which
+        // is the record a bug report needs and not an answer to „wurde meine Regel gespeichert?".
+        log('info', 'apply.applied', { partial: false });
+        mount(<ActivityLog />);
+
+        expect(container.textContent).toContain('Änderung bei Proton gespeichert.');
+        expect(container.textContent).not.toContain('partial=false');
+        expect(container.textContent).not.toContain('apply.applied');
+    });
+
+    it('keeps the keys one click away, because a report needs them', () => {
+        log('info', 'apply.applied', { partial: false });
+        mount(<ActivityLog />);
+
+        act(() => {
+            [...container.querySelectorAll('button')]
+                .find((button) => (button.textContent ?? '').includes('Technische Details'))
+                ?.click();
+        });
+
+        expect(container.textContent).toContain('apply.applied');
+        expect(container.textContent).toContain('partial=false');
     });
 });
