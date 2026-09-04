@@ -8,8 +8,7 @@ import { CATEGORY_LABELS } from '@pms/grouping';
 
 import { buildMailbox } from '../src/data.js';
 import { CategoriesPage } from '../src/pages/CategoriesPage.js';
-import { MailboxProvider } from '../src/mailbox.js';
-import { AppStateProvider } from '../src/state.js';
+import { Providers } from './harness.js';
 
 /**
  * Proton's own categories, and what the screen is allowed to claim about them.
@@ -89,11 +88,9 @@ describe('the screen', () => {
         const root = createRoot(container);
         act(() => {
             root.render(
-                <MailboxProvider>
-                    <AppStateProvider>
-                        <CategoriesPage />
-                    </AppStateProvider>
-                </MailboxProvider>
+                <Providers>
+                    <CategoriesPage />
+                </Providers>
             );
         });
 

@@ -33,6 +33,22 @@ export function TriagePage(): React.JSX.Element {
     const open = suggestions.filter((entry) => decisions[entry.group.key] === undefined);
     const grouped = suggestions.reduce((total, entry) => total + entry.group.size, 0);
 
+    /*
+     * Sections by how the group was found.
+     *
+     * `kind` already carries this: a sender group is one address, `sender-subject` is one address
+     * split because its mail falls into distinct kinds — the security-alert-versus-announcement
+     * case — and `domain` is several senders too small individually, rolled up by organisation.
+     *
+     * There is deliberately no "nach Inhalt" section. Grouping has no content kind, and a heading
+     * promising clustering that does not exist would be a label doing the work the code has not
+     * done. It becomes possible once mail bodies are available locally.
+     */
+    const sections = SECTIONS.map((section) => ({
+        ...section,
+        entries: open.filter((entry) => entry.group.kind === section.kind),
+    })).filter((section) => section.entries.length > 0);
+
     return (
         <>
             <header className="page-head">
@@ -46,7 +62,31 @@ export function TriagePage(): React.JSX.Element {
 
             {open.length === 0 && <p className="muted">Alle Vorschläge bearbeitet.</p>}
 
-            {open.map((entry) => {
+            {sections.map((section) => (
+                <section key={section.kind} className="suggestion-section">
+                    <h2>
+                        {section.label}{' '}
+                        <span className="faint">
+                            ({section.entries.length}{' '}
+                            {section.entries.length === 1 ? 'Vorschlag' : 'Vorschläge'})
+                        </span>
+                    </h2>
+                    <p className="faint">{section.hint}</p>
+                    {renderEntries(section.entries)}
+                </section>
+            ))}
+
+            {Object.keys(decisions).length > 0 && (
+                <p className="notice notice-info">
+                    {Object.values(decisions).filter((value) => value === 'accepted').length} Regeln
+                    vorgemerkt. Geschrieben wird erst nach dem Diff und deiner Bestätigung.
+                </p>
+            )}
+        </>
+    );
+
+    function renderEntries(entries: typeof open): React.JSX.Element[] {
+        return entries.map((entry) => {
                 const isOpen = openKey === entry.group.key;
                 const members = messagesInGroup(entry.group);
                 const alreadyCaught = members.filter((message) => caughtBy(message.ID) !== undefined).length;
@@ -196,15 +236,36 @@ export function TriagePage(): React.JSX.Element {
                         )}
                     </div>
                 );
-            })}
-
-            {Object.keys(decisions).length > 0 && (
-                <p className="notice notice-info">
-                    {Object.values(decisions).filter((value) => value === 'accepted').length} Regeln
-                    vorgemerkt. In der Demo wird nichts geschrieben — im echten Betrieb kommt hier der
-                    Diff mit den betroffenen Mails und erst danach die Bestätigung.
-                </p>
-            )}
-        </>
-    );
+        });
+    }
 }
+
+/**
+ * The three ways a group is found, in the order they are worth looking at.
+ *
+ * One sender is the clearest case and the easiest to judge. A sender split by subject is the
+ * interesting one: it is where a single address needs two rules, because its mail falls into
+ * distinct kinds — the security-alert-versus-announcement case. A domain group is the loosest and
+ * belongs last.
+ *
+ * There is deliberately no „Nach Inhalt". Grouping has no content kind, and a heading promising
+ * clustering that does not exist would be a label doing work the code has not done. It becomes
+ * possible once mail bodies are available locally.
+ */
+const SECTIONS: Array<{ kind: 'sender' | 'sender-subject' | 'domain'; label: string; hint: string }> = [
+    {
+        kind: 'sender',
+        label: 'Nach Absender',
+        hint: 'Eine Adresse, deren Mail durchgehend zusammengehört.',
+    },
+    {
+        kind: 'sender-subject',
+        label: 'Nach Betreff',
+        hint: 'Eine Adresse, deren Mail in klar verschiedene Sorten zerfällt — die brauchen je eine eigene Regel.',
+    },
+    {
+        kind: 'domain',
+        label: 'Nach Organisation',
+        hint: 'Mehrere Absender derselben Domäne, einzeln je zu wenig für eine eigene Regel.',
+    },
+];

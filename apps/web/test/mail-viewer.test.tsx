@@ -4,8 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MailViewer } from '../src/components/MailViewer.js';
-import { MailboxProvider } from '../src/mailbox.js';
-import { AppStateProvider } from '../src/state.js';
+import { Providers } from './harness.js';
 
 /**
  * What the viewer shows when there is nothing to show.
@@ -35,9 +34,7 @@ function render(element: React.JSX.Element): void {
     const root = createRoot(container);
     act(() => {
         root.render(
-            <MailboxProvider>
-                <AppStateProvider>{element}</AppStateProvider>
-            </MailboxProvider>
+<Providers>{element}</Providers>
         );
     });
 }

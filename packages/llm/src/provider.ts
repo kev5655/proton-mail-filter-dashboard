@@ -12,6 +12,8 @@
  * filter does can be wrong and cost mail nobody ever finds.
  */
 
+import type { RuleProposal, SelectionSummary } from './propose.js';
+
 export interface GroupSummary {
     reason: string;
     sampleSubjects: string[];
@@ -46,6 +48,21 @@ export interface LlmProvider {
 
     suggestFolderName(group: GroupSummary, existingFolders: string[]): Promise<Suggestion>;
     explainSieve(sieve: string): Promise<SieveExplanation>;
+
+    /**
+     * Propose *criteria* for a rule from a hand-picked set of mail.
+     *
+     * On the interface rather than on one implementation, which it was not before: the selection
+     * dialog reached for the demo provider directly, so configuring a real model changed nothing
+     * where it mattered. A settings screen offering Ollama while the one feature that needs a model
+     * still asked the stand-in would have been a lie with a form in front of it.
+     *
+     * The return value is criteria, never a rule and never a verdict. They are validated against
+     * what Proton can express, compiled by our compiler and run through the matcher before anything
+     * is shown — so what the user sees is the real list of affected mail, not the model's claim
+     * about it.
+     */
+    proposeRule(selection: SelectionSummary): Promise<RuleProposal>;
 }
 
 /** Used when no model is configured. Every caller must handle this without breaking. */
@@ -58,6 +75,9 @@ export const NO_PROVIDER: LlmProvider = {
         throw new Error('Kein Sprachmodell konfiguriert.');
     },
     async explainSieve() {
+        throw new Error('Kein Sprachmodell konfiguriert.');
+    },
+    async proposeRule() {
         throw new Error('Kein Sprachmodell konfiguriert.');
     },
 };

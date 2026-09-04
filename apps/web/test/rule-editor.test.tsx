@@ -6,9 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEMO_RULES } from '@pms/demo';
 
 import { RuleEditor } from '../src/components/RuleEditor.js';
-import { MailboxProvider } from '../src/mailbox.js';
 import { fromRule, newDraft, type RuleDraft } from '../src/rules/draft.js';
-import { AppStateProvider } from '../src/state.js';
+import { Providers } from './harness.js';
 
 /**
  * The editor, driven the way a person drives it.
@@ -37,8 +36,7 @@ function render(initial: RuleDraft, savedRule = undefined as Parameters<typeof R
     const root = createRoot(container);
     const paint = (): void => {
         root.render(
-            <MailboxProvider>
-                <AppStateProvider>
+            <Providers>
                     <RuleEditor
                         draft={draft}
                         original={initial}
@@ -53,8 +51,7 @@ function render(initial: RuleDraft, savedRule = undefined as Parameters<typeof R
                         onCancel={() => {}}
                         onOpenMail={() => {}}
                     />
-                </AppStateProvider>
-            </MailboxProvider>
+            </Providers>
         );
     };
     act(() => {

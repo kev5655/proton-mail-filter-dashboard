@@ -1,9 +1,11 @@
 import { useState } from 'react';
 
-import { createDemoProvider, type RuleProposal } from '@pms/llm';
+import type { RuleProposal } from '@pms/llm';
 import { matchesRule, ruleFromCriteria } from '@pms/rules';
 
+import { useModel } from '../llm.js';
 import { useMailbox } from '../mailbox.js';
+import { ModelStatus } from './ModelStatus.js';
 import { MailList, type ListableMessage } from './MailList.js';
 import { RuleConditions } from './RuleConditions.js';
 
@@ -21,8 +23,6 @@ import { RuleConditions } from './RuleConditions.js';
  * affected mail, including the messages the user did not select. A model that widens a rule too far
  * is caught by seeing what it caught, not by trusting its explanation.
  */
-
-const provider = createDemoProvider();
 
 interface Result {
     proposal: RuleProposal;
@@ -43,6 +43,7 @@ export function SelectionDialog({
     onOpenMail: (message: ListableMessage) => void;
 }): React.JSX.Element {
     const { folders, messages } = useMailbox();
+    const { provider, state } = useModel();
     const [instruction, setInstruction] = useState('');
     const [result, setResult] = useState<Result | undefined>(undefined);
     const [error, setError] = useState<string | undefined>(undefined);
@@ -114,8 +115,15 @@ export function SelectionDialog({
                     Mailinhalte. Modell: {provider.name}.
                 </p>
 
+                <ModelStatus what="kann hier nichts vorgeschlagen werden" />
+
                 <div className="row" style={{ marginTop: 12 }}>
-                    <button type="button" className="button" onClick={() => void propose()} disabled={busy}>
+                    <button
+                        type="button"
+                        className="button"
+                        onClick={() => void propose()}
+                        disabled={busy || state !== 'available'}
+                    >
                         {busy ? 'Frage das Modell…' : 'Regel vorschlagen lassen'}
                     </button>
                 </div>

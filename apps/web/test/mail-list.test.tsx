@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MailList, type ListableMessage } from '../src/components/MailList.js';
-import { AppStateProvider } from '../src/state.js';
+import { Providers } from './harness.js';
 
 /**
  * The list every screen shows mail through.
@@ -44,7 +44,7 @@ afterEach(() => {
 function render(element: React.JSX.Element): void {
     const root = createRoot(container);
     act(() => {
-        root.render(<AppStateProvider>{element}</AppStateProvider>);
+        root.render(<Providers>{element}</Providers>);
     });
 }
 

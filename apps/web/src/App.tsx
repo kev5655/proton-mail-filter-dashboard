@@ -10,7 +10,9 @@ import { FoldersPage } from './pages/FoldersPage.js';
 import { HistoryPage } from './pages/HistoryPage.js';
 import { LogPage } from './pages/LogPage.js';
 import { RulesPage } from './pages/RulesPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
 import { TriagePage } from './pages/TriagePage.js';
+import { ModelProvider } from './llm.js';
 import { MailboxProvider, useMailbox, useMailboxStatus } from './mailbox.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
@@ -19,7 +21,9 @@ export function App(): React.JSX.Element {
     return (
         <MailboxProvider>
             <AppStateProvider>
-                <Sources />
+                <ModelProvider>
+                    <Sources />
+                </ModelProvider>
             </AppStateProvider>
         </MailboxProvider>
     );
@@ -51,6 +55,7 @@ const PAGE_LABELS: Record<Page, string> = {
     changes: 'Änderungen',
     history: 'Verlauf',
     log: 'Protokoll',
+    settings: 'Einstellungen',
 };
 
 function Shell(): React.JSX.Element {
@@ -71,6 +76,7 @@ function Shell(): React.JSX.Element {
         { id: 'changes', label: PAGE_LABELS.changes, count: drift.filter((item) => item.resolved === undefined).length },
         { id: 'history', label: PAGE_LABELS.history, count: journal.length },
         { id: 'log', label: PAGE_LABELS.log, count: 0 },
+        { id: 'settings', label: PAGE_LABELS.settings, count: 0 },
     ];
 
     return (
@@ -116,6 +122,7 @@ function Shell(): React.JSX.Element {
                     {nav.page === 'changes' && <ChangesPage />}
                     {nav.page === 'history' && <HistoryPage />}
                     {nav.page === 'log' && <LogPage />}
+                    {nav.page === 'settings' && <SettingsPage />}
                 </ErrorBoundary>
 
                 {/*

@@ -923,3 +923,18 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+.suggestion-section {
+    margin-bottom: 28px;
+    min-width: 0;
+}
+
+.suggestion-section > h2 {
+    margin: 0 0 2px;
+    font-size: 15px;
+}
+
+.suggestion-section > p.faint {
+    margin: 0 0 12px;
+    max-width: 78ch;
+}

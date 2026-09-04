@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 
-import { createDemoProvider, type SieveExplanation } from '@pms/llm';
+import type { SieveExplanation } from '@pms/llm';
 
+import { useModel } from '../llm.js';
 import { useMailbox } from '../mailbox.js';
-
-const provider = createDemoProvider();
+import { ModelStatus } from './ModelStatus.js';
 
 /**
  * The script itself, plus an explanation in prose.
@@ -16,11 +16,19 @@ const provider = createDemoProvider();
  */
 export function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
     const { sieveTextFor } = useMailbox();
+    const { provider, state } = useModel();
     const sieve = sieveTextFor(ruleId);
     const [explanation, setExplanation] = useState<SieveExplanation | undefined>(undefined);
     const [failed, setFailed] = useState(false);
 
     useEffect(() => {
+        if (state !== 'available') {
+            // No model, no request. `ModelStatus` says so where the explanation would have been.
+            setExplanation(undefined);
+            setFailed(false);
+            return;
+        }
+
         let cancelled = false;
         provider
             .explainSieve(sieve)
@@ -37,7 +45,7 @@ export function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
         return () => {
             cancelled = true;
         };
-    }, [sieve]);
+    }, [sieve, provider, state]);
 
     return (
         <>
@@ -48,9 +56,12 @@ export function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
             </p>
             <code className="sieve-code">{sieve}</code>
 
-            {failed && (
+            <ModelStatus what="steht hier keine Erklärung in Prosa" />
+
+            {failed && state === 'available' && (
                 <p className="notice notice-warning">
-                    Kein Sprachmodell erreichbar — ohne Erklärung. Die Struktur oben gilt trotzdem.
+                    Das Sprachmodell hat nicht geantwortet — ohne Erklärung. Die Struktur oben gilt
+                    trotzdem.
                 </p>
             )}
 

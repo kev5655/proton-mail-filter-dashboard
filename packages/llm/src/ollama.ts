@@ -1,3 +1,4 @@
+import { buildProposalPrompt, validateProposal, type RuleProposal, type SelectionSummary } from './propose.js';
 import type { GroupSummary, LlmProvider, SieveExplanation, Suggestion } from './provider.js';
 
 /**
@@ -14,7 +15,13 @@ import type { GroupSummary, LlmProvider, SieveExplanation, Suggestion } from './
 export interface OllamaConfig {
     /** e.g. `http://127.0.0.1:11434` locally, or a server on the network. */
     baseUrl: string;
-    /** A 12–14B model quantised to Q4 fits comfortably in 12 GB of VRAM. */
+    /**
+     * The model name as Ollama knows it, e.g. `qwen2.5:7b`.
+     *
+     * Size it to the machine rather than to ambition: a 7–8B model quantised to Q4 needs roughly
+     * 5 GB and runs acceptably on the CPU when it does not fit the card. A 12–14B wants about 12 GB
+     * of VRAM, which most laptops do not have.
+     */
     model: string;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
@@ -100,6 +107,19 @@ export function createOllamaProvider(config: OllamaConfig): LlmProvider {
                 rationale:
                     typeof parsed.rationale === 'string' ? parsed.rationale.trim() : 'Ohne Begründung.',
             };
+        },
+
+        /**
+         * Criteria for a rule, from a hand-picked set of mail.
+         *
+         * The prompt and the validator both already existed in `propose.ts` and are used verbatim.
+         * That matters more than convenience: `validateProposal` rejects rather than repairs, so a
+         * model naming a field Proton cannot filter on, or an empty value list, fails here instead
+         * of becoming a rule that silently matches nothing.
+         */
+        async proposeRule(selection: SelectionSummary): Promise<RuleProposal> {
+            const raw = await generate(buildProposalPrompt(selection), 'json');
+            return validateProposal(JSON.parse(raw));
         },
 
         async explainSieve(sieve: string): Promise<SieveExplanation> {
