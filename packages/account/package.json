@@ -1,0 +1,16 @@
+{
+  "name": "@pms/account",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@pms/core": "workspace:*",
+    "@simplewebauthn/server": "^13.2.2",
+    "zod": "4.5.2"
+  }
+}

@@ -45,6 +45,14 @@ export const ERROR_CODES = [
     'BROWSER_LOGIN_NOT_CONFIGURED',
     // Asked to do something at Proton after the connection was cut.
     'SESSION_DISCONNECTED',
+    // The app's own account: the gate in front of the local data.
+    'ACCOUNT_PASSWORD_EMPTY',
+    'ACCOUNT_PASSWORD_WRONG',
+    'ACCOUNT_EXISTS',
+    'ACCOUNT_MISSING',
+    'ACCOUNT_LOCKED',
+    'ACCOUNT_SECOND_FACTOR_REQUIRED',
+    'ACCOUNT_SECOND_FACTOR_WRONG',
 
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',
