@@ -2,8 +2,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyChange, confirmAtTerminal, digestOf, shortDigest, type ChangeRequest } from '@pms/apply';
+import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
+import { getMessages } from '@pms/proton-api';
 import { ApplyChannel, serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase } from '@pms/store';
 import { getMeta, markAdopted, refreshAccountObjects, syncAll } from '@pms/sync';
@@ -112,6 +114,28 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     // Read fresh: the share of the mailbox a change touches decides whether it is
                     // asked about a second time, and the copy grows with every sync.
                     mailboxSize: (db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
+                    /*
+                     * The one capability that moves mail, handed in here and nowhere else.
+                     *
+                     * `@pms/apply` cannot import the message-moving module and neither can the
+                     * server that parsed the request — the isolation test checks both. So it is
+                     * assembled at the outermost point, in the process that already holds the
+                     * session and already owns the terminal the confirmation is typed at. That is
+                     * the same shape the guarantee has everywhere else in this file: HTTP can ask,
+                     * and only this process can act.
+                     */
+                    moveToCategory: async (messageIds, categoryId) => {
+                        await moveIntoCategory(messageIds, categoryId, {
+                            http,
+                            readCurrent: async (ids) => {
+                                const wanted = new Set(ids);
+                                const page = await getMessages(http, { pageSize: 150 });
+                                return page.messages
+                                    .filter((message) => wanted.has(message.ID))
+                                    .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
+                            },
+                        });
+                    },
                 });
                 /*
                  * Bring the copy back in step before answering.
@@ -243,5 +267,25 @@ function asChangeRequest(value: unknown): ChangeRequest | undefined {
         Array.isArray(candidate.plan.moves) &&
         Array.isArray(candidate.affectedMessageIds);
 
-    return wellFormed ? (candidate as ChangeRequest) : undefined;
+    if (!wellFormed) {
+        return undefined;
+    }
+
+    // A category move is the one kind whose payload is a list of message ids, and those ids are the
+    // entire authorisation for moving somebody's mail. Checked here rather than trusted downstream:
+    // this is the boundary where a JSON body stops being arbitrary.
+    if (candidate.change?.kind === 'move-to-category') {
+        const category = candidate.change.category;
+        const shaped =
+            typeof category === 'object' &&
+            category !== null &&
+            typeof category.id === 'string' &&
+            Array.isArray(category.messageIds) &&
+            category.messageIds.every((id: unknown) => typeof id === 'string' && id !== '');
+        if (!shaped) {
+            return undefined;
+        }
+    }
+
+    return candidate as ChangeRequest;
 }

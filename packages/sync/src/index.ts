@@ -4,11 +4,14 @@ export {
     mirrorFilters,
     mirrorLabels,
     mirrorMessages,
+    recordCategoryObservations,
     getMeta,
     setMeta,
     type Snapshot,
 } from './mirror.js';
 export {
+    readCategoryChanges,
+    readCategoryObservations,
     readFilters,
     readFolderTree,
     readMessages,

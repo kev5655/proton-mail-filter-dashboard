@@ -1,3 +1,4 @@
+import type { CategoryChange, CategoryObservation } from '@pms/grouping';
 import type { Db } from '@pms/store';
 
 /**
@@ -238,5 +239,89 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         labelIds: labelsByMessage.get(row.id) ?? [],
         recipients: recipientsByMessage.get(row.id) ?? [],
         conversationId: row.conversation_id ?? undefined,
+    }));
+}
+
+/**
+ * The category history, for the screen that makes Proton's sorting visible.
+ *
+ * Bounded by number of *syncs* rather than by rows or by date: "the last twenty times we looked" is
+ * the unit every verdict on that screen is expressed in, and a row limit would silently truncate a
+ * busy sync into a partial observation — which is worse than not having it, because a partial
+ * observation still looks like a whole one.
+ */
+export function readCategoryObservations(db: Db, sinceSyncs = 20): CategoryObservation[] {
+    const rows = db
+        .prepare(
+            `SELECT sender_address, sender_domain, category_id, observed_at, message_count
+             FROM category_observations
+             WHERE observed_at >= COALESCE(
+                 (SELECT MIN(observed_at) FROM (
+                     SELECT DISTINCT observed_at FROM category_observations
+                     ORDER BY observed_at DESC LIMIT ?
+                 )), 0)
+             ORDER BY observed_at`
+        )
+        .all(sinceSyncs) as Array<{
+        sender_address: string;
+        sender_domain: string;
+        category_id: string;
+        observed_at: number;
+        message_count: number;
+    }>;
+
+    return rows.map((row) => ({
+        senderAddress: row.sender_address,
+        senderDomain: row.sender_domain,
+        categoryId: row.category_id,
+        observedAt: row.observed_at,
+        messageCount: row.message_count,
+    }));
+}
+
+/**
+ * Every time a message changed category, with what it changed from.
+ *
+ * A change is a closed row and an open row on the same message: the old category has a `gone_at`,
+ * and the new one has a `first_seen` at that same moment. Pairing them here rather than storing the
+ * transition means the history stays two plain facts — "it had this, then it did not" — instead of
+ * an interpretation baked in at write time that could not be revised.
+ *
+ * A message that gained its first category has no `from`. That is not a change of Proton's mind, so
+ * it is reported with `fromCategory: undefined` and the screen words it differently.
+ */
+export function readCategoryChanges(db: Db, limit = 200): CategoryChange[] {
+    const rows = db
+        .prepare(
+            `SELECT
+                 fresh.message_id   AS message_id,
+                 m.sender_address   AS sender_address,
+                 old.category_id    AS from_category,
+                 fresh.category_id  AS to_category,
+                 fresh.first_seen   AS observed_at
+             FROM message_categories AS fresh
+             JOIN messages AS m ON m.id = fresh.message_id
+             LEFT JOIN message_categories AS old
+                 ON old.message_id = fresh.message_id
+                AND old.gone_at = fresh.first_seen
+             -- The first observation of a message is not a change; it is the start of the record.
+             WHERE fresh.first_seen > (SELECT MIN(observed_at) FROM category_observations)
+             ORDER BY fresh.first_seen DESC
+             LIMIT ?`
+        )
+        .all(limit) as Array<{
+        message_id: string;
+        sender_address: string;
+        from_category: string | null;
+        to_category: string;
+        observed_at: number;
+    }>;
+
+    return rows.map((row) => ({
+        messageId: row.message_id,
+        senderAddress: row.sender_address,
+        fromCategory: row.from_category ?? undefined,
+        toCategory: row.to_category,
+        observedAt: row.observed_at,
     }));
 }

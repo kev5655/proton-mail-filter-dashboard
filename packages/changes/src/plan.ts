@@ -1,4 +1,5 @@
 import type { SimpleObject } from '@proton/sieve/filterModel';
+import { CATEGORY_LABELS } from '@pms/grouping';
 import { resolveOutcome, type MatchableMessage, type OrderedRule } from '@pms/rules';
 
 /**
@@ -30,7 +31,19 @@ export type ChangeKind =
      * here on the tool treats that rule as part of the set it manages, and the diff shows what the
      * rule already does before anyone agrees to that.
      */
-    | 'adopt-rule';
+    | 'adopt-rule'
+    /**
+     * Moving named messages into one of Proton's categories.
+     *
+     * The second of the two changes that move mail, and the only one a person initiates. It exists
+     * because a category is not a folder: no filter can file into one, and Proton's own client
+     * moves the mail and lets the server draw its own conclusion about the sender. Doing it from
+     * here is the only way to reach that mechanism at all.
+     *
+     * It names message ids and nothing else — never a sender, never a folder, never "the rest of
+     * these". The diff lists them, the terminal asks about them, and exactly those move.
+     */
+    | 'move-to-category';
 
 export interface PendingChange {
     id: string;
@@ -43,6 +56,13 @@ export interface PendingChange {
     after?: OrderedRule | undefined;
     /** For folder changes. */
     folder?: { name: string; newName?: string; parent?: string | undefined } | undefined;
+    /**
+     * For a category move: where, and exactly which messages.
+     *
+     * The ids are the whole authorisation. Nothing downstream widens them, and nothing derives them
+     * from a sender or a folder — that is what keeps this narrow enough to be an exception.
+     */
+    category?: { id: string; messageIds: string[] } | undefined;
 }
 
 /** One message whose destination the change alters. */
@@ -104,6 +124,11 @@ export function applyChangeToRules(rules: OrderedRule[], change: PendingChange):
 
         // Adopting changes who is responsible for a rule, not what it does.
         case 'adopt-rule':
+            return rules;
+
+        // Moving mail into a category changes where some mail is, not which rule matches what.
+        // Proton may draw a conclusion from it, but that conclusion is not a rule we hold.
+        case 'move-to-category':
             return rules;
 
         // Folder changes do not alter which rule matches what, only where the mail is put. A rename
@@ -192,4 +217,79 @@ export function describePlan(plan: ChangePlan): string {
         parts.push(`${plan.returnedToInbox} kommen in den Posteingang zurück`);
     }
     return `${parts.join(', ')}.`;
+}
+
+export interface CategoryMoveInput {
+    /** The rules as they stand, so the diff can say which one is already handling this mail. */
+    rules: OrderedRule[];
+    messages: PlanInput['messages'];
+    /** The messages the user picked, by id. Nothing else moves. */
+    messageIds: string[];
+    categoryId: string;
+    /** Which of Proton's categories each message carries today, by message id. */
+    currentCategoryOf: (messageId: string) => string | undefined;
+}
+
+/**
+ * The plan for a category move.
+ *
+ * A separate builder rather than a branch inside `planChange`, because the two derive their moves
+ * from opposite things. `planChange` simulates the rule set and reads the moves out of the
+ * difference; here the moves *are* the input — the user named them — and simulating anything would
+ * be inventing a second opinion about a decision that has already been made.
+ *
+ * Three things it deliberately does not claim:
+ *
+ *  - **`clearedFromInbox` stays 0.** Whether a category takes mail out of the inbox is not
+ *    established. Proton's own client sends one request and no `unlabel`, which hints that the
+ *    previous category falls away, and hints at nothing about the inbox. The first real run settles
+ *    it; a number here would be a guess dressed as a count.
+ *  - **A message already in the target category still appears as a move**, with `from` and `to`
+ *    equal. Dropping it would quietly shrink the list the user is asked to approve below the list
+ *    they selected, and the count in the terminal would stop matching the count on the screen.
+ *  - **`takenFrom` is the duplicate warning again**, in the last place before a write: a rule of the
+ *    user's own is already filing this mail somewhere, and moving it into a category may well be
+ *    doing the same work twice.
+ */
+export function planCategoryMove(input: CategoryMoveInput): ChangePlan {
+    const wanted = new Set(input.messageIds);
+    const to = CATEGORY_LABELS[input.categoryId] ?? `Kategorie ${input.categoryId}`;
+
+    const change: PendingChange = {
+        id: `cat-${input.categoryId}-${String(input.messageIds.length)}`,
+        kind: 'move-to-category',
+        summary: `${input.messageIds.length} ${input.messageIds.length === 1 ? 'Mail' : 'Mails'} nach „${to}" verschieben`,
+        category: { id: input.categoryId, messageIds: [...input.messageIds] },
+    };
+
+    const moves: Move[] = [];
+    const takenFrom = new Map<string, number>();
+
+    for (const message of input.messages) {
+        if (!wanted.has(message.ID)) {
+            continue;
+        }
+
+        const currentId = input.currentCategoryOf(message.ID);
+        moves.push({
+            messageId: message.ID,
+            subject: message.Subject,
+            sender: message.Sender.Address,
+            from: currentId === undefined ? undefined : (CATEGORY_LABELS[currentId] ?? `Kategorie ${currentId}`),
+            to,
+        });
+
+        const owner = resolveOutcome(input.rules, message).matching.filter((entry) => filesInto(entry)).at(-1);
+        if (owner !== undefined) {
+            takenFrom.set(owner.name, (takenFrom.get(owner.name) ?? 0) + 1);
+        }
+    }
+
+    return {
+        change,
+        moves,
+        clearedFromInbox: 0,
+        returnedToInbox: 0,
+        takenFrom: [...takenFrom].map(([ruleName, count]) => ({ ruleName, count })).sort((a, b) => b.count - a.count),
+    };
 }

@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from 'react
 import {
     Journal,
     applyChangeToRules,
+    planCategoryMove,
     planChange,
     verifyMoves,
     type ChangePlan,
@@ -37,6 +38,15 @@ export interface StoreState {
     /** The change awaiting confirmation, with its consequences already computed. */
     staged: ChangePlan | undefined;
     stage: (change: PendingChange) => void;
+    /**
+     * Stage a move of named messages into one of Proton's categories.
+     *
+     * Separate from `stage` because its plan comes from a different place. Every other change is
+     * planned by simulating the rule set; this one is planned from the ids the user selected, and
+     * routing it through `planChange` would produce a diff derived from rules that have nothing to
+     * say about it — an empty one, most likely, for a change that moves mail.
+     */
+    stageCategoryMove: (categoryId: string, messageIds: string[]) => void;
     discard: () => void;
     /** Apply the staged change. Only reachable from the diff dialog. */
     confirm: () => void;
@@ -92,7 +102,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
     // Seeded from whichever mailbox is in play. `App` remounts this provider when the source
     // changes, so there is no reseeding to write here: switching from the demo to the real account
     // starts a fresh store rather than carrying half-applied changes across two different mailboxes.
-    const { rules: initialRules, folders: initialFolders, messages } = useMailbox();
+    const { rules: initialRules, folders: initialFolders, messages, categoryOfMessage } = useMailbox();
     const { source } = useMailboxStatus();
     const [rules, setRules] = useState<MailboxRule[]>(initialRules);
     const [folders, setFolders] = useState<MailboxFolder[]>(initialFolders);
@@ -136,6 +146,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             setStaged(planChange({ rules, messages, change }));
         },
         [rules]
+    );
+
+    const stageCategoryMove = useCallback(
+        (categoryId: string, messageIds: string[]) => {
+            setStaged(
+                planCategoryMove({
+                    rules,
+                    messages,
+                    messageIds,
+                    categoryId,
+                    currentCategoryOf: categoryOfMessage,
+                })
+            );
+        },
+        [rules, messages, categoryOfMessage]
     );
 
     const confirm = useCallback(() => {
@@ -200,6 +225,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             journal: journal.entries,
             staged,
             stage,
+            stageCategoryMove,
             discard: () => setStaged(undefined),
             confirm,
             undo,
@@ -207,7 +233,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             resolveDrift,
         }),
         // `version` is in the list because the journal is mutable and does not change identity.
-        [rules, folders, journal, staged, stage, confirm, undo, drift, resolveDrift, version]
+        [rules, folders, journal, staged, stage, stageCategoryMove, confirm, undo, drift, resolveDrift, version]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;

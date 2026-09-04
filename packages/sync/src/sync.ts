@@ -9,7 +9,14 @@ import {
 } from '@pms/proton-api';
 import type { Db } from '@pms/store';
 
-import { getMeta, mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from './mirror.js';
+import {
+    getMeta,
+    mirrorFilters,
+    mirrorLabels,
+    mirrorMessages,
+    recordCategoryObservations,
+    setMeta,
+} from './mirror.js';
 
 const log = getLogger('sync');
 
@@ -79,6 +86,8 @@ const INCREMENTAL_OVERLAP_SECONDS = 3_600;
 export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {}): Promise<SyncResult> {
     const report = options.onProgress ?? ((): void => {});
     const effective = options.incremental === true ? withIncrementalWindow(db, options) : options;
+    // One timestamp for the whole run, so "one sync = one observation" holds across every page.
+    const observedAt = Math.floor(Date.now() / 1000);
 
     // Folders and labels first: a message references them, and a rule files into them. Fetching
     // them after the messages would mean a window where the copy names a folder it cannot resolve.
@@ -91,7 +100,7 @@ export async function syncAll(db: Db, http: ProtonHttp, options: SyncOptions = {
     const filterCount = mirrorFilters(db, filters);
     report({ stage: 'filters', done: filterCount, total: filterCount });
 
-    const { messages, truncated } = await syncMessages(db, http, effective, report);
+    const { messages, truncated } = await syncMessages(db, http, effective, report, observedAt);
 
     // What the account looked like at this moment.
     //
@@ -141,7 +150,8 @@ async function syncMessages(
     db: Db,
     http: ProtonHttp,
     options: SyncOptions,
-    report: (progress: SyncProgress) => void
+    report: (progress: SyncProgress) => void,
+    observedAt: number
 ): Promise<{ messages: number; truncated: boolean }> {
     const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     const limit = options.maxMessages ?? DEFAULT_MAX_MESSAGES;
@@ -174,6 +184,10 @@ async function syncMessages(
         const batch = result.messages.length > room ? result.messages.slice(0, room) : result.messages;
 
         done += mirrorMessages(db, batch);
+        // After the mirror: the history rows reference a message, which does not exist until the
+        // line above has run. It reads no state from the database except its own, so nothing is
+        // lost by going second — see the note on `recordCategoryObservations`.
+        recordCategoryObservations(db, batch, observedAt);
         report({ stage: 'messages', done, total });
 
         if (done >= limit) {

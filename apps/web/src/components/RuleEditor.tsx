@@ -57,7 +57,7 @@ export function RuleEditor({
     onCancel: () => void;
     onOpenMail: (message: MailboxMessage) => void;
 }): React.JSX.Element {
-    const { messages, folders, caughtBy } = useMailbox();
+    const { messages, folders, caughtBy, categoryCoverage } = useMailbox();
     const { source } = useMailboxStatus();
     const [showAllOthers, setShowAllOthers] = useState(false);
     const [showSieve, setShowSieve] = useState(false);
@@ -131,6 +131,17 @@ export function RuleEditor({
         const owner = caughtBy(message.ID);
         return owner !== undefined && owner.ruleId !== draft.ruleId;
     }).length;
+
+    /*
+     * How much of this rule's catch Proton already sorts.
+     *
+     * The earliest point at which changing your mind is still cheap: the rule has not been written,
+     * nothing has been offered, and the question "does this duplicate work Proton already does" is
+     * answerable. Shown as a fact, never as a block — a category and a folder are not the same
+     * thing, and wanting both is legitimate.
+     */
+    const coverage = categoryCoverage(matched.map((message) => message.ID));
+    const dominant = coverage[0];
 
     const sieveOnly = savedRule?.authoredAs === 'sieve';
     const verdict = savedRule === undefined ? { expressible: true as const } : isExpressibleAsTree(savedRule.rule);
@@ -325,6 +336,20 @@ export function RuleEditor({
                         </>
                     )}
                 </p>
+
+                {dominant !== undefined && dominant.count > 0 && (
+                    <p className="notice notice-info">
+                        <strong>
+                            Proton sortiert {dominant.count} dieser {matched.length} Mails schon nach
+                            „{dominant.label}".
+                        </strong>{' '}
+                        {dominant.stable
+                            ? 'Und tut das bei diesen Absendern jedes Mal, seit wir hinsehen.'
+                            : 'Beobachtet allerdings erst einmal — das kann ein Zufall des letzten Syncs sein.'}{' '}
+                        Ein eigener Ordner ist trotzdem sinnvoll, wenn du die Mail dauerhaft
+                        woanders haben willst; doppelt ist nur die Sortierarbeit.
+                    </p>
+                )}
 
                 <div className="split">
                     <div className="preview-column">

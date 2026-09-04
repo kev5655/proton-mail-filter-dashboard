@@ -3,7 +3,18 @@ import { toSieveTree } from '@proton/sieve/toSieveTree';
 
 import { INBOX } from '@pms/demo';
 import type { MailboxFolder, MailboxMessage, MailboxRule } from '@pms/server/types';
-import { CATEGORY_IDS, CATEGORY_LABELS, groupMessages, scoreGroups, type ScoredGroup } from '@pms/grouping';
+import {
+    categoryIdsOf,
+    CATEGORY_IDS,
+    CATEGORY_LABELS,
+    deriveAutoRules,
+    groupMessages,
+    scoreGroups,
+    type AutoRule,
+    type CategoryChange,
+    type CategoryObservation,
+    type ScoredGroup,
+} from '@pms/grouping';
 import {
     analyseRules,
     matchesRule,
@@ -30,6 +41,15 @@ export interface MailboxInput {
     messages: MailboxMessage[];
     folders: MailboxFolder[];
     rules: MailboxRule[];
+    /**
+     * What Proton's own sorting has been observed doing, across syncs.
+     *
+     * Optional because a copy made before the history existed has none, and a fresh one has almost
+     * none. Absent is a real state with a real answer — "not enough looks yet" — not a gap to fill
+     * in with a guess.
+     */
+    categoryObservations?: readonly CategoryObservation[];
+    categoryChanges?: readonly CategoryChange[];
 }
 
 /**
@@ -81,6 +101,28 @@ export interface MailboxData extends MailboxInput {
     caughtBy: (messageId: string) => { ruleId: string; ruleName: string; destination: string } | undefined;
     /** Proton's own categories present in this mailbox, in Proton's order, unknown ids last. */
     categories: CategorySummary[];
+    /** What Proton's sorting has been observed doing, per sender and per domain. */
+    autoRules: AutoRule[];
+    /** The verdict for one sender, when there is one. */
+    autoRuleFor: (address: string) => AutoRule | undefined;
+    /**
+     * Which of Proton's categories one message carries today, if any.
+     *
+     * The „bisher" column of a category move's diff. A message can in principle carry two, and this
+     * answers with the first — the diff shows one destination and one origin, and inventing a
+     * second row for a state we have never observed would be furnishing the screen with a
+     * hypothetical.
+     */
+    categoryOfMessage: (messageId: string) => string | undefined;
+    /**
+     * Which of Proton's categories these messages already carry.
+     *
+     * The answer to "is the rule I am about to write doing work Proton already does". Reads the
+     * categories computed above rather than walking the mailbox again.
+     */
+    categoryCoverage: (
+        messageIds: readonly string[]
+    ) => Array<{ categoryId: string; label: string; count: number; stable: boolean }>;
     /** Every message of a group, not the five samples the grouping keeps for a preview. */
     messagesInGroup: (group: ScoredGroup) => MailboxMessage[];
     analysisFor: (ruleId: string) => RuleAnalysis | undefined;
@@ -120,9 +162,17 @@ function proposeFolder(group: ScoredGroup): string {
     if (haystack.includes('rechnung') || haystack.includes('abrechnung')) {
         return 'Kosten Bestellung';
     }
-    if (group.categories.includes('Newsletter') || group.categories.includes('Werbung')) {
-        return 'Newsletter';
-    }
+
+    /*
+     * There used to be a branch here proposing a folder named "Newsletter" *because* Proton had
+     * already filed the group under Newsletter or Werbung. That is the duplicate filter this tool
+     * exists to prevent, suggested by the tool itself: a rule that moves mail Proton already sorts,
+     * into a folder that duplicates a category the user can already click.
+     *
+     * The category is still worth knowing — it is shown beside the suggestion, and the rule editor
+     * says how much of the match Proton already handles — but it must not be the *reason* for a
+     * destination.
+     */
 
     const organisation = (group.match.domain ?? group.match.sender?.split('@')[1] ?? 'Diverses').split('.')[0];
     return organisation === undefined || organisation === ''
@@ -215,22 +265,20 @@ export function buildMailbox(input: MailboxInput): MailboxData {
     /*
      * Proton's own categories.
      *
-     * They arrive as ordinary entries in `LabelIDs`, mixed in with folders and labels, so the only
-     * thing separating them is the id. The ids are unverified — see `CATEGORY_LABELS` — which is
-     * why a label that looks like a category but is not in the map is still reported, marked
-     * unknown. Dropping it would hide exactly the evidence needed to correct the map.
+     * They arrive as ordinary entries in `LabelIDs`, mixed in with folders and labels, so the id is
+     * the only thing separating them. `categoryIdsOf` is the single definition of which ids count —
+     * shared with the sync engine, which writes the same judgement into the history. Two copies of
+     * this rule is how `16` and `40` came to be missing from one of them, and a snoozed message was
+     * reported to the user as an unknown category.
+     *
+     * An unrecognised id is still reported, marked unknown. Dropping it would hide exactly the
+     * evidence needed to correct the map.
      */
     const knownFolderIds = new Set(folders.map((folder) => folder.ID));
     const byCategory = new Map<string, MailboxMessage[]>();
 
     for (const message of messages) {
-        for (const labelId of message.LabelIDs) {
-            const isKnownCategory = labelId in CATEGORY_LABELS;
-            // A category id is numeric, two digits, and is not one of this account's own folders.
-            const looksLikeCategory = /^\d{1,2}$/.test(labelId) && !knownFolderIds.has(labelId);
-            if (!isKnownCategory && !(looksLikeCategory && !SYSTEM_LOCATIONS.has(labelId))) {
-                continue;
-            }
+        for (const labelId of categoryIdsOf(message.LabelIDs, knownFolderIds)) {
             const list = byCategory.get(labelId);
             if (list === undefined) {
                 byCategory.set(labelId, [message]);
@@ -308,11 +356,82 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         };
     });
 
+    /*
+     * What Proton's own sorting has been observed doing.
+     *
+     * Derived once here rather than per screen: the rule editor asks "does Proton already handle
+     * this sender" on every keystroke of a live preview, and the answer must not cost a pass over
+     * the history each time.
+     */
+    const autoRules = deriveAutoRules({
+        observations: input.categoryObservations ?? [],
+        changes: input.categoryChanges ?? [],
+    });
+    const autoRuleBySender = new Map(
+        autoRules
+            .filter((rule) => rule.scope.kind === 'sender')
+            .map((rule) => [rule.scope.kind === 'sender' ? rule.scope.address : '', rule])
+    );
+
+    /** Category id per message, so coverage is a lookup rather than a scan. */
+    const categoryOf = new Map<string, string[]>();
+    for (const summary of categories) {
+        for (const message of summary.messages) {
+            const list = categoryOf.get(message.ID);
+            if (list === undefined) {
+                categoryOf.set(message.ID, [summary.id]);
+            } else {
+                list.push(summary.id);
+            }
+        }
+    }
+
     return {
         messages,
         folders,
         rules,
         inboxMessages,
+        autoRules,
+        autoRuleFor: (address) => autoRuleBySender.get(address),
+        categoryOfMessage: (messageId) => categoryOf.get(messageId)?.[0],
+
+        /*
+         * How much of a set of messages Proton already sorts, and how sure we are.
+         *
+         * `stable` is the difference between "this mail is in Werbung today" and "Proton has put
+         * this sender in Werbung every time we looked". The first is a fact about one snapshot and
+         * the second is worth changing a plan over, so the sentence on screen has to distinguish
+         * them rather than averaging them into a number.
+         */
+        categoryCoverage: (messageIds) => {
+            const counts = new Map<string, { count: number; stableSenders: number }>();
+
+            for (const id of messageIds) {
+                const message = byId.get(id);
+                for (const categoryId of categoryOf.get(id) ?? []) {
+                    const entry = counts.get(categoryId) ?? { count: 0, stableSenders: 0 };
+                    entry.count++;
+                    const verdict = message === undefined
+                        ? undefined
+                        : autoRuleBySender.get(message.Sender.Address)?.verdict;
+                    if (verdict?.kind === 'stable' && verdict.categoryId === categoryId) {
+                        entry.stableSenders++;
+                    }
+                    counts.set(categoryId, entry);
+                }
+            }
+
+            return [...counts.entries()]
+                .map(([categoryId, entry]) => ({
+                    categoryId,
+                    label: CATEGORY_LABELS[categoryId] ?? `Unbekannte Kategorie ${categoryId}`,
+                    count: entry.count,
+                    // Only when most of what it covers rests on a settled verdict; otherwise the
+                    // word "consistently" would be doing work one snapshot cannot support.
+                    stable: entry.count > 0 && entry.stableSenders / entry.count >= 0.5,
+                }))
+                .sort((a, b) => b.count - a.count);
+        },
         groups,
         analysis,
         suggestions,
@@ -389,14 +508,6 @@ export function buildMailbox(input: MailboxInput): MailboxData {
             ),
     };
 }
-
-/**
- * Proton's system *locations*, which look like category ids but are not.
- *
- * Every message carries several of these — inbox, all mail, sent — and they have nothing to do
- * with the categories the user sees as tabs in Proton's own mailbox.
- */
-const SYSTEM_LOCATIONS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '12', '15']);
 
 /** Proton's display order, with anything unrecognised after it rather than mixed in. */
 function order(id: string): number {

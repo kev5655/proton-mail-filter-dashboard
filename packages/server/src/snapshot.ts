@@ -1,6 +1,14 @@
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
-import { getMeta, readFilters, readFolderTree, readMessages, type StoredFolder } from '@pms/sync';
+import {
+    getMeta,
+    readCategoryChanges,
+    readCategoryObservations,
+    readFilters,
+    readFolderTree,
+    readMessages,
+    type StoredFolder,
+} from '@pms/sync';
 import { fromSieveTree } from '@proton/sieve/fromSieveTree';
 import type { SimpleObject } from '@proton/sieve/filterModel';
 
@@ -93,6 +101,8 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
         rules,
         unreadable,
         messages,
+        categoryObservations: readCategoryObservations(db),
+        categoryChanges: readCategoryChanges(db),
     };
 }
 

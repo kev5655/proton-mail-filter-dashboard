@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@pms/rules": "workspace:*",
-    "@proton/sieve": "workspace:*"
+    "@proton/sieve": "workspace:*",
+    "@pms/grouping": "workspace:*"
   }
 }

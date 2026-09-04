@@ -1,7 +1,8 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
+import { CATEGORY_LABELS } from '@pms/grouping';
 import type { ProtonHttp } from '@pms/proton-api';
-import { moveMessagesBack } from '@pms/proton-api/write/messages';
+import { moveMessagesBack, moveMessagesToCategory } from '@pms/proton-api/write/messages';
 
 import type { JournalEntry, MovedMessage } from './journal.js';
 
@@ -28,6 +29,11 @@ const log = getLogger('undo');
  *
  * A message somebody has since moved by hand is skipped and named. Putting it back would be
  * overruling a person with a record of what a machine did earlier.
+ *
+ * **Categories are a destination like any other here.** A category move is the second change kind
+ * that moves mail, so undoing one has to be able to put a message back into the category it came
+ * from — which needs a different endpoint from the one that restores a folder. The choice is made
+ * per message, from what the snapshot says, and never from what the change intended.
  */
 
 export interface MessageState {
@@ -107,7 +113,13 @@ export async function undoChange(entry: JournalEntry, context: UndoContext): Pro
 
     const restored: UndoOutcome['restored'] = [];
     for (const [targetLabelId, messageIds] of byTarget) {
-        await moveMessagesBack(context.http, messageIds, targetLabelId);
+        // A category is not a folder and the batch-move endpoint does not put mail into one. Which
+        // call to make follows from where the message was, which is recorded, not assumed.
+        if (targetLabelId in CATEGORY_LABELS) {
+            await moveMessagesToCategory(context.http, messageIds, targetLabelId);
+        } else {
+            await moveMessagesBack(context.http, messageIds, targetLabelId);
+        }
         restored.push({ targetLabelId, messageIds });
     }
 
@@ -139,10 +151,16 @@ export async function undoChange(entry: JournalEntry, context: UndoContext): Pro
     return { entryId: entry.id, restored, skippedMovedSince, unrestorable, partial };
 }
 
-function isIn(labels: readonly string[], folderName: string, folderIds: Map<string, string>): boolean {
-    const id = folderIds.get(folderName);
+/** Whether the message is still where the change put it — a folder, or one of Proton's categories. */
+function isIn(labels: readonly string[], destination: string, folderIds: Map<string, string>): boolean {
+    const id = folderIds.get(destination) ?? CATEGORY_IDS_BY_NAME.get(destination);
     return id !== undefined && labels.includes(id);
 }
+
+/** Category name to id, so the journal's German destination resolves the same way a folder's does. */
+const CATEGORY_IDS_BY_NAME = new Map(
+    Object.entries(CATEGORY_LABELS).map(([id, name]) => [name, id])
+);
 
 /**
  * Where a message was before the change.
@@ -150,12 +168,21 @@ function isIn(labels: readonly string[], folderName: string, folderIds: Map<stri
  * From the snapshot the journal recorded, and only from there. The first label that is a known
  * folder wins; a message carries several — the inbox, all mail — and picking by position rather
  * than by recognising a folder would land mail in whatever came first.
+ *
+ * The order below is the order of specificity, and it decides real cases. A message moved into
+ * „Transaktionen" was in the inbox and in „Standard" before; both are in the snapshot, and undoing
+ * to the inbox would silently drop the category the user is trying to get back. So a folder first,
+ * then a category, then the inbox — each one narrower than the next.
  */
 function previousFolderOf(moved: MovedMessage, folderIds: Map<string, string>): string | undefined {
     const known = new Set(folderIds.values());
     const folder = moved.previousLabelIds.find((id) => known.has(id));
     if (folder !== undefined) {
         return folder;
+    }
+    const category = moved.previousLabelIds.find((id) => id in CATEGORY_LABELS);
+    if (category !== undefined) {
+        return category;
     }
     // It was in the inbox and nowhere else, which is a destination like any other.
     return moved.previousLabelIds.includes(INBOX) ? INBOX : undefined;

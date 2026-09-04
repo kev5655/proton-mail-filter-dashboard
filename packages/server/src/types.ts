@@ -93,6 +93,31 @@ export interface MailboxMeta {
     version: string;
 }
 
+/**
+ * Proton's category history, as the dashboard receives it.
+ *
+ * Types only, structurally identical to `@pms/grouping`'s. Restated rather than re-exported because
+ * this file is the browser's contract and must stay free of value imports — and `@pms/grouping` is
+ * a value module. `deriveAutoRules` accepts these because the shapes match.
+ */
+export interface CategoryObservationDto {
+    senderAddress: string;
+    senderDomain: string;
+    categoryId: string;
+    /** Unix seconds of the sync that saw this — when we *looked*, not when the mail arrived. */
+    observedAt: number;
+    messageCount: number;
+}
+
+export interface CategoryChangeDto {
+    messageId: string;
+    senderAddress: string;
+    /** Absent when the message had no category before: a first sighting, not a change of mind. */
+    fromCategory: string | undefined;
+    toCategory: string;
+    observedAt: number;
+}
+
 export interface MailboxSnapshot {
     meta: MailboxMeta;
     folders: MailboxFolder[];
@@ -100,6 +125,15 @@ export interface MailboxSnapshot {
     rules: MailboxRule[];
     unreadable: UnreadableRule[];
     messages: MailboxMessage[];
+    /**
+     * What Proton's own sorting did, over the syncs we have.
+     *
+     * Empty on a copy made before the history existed, and near-empty on a young one. That is not a
+     * gap to paper over: it is the honest state, and the screen says "not enough looks yet" rather
+     * than inventing a verdict from a single snapshot.
+     */
+    categoryObservations: CategoryObservationDto[];
+    categoryChanges: CategoryChangeDto[];
 }
 
 /**

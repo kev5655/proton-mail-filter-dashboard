@@ -30,7 +30,17 @@ afterAll(async () => {
     await harness.close();
 });
 
-const PAGES = ['Vorschläge', 'Regeln', 'Kategorien', 'Ordner', 'Änderungen', 'Verlauf', 'Protokoll', 'Einstellungen'];
+const PAGES = [
+    'Vorschläge',
+    'Regeln',
+    'Kategorien',
+    'Auto-Regeln',
+    'Ordner',
+    'Änderungen',
+    'Verlauf',
+    'Protokoll',
+    'Einstellungen',
+];
 const WIDTHS = [1440, 1280, 1024, 900, 780];
 
 /**
