@@ -16,8 +16,9 @@ import { start, type Harness } from './harness.js';
  * has to be measured is every element, and then the ones allowed to scroll subtracted — which is a
  * short, explicit list rather than a shrug.
  *
- * Several widths, because the failure is width-dependent: the layout collapses to one column at
- * 1100 and again at 860, and each of those is a different set of rules.
+ * Several widths, because the failure is width-dependent: the layout drops to two columns at 1160,
+ * to one at 1100 and again at 860, and the navigation becomes a strip at 620 — each of those is a
+ * different set of rules.
  */
 
 let harness: Harness;
@@ -40,7 +41,12 @@ const PAGES = [
     'Verlauf',
     'Einstellungen',
 ];
-const WIDTHS = [1440, 1280, 1024, 900, 780];
+/*
+ * 390 is a phone held upright and 620 is the breakpoint's own edge; both were added when the
+ * navigation became a strip there, because a layout nothing measures is a layout that breaks
+ * quietly. 1160 is the edge of the two-column grid.
+ */
+const WIDTHS = [1440, 1280, 1160, 1024, 900, 780, 620, 390];
 
 /**
  * Every element wider than the space it has, minus the ones meant to be.
@@ -59,7 +65,12 @@ const WIDTHS = [1440, 1280, 1024, 900, 780];
  */
 async function sidewaysScrollers(): Promise<string[]> {
     return harness.page.evaluate(() => {
-        const allowed = ['.sieve-code', 'select', 'pre', 'code'];
+        /*
+         * `.nav-items` is on this list for the same reason `.sieve-code` is: on a phone it is a
+         * strip that scrolls sideways *on purpose* — eight entries in one swipe instead of eight
+         * rows filling the first screen. Its overflow is the mechanism, not a fault.
+         */
+        const allowed = ['.sieve-code', 'select', 'pre', 'code', '.nav-items'];
         const found: string[] = [];
 
         for (const element of document.querySelectorAll<HTMLElement>('body *')) {

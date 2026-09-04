@@ -25,6 +25,14 @@ export function CategoriesPage(): React.JSX.Element {
     const { source } = useMailboxStatus();
     const { setOpen, goTo } = useAppState();
     const [openId, setOpenId] = useState<string | undefined>(undefined);
+    /**
+     * Which „this rule does it too" list is unfolded, keyed by category and rule.
+     *
+     * One at a time, and separate from the category's own mail list: „209 davon" is a claim about
+     * an overlap, and the two lists answer different questions — everything Proton put here, versus
+     * the part of it a rule of your own moves as well.
+     */
+    const [openOverlap, setOpenOverlap] = useState<string | undefined>(undefined);
 
     const linkFor =
         source === 'proton'
@@ -61,10 +69,19 @@ export function CategoriesPage(): React.JSX.Element {
                 </p>
             )}
 
+            {/*
+             * Two columns where there is room for two. A category card is a heading, a count and a
+             * line about a rule; one per row on a wide screen is a column of whitespace. A card
+             * with a mail list unfolded under it takes the full width back.
+             */}
+            <div className="column-grid">
             {categories.map((entry) => {
                 const isOpen = openId === entry.id;
+                const overlapOpen = entry.alsoMovedByRules.some(
+                    (rule) => openOverlap === `${entry.id}:${rule.ruleId}`
+                );
                 return (
-                    <div className="card" key={entry.id}>
+                    <div className={isOpen || overlapOpen ? 'card column-span' : 'card'} key={entry.id}>
                         <div className="card-head">
                             <div className="stack">
                                 <h2>
@@ -94,20 +111,67 @@ export function CategoriesPage(): React.JSX.Element {
                             <div className="notice notice-info">
                                 <strong>Hier arbeitet zusätzlich eine eigene Regel.</strong>
                                 <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                                    {entry.alsoMovedByRules.map((rule) => (
-                                        <li key={rule.ruleId}>
-                                            <button
-                                                type="button"
-                                                className="value-chip value-chip-link"
-                                                onClick={() => goTo({ page: 'rules', focusRuleId: rule.ruleId })}
-                                            >
-                                                {rule.ruleName}
-                                            </button>{' '}
-                                            verschiebt {rule.count} davon nach „{rule.destination}".
-                                        </li>
-                                    ))}
+                                    {entry.alsoMovedByRules.map((rule) => {
+                                        const key = `${entry.id}:${rule.ruleId}`;
+                                        return (
+                                            <li key={rule.ruleId}>
+                                                <button
+                                                    type="button"
+                                                    className="value-chip value-chip-link"
+                                                    onClick={() =>
+                                                        goTo({ page: 'rules', focusRuleId: rule.ruleId })
+                                                    }
+                                                >
+                                                    {rule.ruleName}
+                                                </button>{' '}
+                                                verschiebt {rule.count} davon nach „{rule.destination}".{' '}
+                                                <button
+                                                    type="button"
+                                                    className="link-button"
+                                                    aria-expanded={openOverlap === key}
+                                                    onClick={() => {
+                                                        setOpenOverlap(
+                                                            openOverlap === key ? undefined : key
+                                                        );
+                                                    }}
+                                                >
+                                                    {openOverlap === key
+                                                        ? 'Mails ausblenden'
+                                                        : 'Welche?'}
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             </div>
+                        )}
+
+                        {/*
+                         * The overlap itself, on demand.
+                         *
+                         * Exactly the mail that is in this category *and* moved by that rule —
+                         * which is the list somebody needs to decide whether the rule is doing
+                         * useful work or repeating what Proton already did. Below the notice rather
+                         * than inside it: a mail list inside a coloured box reads as part of the
+                         * warning instead of as the evidence for it.
+                         */}
+                        {entry.alsoMovedByRules.map((rule) =>
+                            openOverlap === `${entry.id}:${rule.ruleId}` ? (
+                                <div key={rule.ruleId} style={{ marginTop: 12 }}>
+                                    <p className="faint">
+                                        In „{entry.label}" und von „{rule.ruleName}" nach „
+                                        {rule.destination}" verschoben — {rule.count}{' '}
+                                        {rule.count === 1 ? 'Mail' : 'Mails'}.
+                                    </p>
+                                    <MailList
+                                        messages={rule.messages}
+                                        onOpen={setOpen}
+                                        search
+                                        pageSize={settings.display.pageSize}
+                                        {...(linkFor === undefined ? {} : { linkFor })}
+                                    />
+                                </div>
+                            ) : null
                         )}
 
                         {entry.topSenders.length > 0 && (
@@ -142,6 +206,7 @@ export function CategoriesPage(): React.JSX.Element {
                     </div>
                 );
             })}
+            </div>
         </>
     );
 }

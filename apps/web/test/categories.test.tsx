@@ -57,6 +57,33 @@ describe('the derivation', () => {
         }
     });
 
+    it('carries the mail behind the number, and only mail that is in both', () => {
+        /*
+         * „209 davon" is a claim about an overlap, and the screen offers to show it. So the list
+         * behind the number has to *be* the overlap: every message in it must be in this category
+         * and moved by that rule. A list that quietly held the whole category, or the rule's whole
+         * catch, would look right at every count and be wrong at every row.
+         */
+        const withRules = mailbox.categories.filter((entry) => entry.alsoMovedByRules.length > 0);
+        expect(withRules.length).toBeGreaterThan(0);
+
+        for (const entry of withRules) {
+            const inCategory = new Set(entry.messages.map((message) => message.ID));
+            for (const rule of entry.alsoMovedByRules) {
+                expect(rule.messages.length).toBe(rule.count);
+                for (const message of rule.messages) {
+                    expect(inCategory.has(message.ID)).toBe(true);
+                }
+            }
+        }
+
+        // And together they account for no more than the category itself.
+        for (const entry of withRules) {
+            const moved = entry.alsoMovedByRules.reduce((total, rule) => total + rule.count, 0);
+            expect(moved).toBeLessThanOrEqual(entry.messages.length);
+        }
+    });
+
     it('names the own rules that move categorised mail as well', () => {
         // The one actionable fact on the screen: Proton already sorts this, so a rule doing it too
         // is a second thing to keep in step. The demo's catch-all guarantees at least one.

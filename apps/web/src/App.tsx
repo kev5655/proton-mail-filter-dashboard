@@ -213,18 +213,27 @@ function Shell(): React.JSX.Element {
                     </div>
                 </div>
 
-                {nav_.map((entry) => (
-                    <button
-                        key={entry.id}
-                        type="button"
-                        className="nav-item"
-                        aria-current={nav.page === entry.id ? 'page' : undefined}
-                        onClick={() => goTo({ page: entry.id })}
-                    >
-                        <span>{entry.label}</span>
-                        {entry.count > 0 && <span className="nav-count">{entry.count}</span>}
-                    </button>
-                ))}
+                {/*
+                 * Wrapped, and the wrapper is `display: contents` on anything wider than a phone —
+                 * so above that breakpoint the buttons are still direct children of the sidebar and
+                 * nothing about the layout changes. On a phone the wrapper becomes a horizontal
+                 * strip: eight full-width rows there filled the entire first screen, so every page
+                 * began with a menu somebody had to scroll past to reach their own mail.
+                 */}
+                <div className="nav-items">
+                    {nav_.map((entry) => (
+                        <button
+                            key={entry.id}
+                            type="button"
+                            className="nav-item"
+                            aria-current={nav.page === entry.id ? 'page' : undefined}
+                            onClick={() => goTo({ page: entry.id })}
+                        >
+                            <span>{entry.label}</span>
+                            {entry.count > 0 && <span className="nav-count">{entry.count}</span>}
+                        </button>
+                    ))}
+                </div>
 
                 {/*
                  * Stated on every screen, not tucked into a settings page. Someone looking at a

@@ -161,7 +161,17 @@ export function TriagePage(): React.JSX.Element {
                                 {section.entries.length === 0 ? (
                                     <p className="muted">Hier passt nichts auf den Filter.</p>
                                 ) : (
-                                    renderEntries(section.entries)
+                                    /*
+                                     * Two columns where there is room for two.
+                                     *
+                                     * A suggestion card is a fixed, small thing — a name, a folder
+                                     * and two buttons — so one per line on a wide screen means
+                                     * scrolling past a column of whitespace. The card that is
+                                     * opened takes the full width back, because what unfolds under
+                                     * it is a mail list, and a mail list in half a column is worse
+                                     * than a second column is good.
+                                     */
+                                    <div className="column-grid">{renderEntries(section.entries)}</div>
                                 )}
                             </>
                         )}
@@ -208,7 +218,10 @@ export function TriagePage(): React.JSX.Element {
                 };
 
                 return (
-                    <div className="card" key={entry.group.key}>
+                    <div
+                        className={isOpen ? 'card column-span' : 'card'}
+                        key={entry.group.key}
+                    >
                         <div className="card-head">
                             <div className="stack">
                                 <div className="row">

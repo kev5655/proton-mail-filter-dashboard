@@ -97,8 +97,20 @@ export interface CategorySummary {
     messages: MailboxMessage[];
     inInbox: number;
     topSenders: Array<{ address: string; count: number }>;
-    /** Own rules that also move mail Proton already categorised — usually redundant. */
-    alsoMovedByRules: Array<{ ruleId: string; ruleName: string; destination: string; count: number }>;
+    /**
+     * Own rules that also move mail Proton already categorised — usually redundant.
+     *
+     * The messages come along rather than only their number. „209 davon" is a claim, and the only
+     * way to check a claim about which mail a rule catches is to look at the mail; a count on its
+     * own asks to be believed.
+     */
+    alsoMovedByRules: Array<{
+        ruleId: string;
+        ruleName: string;
+        destination: string;
+        count: number;
+        messages: MailboxMessage[];
+    }>;
     /** True for a label id that is not in `CATEGORY_LABELS`. Reported, never hidden. */
     unknown: boolean;
 }
@@ -344,7 +356,10 @@ export function buildMailbox(input: MailboxInput): MailboxData {
 
             // Which of the user's own rules also move this mail. Proton has already sorted it, so
             // a rule doing the same work is one more thing to keep in step for no gain.
-            const byRule = new Map<string, { ruleId: string; ruleName: string; destination: string; count: number }>();
+            const byRule = new Map<
+                string,
+                { ruleId: string; ruleName: string; destination: string; messages: MailboxMessage[] }
+            >();
             for (const message of list) {
                 const owner = outcomes.get(message.ID)?.decidedBy;
                 const destination = outcomes.get(message.ID)?.destination;
@@ -353,9 +368,14 @@ export function buildMailbox(input: MailboxInput): MailboxData {
                 }
                 const existing = byRule.get(owner.id);
                 if (existing === undefined) {
-                    byRule.set(owner.id, { ruleId: owner.id, ruleName: owner.name, destination, count: 1 });
+                    byRule.set(owner.id, {
+                        ruleId: owner.id,
+                        ruleName: owner.name,
+                        destination,
+                        messages: [message],
+                    });
                 } else {
-                    existing.count++;
+                    existing.messages.push(message);
                 }
             }
 
@@ -368,7 +388,9 @@ export function buildMailbox(input: MailboxInput): MailboxData {
                     .map(([address, count]) => ({ address, count }))
                     .sort((a, b) => b.count - a.count)
                     .slice(0, 5),
-                alsoMovedByRules: [...byRule.values()].sort((a, b) => b.count - a.count),
+                alsoMovedByRules: [...byRule.values()]
+                    .map((entry) => ({ ...entry, count: entry.messages.length }))
+                    .sort((a, b) => b.count - a.count),
                 unknown: !(id in CATEGORY_LABELS),
             };
         })

@@ -1318,3 +1318,156 @@
 .card > .row:not(:first-child) {
     margin-top: 12px;
 }
+
+/* ---------------------------------------------------------------- two columns */
+
+/*
+ * A list of cards that becomes two columns when there is room for two.
+ *
+ * `minmax(0, 1fr)` for the same reason every other flexible track in this file has it: a `1fr`
+ * track still takes its automatic minimum from its content, so one long subject would push the
+ * column past the viewport and make the page scroll sideways.
+ *
+ * The breakpoint is a width, not a count: below it the content column is too narrow for two cards
+ * to be anything but cramped, and one column is the right answer rather than a fallback.
+ */
+.column-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+/* The cards space themselves through the grid's gap; their own margin would double it. */
+.column-grid > .card {
+    margin-bottom: 0;
+}
+
+@media (min-width: 1160px) {
+    .column-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    /*
+     * A card that has unfolded a mail list takes the width back.
+     *
+     * A list of subjects and senders in half a column is worse than a second column is good — and
+     * the card is only that wide while somebody is actually reading it.
+     */
+    .column-span {
+        grid-column: 1 / -1;
+    }
+}
+
+/*
+ * A button that is a word inside a sentence.
+ *
+ * Not a `.button`: it sits in running text — „verschiebt 209 davon nach Junk. Welche?" — and a
+ * button with a border and padding there would break the line it belongs to.
+ */
+.link-button {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.link-button:hover {
+    text-decoration-thickness: 2px;
+}
+
+/* ---------------------------------------------------------------- phones */
+
+/*
+ * Above a phone the wrapper is not a box at all: the buttons stay direct children of the sidebar's
+ * flex column, so its `gap` still spaces them and nothing about the wide layout changes.
+ */
+.nav-items {
+    display: contents;
+}
+
+/*
+ * A phone, where the navigation cannot be a column.
+ *
+ * Eight full-width rows, a brand and a source banner filled the entire first screen at 390px: every
+ * page began with a menu to scroll past before any mail appeared. The entries become a strip that
+ * scrolls sideways instead — the whole menu in one swipe, and the content starts where the screen
+ * does.
+ *
+ * The source banner stays. It is the one thing on this screen that must never be traded for space:
+ * somebody looking at a plausible list of their own folder names has to be able to tell whether it
+ * is theirs.
+ */
+@media (max-width: 620px) {
+    .sidebar {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+
+    .brand {
+        padding: 2px 2px 0;
+    }
+
+    /* The subtitle is the first thing to go: the logo and the name already say what this is. */
+    .brand .stack span {
+        display: none;
+    }
+
+    .nav-items {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        /* Bleed to the screen edges, so the strip looks like it continues rather than stopping. */
+        margin: 0 -12px;
+        padding: 0 12px 2px;
+        /* A scrollbar under eight chips is more furniture than the chips. */
+        scrollbar-width: none;
+    }
+
+    .nav-items::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-item {
+        flex: none;
+        width: auto;
+        border-radius: 999px;
+        padding: 7px 12px;
+        white-space: nowrap;
+        background: var(--bg);
+    }
+
+    .demo-banner {
+        margin-top: 0;
+    }
+
+    .main {
+        padding: 12px;
+    }
+
+    /* Prose was capped for a wide column; on a phone the cap is the screen. */
+    .notice,
+    .page-head p {
+        max-width: none;
+    }
+
+    /*
+     * A row of buttons becomes a column when the buttons no longer fit side by side.
+     *
+     * `.row` already wraps, but a half-width button next to a wrapped one reads as two unrelated
+     * controls. Full width each is unambiguous and is what a thumb wants.
+     */
+    .card > .row > .button,
+    .form-stack > .row > .button {
+        flex: 1 1 160px;
+        justify-content: center;
+    }
+
+    .form-stack > .field,
+    .form-stack > .field-narrow {
+        max-width: none;
+    }
+}
