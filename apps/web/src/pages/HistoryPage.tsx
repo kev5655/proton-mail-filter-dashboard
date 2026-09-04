@@ -23,7 +23,7 @@ import { ActivityLog } from '../components/ActivityLog.js';
  * description of the change.
  */
 export function HistoryPage(): React.JSX.Element {
-    const { journal, undo, stageUndo } = useStore();
+    const { journal, undo, stageUndo, stageRewind } = useStore();
     const { source, history } = useMailboxStatus();
 
     // The demo has no account to have changed, so it shows its own local record; everything else
@@ -40,6 +40,7 @@ export function HistoryPage(): React.JSX.Element {
                   backupPath: undefined as string | undefined,
                   undoable: entry.undoneAt === undefined,
                   moved: entry.moved.length,
+                  snapshot: entry.moved,
                   take: () => {
                       undo(entry.id);
                   },
@@ -57,6 +58,7 @@ export function HistoryPage(): React.JSX.Element {
                   // disagree about what the account looks like.
                   undoable: entry.undoneAt === undefined && entry.undoesId === undefined,
                   moved: entry.moved.length,
+                  snapshot: entry.moved,
                   take: () => {
                       stageUndo({ id: entry.id, summary: entry.summary, moved: entry.moved });
                   },
@@ -86,7 +88,7 @@ export function HistoryPage(): React.JSX.Element {
                 </p>
             )}
 
-            {entries.map((entry) => (
+            {entries.map((entry, index) => (
                 <div className="card" key={entry.id}>
                     <div className="card-head">
                         <div className="stack">
@@ -103,9 +105,36 @@ export function HistoryPage(): React.JSX.Element {
                         </div>
 
                         {entry.undoable && (
-                            <button type="button" className="button button-secondary" onClick={entry.take}>
-                                Rückgängig
-                            </button>
+                            <div className="row">
+                                <button type="button" className="button button-secondary" onClick={entry.take}>
+                                    Rückgängig
+                                </button>
+                                {/*
+                                 * Only where there is something above it to take back as well.
+                                 * On the newest entry a rewind is the same act as the undo beside
+                                 * it, and two buttons doing one thing is a choice nobody needs.
+                                 */}
+                                {index > 0 && source !== 'demo' && (
+                                    <button
+                                        type="button"
+                                        className="button button-quiet"
+                                        onClick={() => {
+                                            stageRewind(
+                                                entries
+                                                    .slice(0, index + 1)
+                                                    .filter((candidate) => candidate.undoable)
+                                                    .map((candidate) => ({
+                                                        id: candidate.id,
+                                                        summary: candidate.summary,
+                                                        moved: candidate.snapshot,
+                                                    }))
+                                            );
+                                        }}
+                                    >
+                                        Bis hierhin zurück ({index + 1})
+                                    </button>
+                                )}
+                            </div>
                         )}
                     </div>
 

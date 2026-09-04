@@ -131,7 +131,13 @@ function Shell(): React.JSX.Element {
 
     const nav_: Array<{ id: Page; label: string; count: number }> = [
         { id: 'triage', label: PAGE_LABELS.triage, count: groups.length },
-        { id: 'rules', label: PAGE_LABELS.rules, count: rules.length },
+        {
+            id: 'rules',
+            label: PAGE_LABELS.rules,
+            // Only the ones this tool manages. Counting a rule that is simultaneously asking to be
+            // adopted on „Änderungen" would put a number on the tab that answers its own question.
+            count: rules.filter((rule) => rule.adopted !== false).length,
+        },
         { id: 'categories', label: PAGE_LABELS.categories, count: categories.length },
         {
             id: 'auto-rules',

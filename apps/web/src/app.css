@@ -466,6 +466,18 @@
  * headings and sections rather than as a row of controls. The caret is the only thing that says it
  * can be clicked, and `aria-expanded` says it to anything that cannot see the caret.
  */
+/*
+ * A rule this tool did not write and nobody has taken responsibility for.
+ *
+ * Dimmed rather than hidden: it is running at Proton right now, and a list of rules that leaves out
+ * a running rule is worse than one that explains it. It is not editable — a decision about whether
+ * to manage it belongs on „Änderungen", and editing it here would answer that question by accident.
+ */
+.rule-row.unconfirmed {
+    opacity: 0.72;
+    border-left: 3px solid var(--warning);
+}
+
 .section-toggle {
     font: inherit;
     color: inherit;

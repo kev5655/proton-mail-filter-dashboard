@@ -64,6 +64,19 @@ describe('the rules page', () => {
         expect(text(html)).toContain('Zielordner doppelt');
     });
 
+    it('marks a rule nobody has taken responsibility for, and does not offer it for editing', () => {
+        // It used to sit here indistinguishable from the rest and fully editable, while at the same
+        // time asking to be adopted on „Änderungen" — so the same rule was both under management and
+        // awaiting a decision about whether it should be. Editing it would have answered that
+        // question by accident.
+        const body = text(html);
+        expect(body).toContain('nicht bestätigt');
+        expect(body).toContain('sie läuft trotzdem');
+        // Listed, not hidden: it is running at Proton right now, and a list of rules that leaves
+        // out a running rule is worse than one that explains it.
+        expect(body).toContain('Zahnarzt');
+    });
+
     it('does not call a switched-off rule active', () => {
         // The badge used to be a verdict about how well a rule works, and its `default:` branch
         // said „aktiv" — including for a rule Proton is not running at all. Being confidently wrong

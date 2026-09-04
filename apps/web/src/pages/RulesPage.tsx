@@ -122,15 +122,33 @@ export function RulesPage(): React.JSX.Element {
                     {rules.map((entry, index) => {
                         const report = analysisFor(entry.id);
                         const target = entry.rule.Actions.FileInto.at(-1) ?? '—';
+                        /*
+                         * A rule this tool did not write and nobody has taken responsibility for.
+                         *
+                         * It used to sit here indistinguishable from the rest and fully editable,
+                         * while simultaneously asking to be adopted on „Änderungen" — so the same
+                         * rule was both under management and awaiting a decision about whether it
+                         * should be. Editing it would have answered that question by accident.
+                         *
+                         * It is not hidden: it is running at Proton right now, and a list of rules
+                         * that leaves out a running rule is worse than one that explains it.
+                         */
+                        const unconfirmed = entry.adopted === false;
 
                         return (
                             <button
                                 key={entry.id}
                                 type="button"
-                                className="rule-row"
+                                className={unconfirmed ? 'rule-row unconfirmed' : 'rule-row'}
                                 aria-current={editing === entry.id ? 'true' : undefined}
                                 aria-expanded={editing === entry.id}
-                                onClick={() => leaveEditor(entry.id)}
+                                onClick={() => {
+                                    if (unconfirmed) {
+                                        goTo({ page: 'changes' });
+                                        return;
+                                    }
+                                    leaveEditor(entry.id);
+                                }}
                             >
                                 <span className="rule-order">{index + 1}</span>
 
@@ -138,13 +156,19 @@ export function RulesPage(): React.JSX.Element {
                                     <span className="row">
                                         <strong>{entry.name}</strong>
                                         <FilterKind kind={entry.authoredAs} />
+                                        {unconfirmed && (
+                                            <span className="badge badge-warning">nicht bestätigt</span>
+                                        )}
                                         {shadowNames.has(target) && (
                                             <span className="badge badge-warning">Zielordner doppelt</span>
                                         )}
                                     </span>
                                     <span className="faint">
-                                        → {target} · {report?.matchedCount ?? 0} Treffer ·{' '}
-                                        {report?.decidedCount ?? 0}× entscheidend
+                                        {unconfirmed
+                                            ? 'In Proton angelegt, hier noch nicht übernommen — sie läuft trotzdem. Unter „Änderungen" entscheiden.'
+                                            : `→ ${target} · ${String(report?.matchedCount ?? 0)} Treffer · ${String(
+                                                  report?.decidedCount ?? 0
+                                              )}× entscheidend`}
                                     </span>
                                 </span>
 

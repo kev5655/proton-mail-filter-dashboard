@@ -60,6 +60,9 @@ export function describeChange(change: PendingChange): string {
             return `${String(count)} ${count === 1 ? 'Mail' : 'Mails'} nach „${categoryName(change.category?.id)}" verschieben`;
         }
 
+        case 'rewind-to':
+            return 'Auf einen früheren Stand zurückgehen';
+
         case 'undo-entry':
             // Named without its contents on purpose: what it will do lives in the journal entry,
             // and the diff reads it from there. A summary that guessed would be guessing about

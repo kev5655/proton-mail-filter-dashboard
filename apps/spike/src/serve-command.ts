@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type ChangeRequest } from '@pms/apply';
-import { describeChange } from '@pms/changes';
+import { describeChange, type PendingChange } from '@pms/changes';
 import { undoChange } from '@pms/changes/undo';
 import { moveIntoCategory } from '@pms/changes/category';
 import { AppError } from '@pms/core/errors';
@@ -15,9 +15,11 @@ import {
     markAdopted,
     markUndone,
     readJournalEntry,
+    readJournalSince,
     recordJournalEntry,
     refreshAccountObjects,
     syncAll,
+    type StoredEntry,
 } from '@pms/sync';
 
 import { DATA_DIR, logFilePath } from './paths.js';
@@ -137,6 +139,57 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          * and it is the only place a malformed offer is rejected — before anybody is asked about
          * it. `run` performs the change, and it does so only after `confirmAtTerminal` returns.
          */
+        /*
+         * Taking one recorded change back — the piece both undo and rewind are made of.
+         *
+         * It lives here because undo needs three things from three places that must not be brought
+         * together anywhere else: the journal (this database), the write path (`@pms/apply`, which
+         * cannot read a database), and the message-moving module (`@pms/changes/undo`, which
+         * nothing else may import). This function is where they meet, once.
+         *
+         * `undoChange` keeps its own order — rule first, then mail, because the filter is still
+         * running and mail moved back under a live rule is re-filed within the hour — and its own
+         * refusals: a message somebody has moved by hand since is skipped and named rather than
+         * overruled, and one with no recorded previous folder is reported as unrestorable instead
+         * of guessed at.
+         */
+        const undoOne = async (
+            entry: StoredEntry,
+            performInverse: (inverse: PendingChange) => Promise<void>
+        ): Promise<{ restored: number; skipped: number; unrestorable: number }> => {
+            if (entry.undoneAt !== undefined) {
+                throw new AppError('UNDO_ENTRY_ALREADY_UNDONE', {
+                    message: 'Diese Änderung wurde bereits zurückgenommen.',
+                    hint: 'Ein zweites Zurücknehmen wäre etwas anderes als das erste.',
+                    context: { entryId: entry.id },
+                });
+            }
+
+            const folders = await getFolders(http);
+            const outcome = await undoChange(entry, {
+                http,
+                applyInverse: async () => {
+                    await performInverse(entry.inverse);
+                },
+                readCurrent: async (ids) => {
+                    const wanted = new Set(ids);
+                    const page = await getMessages(http, { pageSize: 150 });
+                    return page.messages
+                        .filter((message) => wanted.has(message.ID))
+                        .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
+                },
+                folderIds: new Map(folders.map((folder) => [folder.Name, folder.ID])),
+            });
+
+            markUndone(db, entry.id, Math.floor(Date.now() / 1000));
+
+            return {
+                restored: outcome.restored.reduce((total, group) => total + group.messageIds.length, 0),
+                skipped: outcome.skippedMovedSince.length,
+                unrestorable: outcome.unrestorable.length,
+            };
+        };
+
         const confirm = confirmAtTerminal();
         const apply = new ApplyChannel(
             (request) => {
@@ -213,37 +266,37 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                                 context: { entryId },
                             });
                         }
-                        if (entry.undoneAt !== undefined) {
-                            throw new AppError('UNDO_ENTRY_ALREADY_UNDONE', {
-                                message: 'Diese Änderung wurde bereits zurückgenommen.',
-                                hint: 'Ein zweites Zurücknehmen wäre etwas anderes als das erste.',
+                        return undoOne(entry, performInverse);
+                    },
+                    /*
+                     * The same act, several times, newest first.
+                     *
+                     * Each step is journalled as it lands, so a rewind that stops halfway leaves a
+                     * record somebody can read rather than an account nobody can account for. It
+                     * stops at the first failure and says where — and nothing rolls forward again,
+                     * because that would be a second unwatched write series inside an error path.
+                     */
+                    rewindTo: async (entryId, performInverse) => {
+                        const chain = readJournalSince(db, entryId);
+                        if (chain.length === 0) {
+                            throw new AppError('APPLY_MALFORMED', {
+                                message: 'Ab diesem Eintrag gibt es nichts zurückzunehmen.',
+                                hint: 'Es wurde nichts geschrieben.',
                                 context: { entryId },
                             });
                         }
 
-                        const folders = await getFolders(http);
-                        const outcome = await undoChange(entry, {
-                            http,
-                            applyInverse: async () => {
-                                await performInverse(entry.inverse);
-                            },
-                            readCurrent: async (ids) => {
-                                const wanted = new Set(ids);
-                                const page = await getMessages(http, { pageSize: 150 });
-                                return page.messages
-                                    .filter((message) => wanted.has(message.ID))
-                                    .map((message) => ({ ID: message.ID, LabelIDs: message.LabelIDs }));
-                            },
-                            folderIds: new Map(folders.map((folder) => [folder.Name, folder.ID])),
-                        });
-
-                        markUndone(db, entryId, Math.floor(Date.now() / 1000));
-
-                        return {
-                            restored: outcome.restored.reduce((total, group) => total + group.messageIds.length, 0),
-                            skipped: outcome.skippedMovedSince.length,
-                            unrestorable: outcome.unrestorable.length,
-                        };
+                        const steps: Array<{ entryId: string; restored: number }> = [];
+                        for (const entry of chain) {
+                            try {
+                                const result = await undoOne(entry, performInverse);
+                                steps.push({ entryId: entry.id, restored: result.restored });
+                            } catch (cause) {
+                                log.warn({ entryId: entry.id, cause }, 'rewind stopped');
+                                return { steps, stoppedAt: entry.id };
+                            }
+                        }
+                        return { steps };
                     },
                     moveToCategory: async (messageIds, categoryId) => {
                         await moveIntoCategory(messageIds, categoryId, {

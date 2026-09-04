@@ -150,6 +150,7 @@ export function inverseOf(change: PendingChange): PendingChange {
          * is likewise excluded, in the query that builds the chain.
          */
         case 'undo-entry':
+        case 'rewind-to':
             return { ...base, kind: 'undo-entry' };
 
         default: {

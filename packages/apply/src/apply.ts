@@ -95,6 +95,9 @@ export function weigh(
     if (request.change.kind === 'undo-entry') {
         return { needsTerminal: true, reason: 'Diese Änderung nimmt eine frühere zurück und verschiebt Mail.' };
     }
+    if (request.change.kind === 'rewind-to') {
+        return { needsTerminal: true, reason: 'Diese Änderung nimmt mehrere frühere zurück und verschiebt Mail.' };
+    }
     if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
         return { needsTerminal: true, reason: 'Diese Änderung löscht etwas.' };
     }
@@ -145,6 +148,21 @@ export interface ApplyContext {
         entryId: string,
         performInverse: (inverse: PendingChange) => Promise<void>
     ) => Promise<{ restored: number; skipped: number; unrestorable: number }>;
+    /**
+     * Take back everything from one recorded change onwards, newest first.
+     *
+     * A separate capability rather than a loop over `undoEntry`, because the *chain* is the thing
+     * that needs a record: which entries were in it, which of them landed, and where it stopped.
+     * That knowledge lives with the journal, not here.
+     *
+     * It stops at the first failure and reports it. Continuing past an error would produce an
+     * account state nobody could describe afterwards — and this is an error path, which is the
+     * worst possible place to keep writing unwatched.
+     */
+    rewindTo?: (
+        entryId: string,
+        performInverse: (inverse: PendingChange) => Promise<void>
+    ) => Promise<{ steps: Array<{ entryId: string; restored: number }>; stoppedAt?: string | undefined }>;
     now?: () => number;
     /** Injected in tests so a verification does not wait on a real clock. */
     sleep?: (ms: number) => Promise<void>;
@@ -326,6 +344,19 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
     // re-sorted, and only one of them can be the headline.
     partial ??= backlogProblem;
 
+    // A rewind that stopped is a real state and gets said, not rounded up. The steps that landed
+    // are each their own journal entry, so the account is explicable from the record either way.
+    if (performed.rewind?.stoppedAt !== undefined) {
+        const landed = performed.rewind.steps.length;
+        partial = new AppError('APPLY_PARTIAL', {
+            message: `${String(landed)} Schritte zurückgenommen, dann abgebrochen.`,
+            hint:
+                'Der Rest steht noch. Es wurde nichts wieder vorgespult — das wäre eine zweite ' +
+                'unbeaufsichtigte Schreibserie im Fehlerpfad. Der Verlauf zeigt, wo es endete.',
+            context: { landed, stoppedAt: performed.rewind.stoppedAt },
+        });
+    }
+
     if (performed.rewrittenRules !== undefined && performed.rewrittenRules.length > 0) {
         log.info(
             { rules: performed.rewrittenRules.map((rule) => rule.name) },
@@ -440,6 +471,8 @@ interface Performed {
     adoptedFilterIds?: string[];
     /** What an undo actually put back, as observed rather than as intended. */
     undo?: { restored: number; skipped: number; unrestorable: number };
+    /** Which steps of a rewind landed, and where it stopped if it did. */
+    rewind?: { steps: Array<{ entryId: string; restored: number }>; stoppedAt?: string | undefined };
     /** Set when some steps landed and a later one did not. Deliberately not rolled back. */
     problem: AppError | undefined;
 }
@@ -634,6 +667,39 @@ async function perform(
                 break;
             }
 
+            /*
+             * The same act, several times, newest first — and stopping at the first failure.
+             *
+             * A partly-rewound account is a state somebody has to be able to look at and
+             * understand. Pressing on past an error would make it one nobody could describe, and
+             * nothing here rolls forward again afterwards: that would be a second unwatched write
+             * series inside an error path.
+             */
+            case 'rewind-to': {
+                const entryId = change.undo?.entryId;
+                if (entryId === undefined || entryId === '') {
+                    throw new AppError('APPLY_MALFORMED', {
+                        message: 'Die Änderung sagt nicht, bis wohin zurückgegangen werden soll.',
+                        hint: 'Es wurde nichts geschrieben.',
+                        context: { kind: change.kind },
+                    });
+                }
+                if (context.rewindTo === undefined) {
+                    throw new AppError('APPLY_PARTIAL', {
+                        message: 'Das Zurückspulen ist hier nicht verdrahtet.',
+                        hint:
+                            'Es wurde nichts geschrieben. Das passiert, wenn die Änderung nicht über ' +
+                            '`pnpm serve` läuft — nur dort liegt der Verlauf.',
+                        context: { kind: change.kind },
+                    });
+                }
+                const result = await context.rewindTo(entryId, async (inverse) => {
+                    await perform({ ...request, change: inverse }, account, http, withoutUndo(context));
+                });
+                performed.rewind = result;
+                break;
+            }
+
             default: {
                 // Every kind is handled above. This stays so that adding one to `ChangeKind`
                 // without adding it here fails loudly instead of reporting a success nobody made.
@@ -665,7 +731,7 @@ async function perform(
 
 /** The same capabilities minus the undo one, so an inverse cannot recurse into another undo. */
 function withoutUndo(context: ApplyContext): ApplyContext {
-    const { undoEntry: _undoEntry, ...rest } = context;
+    const { undoEntry: _undoEntry, rewindTo: _rewindTo, ...rest } = context;
     return rest;
 }
 

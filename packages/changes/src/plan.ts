@@ -52,7 +52,19 @@ export type ChangeKind =
      * each message where *it* was, which is not necessarily where any of the others were. A
      * description of the change could not do that, which is why the snapshot exists.
      */
-    | 'undo-entry';
+    | 'undo-entry'
+    /**
+     * Taking back everything from one point onwards, newest first.
+     *
+     * A chain of undos with one diff and one confirmation, because reversing four changes one
+     * dialog at a time is where somebody stops reading. It names the oldest entry to reverse; the
+     * rest is read from the record.
+     *
+     * It stops at the first failure rather than continuing. A partly-rewound account is a state
+     * somebody has to be able to look at and understand, and pressing on past an error would make
+     * it one nobody could describe.
+     */
+    | 'rewind-to';
 
 export interface PendingChange {
     id: string;
@@ -159,6 +171,7 @@ export function applyChangeToRules(rules: OrderedRule[], change: PendingChange):
          * a step later and in a place that can read the record.
          */
         case 'undo-entry':
+        case 'rewind-to':
             return rules;
 
         // Folder changes do not alter which rule matches what, only where the mail is put. A rename
@@ -390,4 +403,51 @@ function previousName(
         }
     }
     return undefined;
+}
+
+/**
+ * The plan for taking back everything from one point onwards.
+ *
+ * The entries arrive newest first, which is also the order they will be reversed in: undoing an
+ * older change before a newer one that was built on top of it would put the account through a state
+ * nobody planned.
+ *
+ * The moves are every entry's moves together, and a message that two changes both touched appears
+ * once, restored to where the *oldest* of them found it — which is what walking backwards actually
+ * produces. Computing it any other way would show a diff that the run then contradicts.
+ */
+export function planRewind(
+    entries: readonly UndoableEntry[],
+    resolveLabel: (labelId: string) => string | undefined
+): ChangePlan {
+    const oldest = entries.at(-1);
+    const change: PendingChange = {
+        id: `rewind-${oldest?.id ?? 'nothing'}`,
+        kind: 'rewind-to',
+        undo: { entryId: oldest?.id ?? '' },
+    };
+
+    // Newest first in, so a later assignment is by an older entry — the one whose "before" is the
+    // state a full rewind lands on.
+    const byMessage = new Map<string, Move>();
+    for (const entry of entries) {
+        for (const moved of entry.moved) {
+            byMessage.set(moved.messageId, {
+                messageId: moved.messageId,
+                subject: moved.messageId,
+                sender: '',
+                from: moved.movedTo,
+                to: previousName(moved.previousLabelIds, resolveLabel),
+            });
+        }
+    }
+
+    const moves = [...byMessage.values()];
+    return {
+        change,
+        moves,
+        clearedFromInbox: 0,
+        returnedToInbox: moves.filter((move) => move.to === undefined).length,
+        takenFrom: [],
+    };
 }

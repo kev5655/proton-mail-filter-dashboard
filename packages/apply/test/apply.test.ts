@@ -869,3 +869,93 @@ describe('undoing a recorded change', () => {
         ).rejects.toMatchObject({ code: 'APPLY_PARTIAL' });
     });
 });
+
+
+/**
+ * Going back several steps at once.
+ *
+ * One diff and one confirmation for the whole chain, because reversing four changes a dialog at a
+ * time is where somebody stops reading them. The property that matters is what happens when a step
+ * fails: it stops, says where, and does not roll forward again — an error path is the worst
+ * possible place to start a second unwatched write series.
+ */
+describe('rewinding to an earlier point', () => {
+    function rewindRequest(entryId = 'j-1'): ChangeRequest {
+        const rewind: PendingChange = { id: 'w-1', kind: 'rewind-to', undo: { entryId } };
+        return {
+            ...request({ change: rewind }),
+            affectedMessageIds: [],
+            plan: { change: rewind, moves: [], clearedFromInbox: 0, returnedToInbox: 0, takenFrom: [] },
+        };
+    }
+
+    it('always asks the terminal', () => {
+        expect(weigh(rewindRequest(), 10_000)).toMatchObject({ needsTerminal: true });
+    });
+
+    it('takes nothing back when the terminal declines', async () => {
+        const proton = fakeProton();
+        let asked = 0;
+
+        await expect(
+            applyChange(rewindRequest(), {
+                http: proton.http,
+                backupDir,
+                confirm: always('declined'),
+                rewindTo: async () => {
+                    asked++;
+                    return { steps: [] };
+                },
+            })
+        ).rejects.toMatchObject({ code: 'APPLY_NOT_CONFIRMED' });
+
+        expect(asked).toBe(0);
+        expect(proton.writes()).toEqual([]);
+    });
+
+    it('reports a chain that stopped as partial rather than as done', async () => {
+        // Two of three landed. That is a real state, and the one most worth naming: the account is
+        // now somewhere between two versions of itself and the user has to know which.
+        const outcome = await applyChange(rewindRequest(), {
+            http: fakeProton().http,
+            backupDir,
+            confirm: always('granted'),
+            rewindTo: async () => ({
+                steps: [
+                    { entryId: 'j-3', restored: 4 },
+                    { entryId: 'j-2', restored: 2 },
+                ],
+                stoppedAt: 'j-1',
+            }),
+        });
+
+        expect(outcome.partial?.code).toBe('APPLY_PARTIAL');
+        expect(outcome.partial?.message).toContain('2 Schritte');
+        expect(outcome.partial?.hint).toContain('nichts wieder vorgespult');
+    });
+
+    it('reports a chain that finished as finished', async () => {
+        const outcome = await applyChange(rewindRequest(), {
+            http: fakeProton().http,
+            backupDir,
+            confirm: always('granted'),
+            rewindTo: async () => ({ steps: [{ entryId: 'j-1', restored: 3 }] }),
+        });
+
+        expect(outcome.partial).toBeUndefined();
+    });
+
+    it('refuses a rewind that names no starting point', async () => {
+        await expect(
+            applyChange(
+                { ...rewindRequest(), change: { id: 'w-2', kind: 'rewind-to' } },
+                {
+                    http: fakeProton().http,
+                    backupDir,
+                    confirm: always('granted'),
+                    rewindTo: async () => ({ steps: [] }),
+                }
+            )
+        ).rejects.toMatchObject({ code: 'APPLY_MALFORMED' });
+    });
+});

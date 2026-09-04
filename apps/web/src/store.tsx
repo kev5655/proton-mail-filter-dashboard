@@ -5,6 +5,7 @@ import {
     applyChangeToRules,
     planCategoryMove,
     planChange,
+    planRewind,
     planUndo,
     verifyMoves,
     type ChangePlan,
@@ -67,6 +68,14 @@ export interface StoreState {
      * expectations would move a message back to somewhere it had never left.
      */
     stageUndo: (entry: UndoableEntry) => void;
+    /**
+     * Stage a rewind: everything from this entry onwards, newest first, in one go.
+     *
+     * One diff and one confirmation for the whole chain, because reversing four changes a dialog at
+     * a time is where somebody stops reading them. The steps still run separately at Proton and are
+     * journalled separately, so a rewind that stops halfway leaves a record that can be read.
+     */
+    stageRewind: (entries: readonly UndoableEntry[]) => void;
     discard: () => void;
     /** Apply the staged change. Only reachable from the diff dialog. */
     confirm: () => void;
@@ -109,7 +118,10 @@ export interface DriftItem {
  */
 const INITIAL_DRIFT: DriftItem[] = [
     {
-        id: 'd-1',
+        // The id of a real demo rule, so the two write answers on that screen are actually
+        // reachable here. They used to name ids no rule had, which left both buttons permanently
+        // greyed out — a screen the demo could not exercise, and so one nobody could check.
+        id: 'r-fremd',
         kind: 'rule',
         name: 'Zahnarzt',
         detail: 'Absender enthält „praxis@zahnarzt.example" → nach „Wichtig"',
@@ -229,6 +241,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
         [folders]
     );
 
+    const stageRewind = useCallback(
+        (entries: readonly UndoableEntry[]) => {
+            setPendingResolution(undefined);
+            const names = new Map<string, string>([
+                ...folders.map((folder) => [folder.ID, folder.Name] as const),
+                ...Object.entries(CATEGORY_LABELS),
+                [INBOX_LABEL, 'Posteingang'],
+            ]);
+            setStaged(planRewind(entries, (labelId) => names.get(labelId)));
+        },
+        [folders]
+    );
+
     const confirm = useCallback(() => {
         if (staged === undefined) {
             return;
@@ -294,6 +319,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             stage,
             stageCategoryMove,
             stageUndo,
+            stageRewind,
             discard: () => {
                 setStaged(undefined);
                 setPendingResolution(undefined);
@@ -313,6 +339,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
             stage,
             stageCategoryMove,
             stageUndo,
+            stageRewind,
             confirm,
             settle,
             undo,

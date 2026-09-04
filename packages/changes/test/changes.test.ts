@@ -8,7 +8,10 @@ import {
     describePlan,
     planCategoryMove,
     planChange,
+    planRewind,
+    planUndo,
     type PendingChange,
+    type UndoableEntry,
 } from '../src/plan.js';
 import { findRulesNotFiring, partialMoveError, verifyMoves } from '../src/verify.js';
 
@@ -376,5 +379,91 @@ describe('planning a move into one of Protons categories', () => {
         // Undo works from the journal's per-message snapshot instead. Naming one category here
         // would send every message back to the same place, which is only right by accident.
         expect(inverse.category).toBeUndefined();
+    });
+});
+
+
+/**
+ * Planning an undo, and planning a rewind.
+ *
+ * Both are planned from the journal's own snapshot rather than by simulating anything, and that is
+ * the property worth pinning. A simulation would show what a change was *expected* to do; the
+ * record shows what it actually did, as observed after the write. An undo acting on expectations
+ * would move a message back to somewhere it had never left.
+ */
+describe('planning the taking-back of one change', () => {
+    const names = (labelId: string): string | undefined =>
+        ({ 'l-archiv': 'Archiv', '24': 'Standard' })[labelId];
+
+    const entry: UndoableEntry = {
+        id: 'j-1',
+        summary: 'Regel „Shop" anlegen',
+        moved: [
+            { messageId: 'm-1', previousLabelIds: ['l-archiv'], movedTo: 'Werbung' },
+            { messageId: 'm-2', previousLabelIds: ['0'], movedTo: 'Werbung' },
+        ],
+    };
+
+    it('sends each message back where it individually was', () => {
+        // The whole reason the record keeps a per-message snapshot: these two came from different
+        // places, and a description of the change could not express that.
+        const plan = planUndo(entry, names);
+
+        expect(plan.moves).toEqual([
+            { messageId: 'm-1', subject: 'm-1', sender: '', from: 'Werbung', to: 'Archiv' },
+            { messageId: 'm-2', subject: 'm-2', sender: '', from: 'Werbung', to: undefined },
+        ]);
+    });
+
+    it('names the entry it will take back and nothing else', () => {
+        // What will happen is read from the record at apply time. Copying it into the change would
+        // be a second version of the truth, free to disagree with the first.
+        expect(planUndo(entry, names).change).toEqual({
+            id: 'undo-j-1',
+            kind: 'undo-entry',
+            undo: { entryId: 'j-1' },
+        });
+    });
+
+    it('shows an id it cannot place rather than hiding it', () => {
+        const plan = planUndo(
+            { ...entry, moved: [{ messageId: 'm-3', previousLabelIds: ['l-weg'], movedTo: 'Werbung' }] },
+            names
+        );
+
+        // An unrecognised destination is a thing to see before confirming, not after.
+        expect(plan.moves[0]?.to).toBeUndefined();
+    });
+});
+
+describe('planning a rewind', () => {
+    const names = (labelId: string): string | undefined =>
+        ({ 'l-archiv': 'Archiv', 'l-alt': 'Alt' })[labelId];
+
+    // Newest first, which is also the order they will be reversed in.
+    const chain: UndoableEntry[] = [
+        {
+            id: 'j-2',
+            summary: 'zweite',
+            moved: [{ messageId: 'm-1', previousLabelIds: ['l-archiv'], movedTo: 'Werbung' }],
+        },
+        {
+            id: 'j-1',
+            summary: 'erste',
+            moved: [{ messageId: 'm-1', previousLabelIds: ['l-alt'], movedTo: 'Archiv' }],
+        },
+    ];
+
+    it('anchors on the oldest entry, because that is where it stops', () => {
+        expect(planRewind(chain, names).change.undo).toEqual({ entryId: 'j-1' });
+    });
+
+    it('shows a twice-touched message landing where the oldest change found it', () => {
+        // Walking backwards through both entries ends at „Alt". Showing „Archiv" — the intermediate
+        // state — would be a diff the run itself then contradicts.
+        const plan = planRewind(chain, names);
+
+        expect(plan.moves).toHaveLength(1);
+        expect(plan.moves[0]?.to).toBe('Alt');
     });
 });

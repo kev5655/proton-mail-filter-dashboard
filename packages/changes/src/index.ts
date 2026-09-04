@@ -11,6 +11,7 @@ export {
     describePlan,
     planCategoryMove,
     planChange,
+    planRewind,
     planUndo,
     type CategoryMoveInput,
     type ChangeKind,

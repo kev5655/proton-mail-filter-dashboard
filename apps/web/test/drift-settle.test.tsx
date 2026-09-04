@@ -59,29 +59,29 @@ describe('answering a rule that appeared at Proton', () => {
         expect(before).toBeGreaterThan(0);
 
         act(() => {
-            store.stage(change, { id: 'd-1', decision: 'reject' });
+            store.stage(change, { id: 'r-fremd', decision: 'reject' });
         });
 
         expect(store.staged).toBeDefined();
-        expect(store.drift.find((item) => item.id === 'd-1')?.resolved).toBeUndefined();
+        expect(store.drift.find((item) => item.id === 'r-fremd')?.resolved).toBeUndefined();
     });
 
     it('resolves it once the change has landed', () => {
         act(() => {
-            store.stage(change, { id: 'd-1', decision: 'reject' });
+            store.stage(change, { id: 'r-fremd', decision: 'reject' });
         });
         act(() => {
             store.settle();
         });
 
-        expect(store.drift.find((item) => item.id === 'd-1')?.resolved).toBe('reject');
+        expect(store.drift.find((item) => item.id === 'r-fremd')?.resolved).toBe('reject');
     });
 
     it('forgets the decision when the change is discarded', () => {
         // Declined in the terminal, or abandoned in the dialog. Either way nothing reached the
         // account, so the entry has to come back and be asked about again.
         act(() => {
-            store.stage(change, { id: 'd-1', decision: 'reject' });
+            store.stage(change, { id: 'r-fremd', decision: 'reject' });
         });
         act(() => {
             store.discard();
@@ -90,6 +90,6 @@ describe('answering a rule that appeared at Proton', () => {
             store.settle();
         });
 
-        expect(store.drift.find((item) => item.id === 'd-1')?.resolved).toBeUndefined();
+        expect(store.drift.find((item) => item.id === 'r-fremd')?.resolved).toBeUndefined();
     });
 });
