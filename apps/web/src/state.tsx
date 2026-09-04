@@ -20,6 +20,7 @@ export type Page =
     | 'rules'
     | 'triage'
     | 'categories'
+    | 'auto-rules'
     | 'folders'
     | 'changes'
     | 'history'
@@ -31,6 +32,8 @@ export interface Navigation {
     /** Set when arriving from somewhere that pointed at one rule, e.g. a folder. */
     focusRuleId?: string | undefined;
     focusFolder?: string | undefined;
+    /** Set when arriving from a screen that identified a sender worth writing a rule for. */
+    draftForSender?: string | undefined;
 }
 
 interface AppState {

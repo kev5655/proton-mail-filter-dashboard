@@ -1059,3 +1059,23 @@
 .preview-head > p {
     margin: 0;
 }
+
+/*
+ * Lists on the Auto-Regeln screen.
+ *
+ * No bullets: every entry there is a full sentence about one sender, and a bullet in front of a
+ * sentence reads as a fragment. The indent is dropped for the same reason the folder tree keeps
+ * one — this list has no hierarchy to show.
+ */
+.plain-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.plain-list li {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}

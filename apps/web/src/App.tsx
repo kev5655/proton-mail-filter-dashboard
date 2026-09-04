@@ -4,6 +4,7 @@ import { DiffDialog } from './components/DiffDialog.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { MailViewer } from './components/MailViewer.js';
 import { SelectionDialog } from './components/SelectionDialog.js';
+import { AutoRulesPage } from './pages/AutoRulesPage.js';
 import { CategoriesPage } from './pages/CategoriesPage.js';
 import { ChangesPage } from './pages/ChangesPage.js';
 import { FoldersPage } from './pages/FoldersPage.js';
@@ -99,6 +100,7 @@ const PAGE_LABELS: Record<Page, string> = {
     triage: 'Vorschläge',
     rules: 'Regeln',
     categories: 'Kategorien',
+    'auto-rules': 'Auto-Regeln',
     folders: 'Ordner',
     changes: 'Änderungen',
     history: 'Verlauf',
@@ -108,7 +110,7 @@ const PAGE_LABELS: Record<Page, string> = {
 
 function Shell(): React.JSX.Element {
     const { nav, goTo, selected, selectedFrom, clearSelection, open, setOpen } = useAppState();
-    const { groups, categories } = useMailbox();
+    const { groups, categories, autoRules } = useMailbox();
     const status = useMailboxStatus();
     const { rules, folders, drift, journal } = useStore();
     const [buildingRule, setBuildingRule] = useState(false);
@@ -120,6 +122,15 @@ function Shell(): React.JSX.Element {
         { id: 'triage', label: PAGE_LABELS.triage, count: groups.length },
         { id: 'rules', label: PAGE_LABELS.rules, count: rules.length },
         { id: 'categories', label: PAGE_LABELS.categories, count: categories.length },
+        {
+            id: 'auto-rules',
+            label: PAGE_LABELS['auto-rules'],
+            // Only the senders we can actually say something about. Counting the undecided ones
+            // would put a number on the tab that promises more than the screen delivers.
+            count: autoRules.filter(
+                (rule) => rule.scope.kind === 'sender' && rule.verdict.kind !== 'too-few'
+            ).length,
+        },
         { id: 'folders', label: PAGE_LABELS.folders, count: folders.length },
         { id: 'changes', label: PAGE_LABELS.changes, count: drift.filter((item) => item.resolved === undefined).length },
         { id: 'history', label: PAGE_LABELS.history, count: journal.length },
@@ -170,6 +181,7 @@ function Shell(): React.JSX.Element {
                     {nav.page === 'rules' && <RulesPage />}
                     {nav.page === 'triage' && <TriagePage />}
                     {nav.page === 'categories' && <CategoriesPage />}
+                    {nav.page === 'auto-rules' && <AutoRulesPage />}
                     {nav.page === 'folders' && <FoldersPage />}
                     {nav.page === 'changes' && <ChangesPage />}
                     {nav.page === 'history' && <HistoryPage />}

@@ -4,7 +4,7 @@ import { describePlan } from '@pms/changes';
 
 import { useStore } from '../store.js';
 import { useApply } from '../apply.js';
-import { useMailboxStatus } from '../mailbox.js';
+import { useMailbox, useMailboxStatus } from '../mailbox.js';
 import { MailList } from './MailList.js';
 import { RuleConditions } from './RuleConditions.js';
 
@@ -22,6 +22,7 @@ import { RuleConditions } from './RuleConditions.js';
 export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => void }): React.JSX.Element | null {
     const { staged, discard, confirm } = useStore();
     const { source } = useMailboxStatus();
+    const { categoryCoverage } = useMailbox();
     const { phase, offer, reset } = useApply();
 
     /*
@@ -80,6 +81,29 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                         <RuleConditions rule={rule.rule} />
                     </>
                 )}
+
+                {/*
+                  * What Proton already does with this mail.
+                  *
+                  * The last screen before anything is offered, so this is the placement that
+                  * actually counts — the editor's copy of the same sentence can be missed, this one
+                  * is between the decision and the account. Stated, never blocking: filing mail into
+                  * a folder Proton also categorises is a legitimate thing to want.
+                  */}
+                {(() => {
+                    const dominant = categoryCoverage(moves.map((move) => move.messageId))[0];
+                    return dominant === undefined || dominant.count === 0 ? null : (
+                        <p className="notice notice-info">
+                            <strong>
+                                Proton sortiert {dominant.count} dieser {moves.length} Mails schon
+                                nach „{dominant.label}".
+                            </strong>{' '}
+                            {dominant.stable
+                                ? 'Bei diesen Absendern jedes Mal, seit wir hinsehen.'
+                                : 'Bisher einmal beobachtet.'}
+                        </p>
+                    );
+                })()}
 
                 <h3 style={{ marginTop: 16 }}>Was sich ändert</h3>
 

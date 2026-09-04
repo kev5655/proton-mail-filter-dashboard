@@ -177,6 +177,9 @@ importers:
 
   packages/demo:
     dependencies:
+      '@pms/grouping':
+        specifier: workspace:*
+        version: link:../grouping
       '@pms/rules':
         specifier: workspace:*
         version: link:../rules

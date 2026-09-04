@@ -7,8 +7,12 @@ import {
     categoryIdsOf,
     CATEGORY_IDS,
     CATEGORY_LABELS,
+    deriveAutoRules,
     groupMessages,
     scoreGroups,
+    type AutoRule,
+    type CategoryChange,
+    type CategoryObservation,
     type ScoredGroup,
 } from '@pms/grouping';
 import {
@@ -37,6 +41,15 @@ export interface MailboxInput {
     messages: MailboxMessage[];
     folders: MailboxFolder[];
     rules: MailboxRule[];
+    /**
+     * What Proton's own sorting has been observed doing, across syncs.
+     *
+     * Optional because a copy made before the history existed has none, and a fresh one has almost
+     * none. Absent is a real state with a real answer — "not enough looks yet" — not a gap to fill
+     * in with a guess.
+     */
+    categoryObservations?: readonly CategoryObservation[];
+    categoryChanges?: readonly CategoryChange[];
 }
 
 /**
@@ -88,6 +101,19 @@ export interface MailboxData extends MailboxInput {
     caughtBy: (messageId: string) => { ruleId: string; ruleName: string; destination: string } | undefined;
     /** Proton's own categories present in this mailbox, in Proton's order, unknown ids last. */
     categories: CategorySummary[];
+    /** What Proton's sorting has been observed doing, per sender and per domain. */
+    autoRules: AutoRule[];
+    /** The verdict for one sender, when there is one. */
+    autoRuleFor: (address: string) => AutoRule | undefined;
+    /**
+     * Which of Proton's categories these messages already carry.
+     *
+     * The answer to "is the rule I am about to write doing work Proton already does". Reads the
+     * categories computed above rather than walking the mailbox again.
+     */
+    categoryCoverage: (
+        messageIds: readonly string[]
+    ) => Array<{ categoryId: string; label: string; count: number; stable: boolean }>;
     /** Every message of a group, not the five samples the grouping keeps for a preview. */
     messagesInGroup: (group: ScoredGroup) => MailboxMessage[];
     analysisFor: (ruleId: string) => RuleAnalysis | undefined;
@@ -321,11 +347,81 @@ export function buildMailbox(input: MailboxInput): MailboxData {
         };
     });
 
+    /*
+     * What Proton's own sorting has been observed doing.
+     *
+     * Derived once here rather than per screen: the rule editor asks "does Proton already handle
+     * this sender" on every keystroke of a live preview, and the answer must not cost a pass over
+     * the history each time.
+     */
+    const autoRules = deriveAutoRules({
+        observations: input.categoryObservations ?? [],
+        changes: input.categoryChanges ?? [],
+    });
+    const autoRuleBySender = new Map(
+        autoRules
+            .filter((rule) => rule.scope.kind === 'sender')
+            .map((rule) => [rule.scope.kind === 'sender' ? rule.scope.address : '', rule])
+    );
+
+    /** Category id per message, so coverage is a lookup rather than a scan. */
+    const categoryOf = new Map<string, string[]>();
+    for (const summary of categories) {
+        for (const message of summary.messages) {
+            const list = categoryOf.get(message.ID);
+            if (list === undefined) {
+                categoryOf.set(message.ID, [summary.id]);
+            } else {
+                list.push(summary.id);
+            }
+        }
+    }
+
     return {
         messages,
         folders,
         rules,
         inboxMessages,
+        autoRules,
+        autoRuleFor: (address) => autoRuleBySender.get(address),
+
+        /*
+         * How much of a set of messages Proton already sorts, and how sure we are.
+         *
+         * `stable` is the difference between "this mail is in Werbung today" and "Proton has put
+         * this sender in Werbung every time we looked". The first is a fact about one snapshot and
+         * the second is worth changing a plan over, so the sentence on screen has to distinguish
+         * them rather than averaging them into a number.
+         */
+        categoryCoverage: (messageIds) => {
+            const counts = new Map<string, { count: number; stableSenders: number }>();
+
+            for (const id of messageIds) {
+                const message = byId.get(id);
+                for (const categoryId of categoryOf.get(id) ?? []) {
+                    const entry = counts.get(categoryId) ?? { count: 0, stableSenders: 0 };
+                    entry.count++;
+                    const verdict = message === undefined
+                        ? undefined
+                        : autoRuleBySender.get(message.Sender.Address)?.verdict;
+                    if (verdict?.kind === 'stable' && verdict.categoryId === categoryId) {
+                        entry.stableSenders++;
+                    }
+                    counts.set(categoryId, entry);
+                }
+            }
+
+            return [...counts.entries()]
+                .map(([categoryId, entry]) => ({
+                    categoryId,
+                    label: CATEGORY_LABELS[categoryId] ?? `Unbekannte Kategorie ${categoryId}`,
+                    count: entry.count,
+                    // Only when most of what it covers rests on a settled verdict; otherwise the
+                    // word "consistently" would be doing work one snapshot cannot support.
+                    stable: entry.count > 0 && entry.stableSenders / entry.count >= 0.5,
+                }))
+                .sort((a, b) => b.count - a.count);
+        },
         groups,
         analysis,
         suggestions,

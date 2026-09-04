@@ -1,6 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { DEMO_FOLDERS, DEMO_RULES, generateMailbox } from '@pms/demo';
+import {
+    DEMO_CATEGORY_CHANGES,
+    DEMO_CATEGORY_OBSERVATIONS,
+    DEMO_FOLDERS,
+    DEMO_RULES,
+    generateMailbox,
+} from '@pms/demo';
 import type { MailboxSnapshot, UnreadableRule } from '@pms/server/types';
 
 import { buildMailbox, type MailboxData } from './data.js';
@@ -60,7 +66,14 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
     // Built once. The demo mailbox is generated, and regenerating it on a re-render would reshuffle
     // every list under the user.
     const demo = useMemo(
-        () => buildMailbox({ messages: generateMailbox(), folders: DEMO_FOLDERS, rules: DEMO_RULES }),
+        () =>
+            buildMailbox({
+                messages: generateMailbox(),
+                folders: DEMO_FOLDERS,
+                rules: DEMO_RULES,
+                categoryObservations: DEMO_CATEGORY_OBSERVATIONS,
+                categoryChanges: DEMO_CATEGORY_CHANGES,
+            }),
         []
     );
 
@@ -98,6 +111,10 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                         messages: snapshot.messages,
                         folders: snapshot.folders,
                         rules: snapshot.rules,
+                        // Absent on a copy made before the history existed. That is a real state
+                        // with a real answer — "not enough looks yet" — rather than a gap.
+                        categoryObservations: snapshot.categoryObservations ?? [],
+                        categoryChanges: snapshot.categoryChanges ?? [],
                     }),
                     status: {
                         source: 'proton',
