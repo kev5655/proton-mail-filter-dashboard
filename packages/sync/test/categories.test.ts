@@ -7,6 +7,7 @@ import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { mirrorLabels, mirrorMessages, recordCategoryObservations } from '../src/mirror.js';
+import { readCategoryChanges, readCategoryObservations } from '../src/query.js';
 
 /**
  * Watching Proton sort mail, one sync at a time.
@@ -188,5 +189,57 @@ describe('the history is bound to the messages it describes', () => {
 
         // Otherwise the table grows forever with rows describing mail nobody can look at.
         expect(rows()).toEqual([]);
+    });
+});
+
+describe('reading the history back', () => {
+    it('pairs a closed row with the one that replaced it', () => {
+        // A change is not stored; it is two facts — "it had 24, then it did not" and "it has 21
+        // since that same moment" — joined on read. Storing the transition instead would bake an
+        // interpretation in at write time that could never be revised.
+        sync([message('m-1', ['0', '24'])], SYNC_ONE);
+        sync([message('m-1', ['0', '21'])], SYNC_TWO);
+
+        expect(readCategoryChanges(db)).toEqual([
+            {
+                messageId: 'm-1',
+                senderAddress: 'werbung@beispiel.example',
+                fromCategory: '24',
+                toCategory: '21',
+                observedAt: SYNC_TWO,
+            },
+        ]);
+    });
+
+    it('does not call a message’s first category a change', () => {
+        // Otherwise every sync would report the whole batch as news, and the screen whose job is to
+        // show what changed would show everything — which is the same as showing nothing.
+        sync([message('m-1', ['0', '21'])], SYNC_ONE);
+        sync([message('m-1', ['0', '21']), message('m-2', ['0', '25'])], SYNC_TWO);
+
+        const changes = readCategoryChanges(db);
+        expect(changes.map((change) => change.messageId)).toEqual(['m-2']);
+        // Gaining a first category is real, but it is not Proton changing its mind — so it comes
+        // back without a `from`, and the screen words it differently.
+        expect(changes[0]?.fromCategory).toBeUndefined();
+    });
+
+    it('returns the observations a verdict is allowed to rest on', () => {
+        sync([message('m-1', ['0', '21'])], SYNC_ONE);
+        sync([message('m-1', ['0', '21'])], SYNC_TWO);
+
+        const observations = readCategoryObservations(db);
+        expect(observations).toHaveLength(2);
+        expect(observations.map((entry) => entry.observedAt)).toEqual([SYNC_ONE, SYNC_TWO]);
+    });
+
+    it('keeps whole syncs when it trims, never half of one', () => {
+        // A row limit would cut a busy sync in half, and a partial observation still looks like a
+        // complete one — it would quietly understate how much mail a sender had that day.
+        sync([message('m-1', ['0', '21']), message('m-2', ['0', '25'], 'zwei@beispiel.example')], SYNC_ONE);
+        sync([message('m-3', ['0', '21'])], SYNC_TWO);
+
+        const recent = readCategoryObservations(db, 1);
+        expect([...new Set(recent.map((entry) => entry.observedAt))]).toEqual([SYNC_TWO]);
     });
 });

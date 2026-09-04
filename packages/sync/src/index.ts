@@ -10,6 +10,8 @@ export {
     type Snapshot,
 } from './mirror.js';
 export {
+    readCategoryChanges,
+    readCategoryObservations,
     readFilters,
     readFolderTree,
     readMessages,
