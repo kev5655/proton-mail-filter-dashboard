@@ -795,3 +795,81 @@ Mit einem dauerhaften Profil liegen die Proton-Cookies danach auch in Chromes ei
 nicht nur in unserer verschlüsselten Datei. Das war schon immer so und stand bisher nur in
 `.env.example`; es steht jetzt auch auf der Einstellungsseite. Wenn dir das zu viel ist: ohne Profil
 funktioniert die Anmeldung weiterhin, nur ohne Erweiterung und ohne Passkey.
+
+---
+
+## V-09 · Verbindung zu Proton trennen
+
+In den Einstellungen unter „Verbindung zu Proton". Zwei Knöpfe, und der Unterschied ist echt:
+„Trennen" vergisst die Sitzung nur hier, „Überall trennen" bittet Proton zusätzlich, das Token zu
+beenden. Beide löschen danach die lokale Kopie und beenden den Server.
+
+### Der geratene Teil
+
+`DELETE auth/v4/sessions` ist die plausible Umkehrung des Aufrufs, der eine Sitzung öffnet — aber
+nichts in diesem Repository hat sie je aufgerufen und Proton dokumentiert sie nicht. Das ist die
+eine Stelle, an der geraten wurde, und sie ist vertretbar, weil ein fehlschlagender Revoke nichts
+kaputt macht: er nimmt Zugriff weg, er gibt keinen. Er wird versucht, sein Fehlschlag wird gemeldet
+und nicht verschluckt, und das lokale Trennen passiert trotzdem.
+
+### Zu prüfen
+
+- Nach „Überall trennen": in Protons eigenen Einstellungen unter „Sitzungen" nachsehen, ob die
+  Sitzung wirklich weg ist. **Das ist die eigentliche Frage dieses Abschnitts.**
+- Ist danach auch das Chrome-Profil bei Proton abgemeldet, oder geht die nächste Anmeldung dort
+  trotzdem ohne Passwort durch? Erwartet ist Letzteres bei „nur lokal" und offen bei „überall".
+- Sind `data/mailbox.db`, `-wal`, `-shm`, `.kdf.json` und `data/backups/` danach weg — und
+  `login-attempts.json` und `data/logs/` **noch da**? Eine Sperre darf sich nicht durch Trennen
+  abräumen lassen.
+- Beendet sich der Server danach von selbst, mit der Meldung?
+
+---
+
+## V-10 · Die Anmeldung an diesem Werkzeug
+
+Neu und noch von niemandem im Ernst benutzt. `pnpm serve` öffnet jetzt **nichts** beim Start: es
+kommt hoch, sagt „gesperrt" oder „noch kein Konto", und die lokale Kopie wird erst geöffnet, wenn du
+dich im Dashboard anmeldest.
+
+### Beim ersten Mal
+
+Weil schon eine `data/mailbox.db` existiert, fragt `pnpm serve` **einmal** im Terminal nach der
+bisherigen Passphrase (1Password oder Eingabe, wie bisher). Das ist kein Restbestand, den ich
+vergessen habe: das neue Konto übernimmt damit den vorhandenen Schlüssel. Ohne das wäre die Kopie
+nach dem Anlegen des Kontos unlesbar — mit einem frischen Schlüssel verschlüsselt, den es vorher
+nicht gab.
+
+Danach `pnpm dev`, Konto anlegen, und ab dann ist das App-Passwort der einzige Schlüssel.
+
+### Zu prüfen
+
+- Erscheint beim ersten Start der Registrierungs-Bildschirm — und **nicht** das Dashboard mit
+  Demo-Daten dahinter?
+- Öffnet sich nach dem Anlegen die echte Kopie, mit deinen Ordnern und Regeln? (Wenn dort Demo-Daten
+  stehen, hat die Übernahme der Passphrase nicht funktioniert — dann bitte sofort abbrechen und
+  melden, **bevor** du irgendetwas änderst.)
+- `pnpm serve` neu starten: kommt der Sperrbildschirm, und passt das Passwort?
+- Falsches Passwort: kommt eine verständliche Absage und **kein** leeres Dashboard?
+- Zwei-Faktor in den Einstellungen einschalten. Der Code wird erst verlangt, wenn er in der App
+  bewiesen wurde — ein Tippfehler darf dich nicht aussperren. Danach abmelden und mit Code wieder
+  rein.
+- Passkey hinzufügen und benutzen. **Er ersetzt das Passwort nicht**, das steht auch auf dem
+  Bildschirm — er kommt dazu.
+- Nachfrist: sperren, sofort wieder öffnen. Es sollte „weiter ohne Passwort" angeboten werden, und
+  die Proton-Verbindung sollte noch stehen. Mit „Sofort sperren" darf das nicht passieren.
+- Ohne `pnpm serve`, nur `pnpm dev`: es darf **kein** Passwortfeld erscheinen. Die Demo hat nichts
+  zu bewachen.
+
+### Was du wissen solltest, bevor du das Passwort wählst
+
+**Es gibt keine Wiederherstellung.** Der Schlüssel für die lokalen Daten hängt daran. Vergisst du es,
+hilft nur: `data/` löschen und neu mit Proton verbinden. Das ist kein Versäumnis — ein Weg zurück
+müsste den Schlüssel irgendwo hinlegen, wo ihn kein Passwort schützt, und dann wäre das Passwort
+keins.
+
+### Was ich absichtlich nicht getan habe
+
+Das Aufschliessen kann **keine** Proton-Anmeldung auslösen. Es übernimmt eine gespeicherte Sitzung
+und sonst nichts; gibt es keine, steht im Dashboard „nicht verbunden" und du drückst selbst auf
+Anmelden. Ein Passwortfeld, das einen Login-Versuch auslösen kann, hätte `LoginGuard` hinter eine
+Texteingabe gestellt — und genau die Wiederholung war es, die dieses Konto einmal gesperrt hat.

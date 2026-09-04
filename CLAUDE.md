@@ -34,13 +34,22 @@ somewhere; the service runs the rules it already has. That is what lets a new ru
 backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
 because for months the terminal announced it and nothing did it.
 
-**There are four non-GET routes, not two, and the two additions are named here because both were
-made on purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
+**There are five non-GET routes, not two, and every addition is named here because each was made on
+purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
 writes nothing to Proton's data, but it is the most consequential thing the tool does. `POST
 /api/logout` is the only route on the list that *only ever takes away* — it ends the session, forgets
 it, and deletes the local copy of the mailbox — and a tool that makes connecting easy and
 disconnecting hard has the wrong shape. Both have their own line in `handler.ts` and share one
 `SessionChannel`, because being connected is one piece of state and not two.
+
+`POST /api/account` is the fifth and the odd one out: it is the only route that **cannot reach
+Proton at all**, and the only one a locked tool answers. It creates the account and unlocks the key
+that everything else on this machine is encrypted with — so it *acts* where the others only offer,
+and what keeps that defensible is what it cannot do. It has no Proton client, cannot open a
+database, and can only hand a key to the process that does. It is one route with a named action
+rather than eleven paths, because the route count is a promise about what reaches Proton, and
+spending eleven lines of it on a local password form would make the promise harder to read without
+making it stronger; `AccountChannel` still names each action in a branch of its own.
 
 What makes it defensible is not the route count. **No password passes through this process:**
 `loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser
@@ -82,12 +91,46 @@ the module that performs it.
 The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
 parses a request cannot reach the code that performs one. They meet through a channel object handed
 in from outside, and `write-isolation.test.ts` checks that the routing files import neither
-`@pms/apply` nor the write surface. Four non-GET routes exist and each is named in an `if` rather
+`@pms/apply` nor the write surface. Five non-GET routes exist and each is named in an `if` rather
 than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
 records an offer and answers `202` while nothing has happened yet.
 
 `packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
 One file to read when someone asks what this tool can change.
+
+### The password is the key, not a door
+
+`@pms/account` is not a login that guards a screen. The mailbox database and the stored Proton
+session are encrypted with a master secret, and the app password is what unwraps it — so somebody
+who copies `data/` and does not have the password has a directory of noise. That is why `pnpm serve`
+opens **nothing** at start-up: it comes up serving `/api/account` and a lock screen, and the
+database is opened when the key arrives.
+
+Four consequences worth knowing before touching any of it:
+
+- **There is no password recovery, and there cannot be one.** A way back would have to keep the key
+  somewhere a password does not protect. The registration screen says so before the password is
+  chosen, which is the only honest place to say it.
+- **A passkey is a second factor, not the key.** WebAuthn returns a signature, not a secret, so
+  nothing in it can unwrap a key — the password is always required as well. (The PRF extension could
+  change that; `vault-key.ts` is shaped to take a second wrapping when browser support settles.) The
+  interface says this, because „Passkey" that then asks for a password reads as a bug otherwise.
+- **The KDF is slow on purpose.** Argon2id at 64 MiB costs about 1.5 s per derivation, which is what
+  makes a stolen file useless. Tests are given room rather than the KDF being made cheap — see the
+  timeout on `encryption.test.ts`'s describe.
+- **`register()` adopts an existing passphrase.** An installation that already has a database was
+  encrypted with whatever came from 1Password or a prompt; minting a fresh key at registration would
+  orphan it. `serve-command.ts` asks for the old one once, at the terminal, and only in that case.
+
+**Unlocking can never spend a Proton login.** `resume()` picks up a stored session and refreshes it;
+if there is none it returns a client with none, which refuses every request. `connect()` — the path
+that will log in as a last resort — is not reachable from the dashboard. A password field that could
+cause a login attempt would put `LoginGuard`'s whole reason for existing behind a text box.
+
+The grace period is a deliberate weakening and is described as one: locking keeps the key for a
+configurable while, so closing a tab does not mean reconnecting to Proton a minute later. `0` turns
+it off, and the way back in during it is its own button — „weiter ohne Passwort" — rather than an
+empty password quietly being accepted.
 
 ### Where the category ids and the category endpoint come from
 
@@ -214,6 +257,7 @@ packages/mail-view/     Sanitising a mail body so it is safe to display
 packages/changes/       Diff, the change record, category moves and post-write verification
 packages/store/         The encrypted local database
 packages/sync/          Mirroring Proton into it, and reading it back
+packages/account/       The app's own account: the password that is the key to the local data
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
 packages/apply/         The one path that writes to Proton, behind a terminal confirmation
 apps/spike/             M0 read-only probe, plus `--sync` and `--serve`
