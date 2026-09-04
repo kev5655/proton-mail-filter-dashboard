@@ -13,7 +13,9 @@ import { RulesPage } from './pages/RulesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { TriagePage } from './pages/TriagePage.js';
 import { ModelProvider } from './llm.js';
-import { MailboxProvider, useMailbox, useMailboxStatus } from './mailbox.js';
+import { MailboxProvider, useMailbox, useMailboxStatus, useReloadMailbox } from './mailbox.js';
+import { SyncPanel } from './components/SyncPanel.js';
+import { SyncProvider } from './sync.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
 
@@ -38,11 +40,20 @@ export function App(): React.JSX.Element {
  * a history of things that never happened to the account they are now looking at.
  */
 function Sources(): React.JSX.Element {
-    const { source } = useMailboxStatus();
+    const { source, syncedAt } = useMailboxStatus();
+    const reload = useReloadMailbox();
+
     return (
-        <StoreProvider key={source}>
-            <Shell />
-        </StoreProvider>
+        <SyncProvider onFinished={reload}>
+            {/*
+             * Keyed on the source *and* the sync time: a finished sync replaces the mailbox under
+             * the store, and rules seeded from the previous copy would otherwise be edited against
+             * data that has moved on.
+             */}
+            <StoreProvider key={`${source}:${String(syncedAt ?? 'none')}`}>
+                <Shell />
+            </StoreProvider>
+        </SyncProvider>
     );
 }
 
@@ -106,6 +117,8 @@ function Shell(): React.JSX.Element {
                  * are looking at their real mailbox.
                  */}
                 <SourceBanner status={status} />
+
+                <SyncPanel />
             </nav>
 
             <main className="main">

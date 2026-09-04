@@ -938,3 +938,57 @@
     margin: 0 0 12px;
     max-width: 78ch;
 }
+
+/* ---------------------------------------------------------------- sync */
+
+.sync-panel {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.progress-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 200ms linear;
+}
+
+/*
+ * The indeterminate state, and it is meant to look different rather than full.
+ *
+ * Proton does not report a message total until the first page comes back, so for a moment there is
+ * genuinely no percentage. A bar filled to an invented number would be a small lie in a tool whose
+ * argument is that it does not tell them.
+ */
+.progress-unknown {
+    width: 40%;
+    animation: progress-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-sweep {
+    0% { margin-left: -40%; }
+    100% { margin-left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .progress-unknown {
+        animation: none;
+        width: 100%;
+        opacity: 0.4;
+    }
+}

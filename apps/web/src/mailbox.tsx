@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { DEMO_FOLDERS, DEMO_RULES, generateMailbox } from '@pms/demo';
 import type { MailboxSnapshot, UnreadableRule } from '@pms/server/types';
@@ -39,6 +39,8 @@ interface MailboxContext {
     status: MailboxStatus;
     /** True until the server has been asked. The screens render the demo meanwhile. */
     loading: boolean;
+    /** Ask again — after a sync, the copy on disk is not the one in memory. */
+    reload: () => void;
 }
 
 const Context = createContext<MailboxContext | undefined>(undefined);
@@ -65,6 +67,11 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
     const [remote, setRemote] = useState<{ data: MailboxData; status: MailboxStatus } | undefined>();
     const [problem, setProblem] = useState<string | undefined>();
     const [loading, setLoading] = useState(true);
+    const [attempt, setAttempt] = useState(0);
+
+    const reload = useCallback(() => {
+        setAttempt((current) => current + 1);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -118,14 +125,14 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
             cancelled = true;
             abort.abort();
         };
-    }, []);
+    }, [attempt]);
 
     const value = useMemo<MailboxContext>(
         () =>
             remote === undefined
-                ? { data: demo, status: { ...DEMO_STATUS, problem }, loading }
-                : { data: remote.data, status: remote.status, loading: false },
-        [demo, remote, problem, loading]
+                ? { data: demo, status: { ...DEMO_STATUS, problem }, loading, reload }
+                : { data: remote.data, status: remote.status, loading: false, reload },
+        [demo, remote, problem, loading, reload]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;
@@ -150,6 +157,11 @@ function describeProblem(cause: unknown): string | undefined {
 
 export function useMailbox(): MailboxData {
     return useMailboxContext().data;
+}
+
+/** Re-read the mirror. Used after a sync, when the copy on disk has moved on. */
+export function useReloadMailbox(): () => void {
+    return useMailboxContext().reload;
 }
 
 export function useMailboxStatus(): MailboxStatus & { loading: boolean } {

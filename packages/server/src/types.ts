@@ -82,3 +82,11 @@ export interface MailboxSnapshot {
     unreadable: UnreadableRule[];
     messages: MailboxMessage[];
 }
+
+/**
+ * The sync's shape, re-exported for the browser.
+ *
+ * The dashboard must not import `@pms/sync` — that package opens a database. This entry point
+ * exists precisely so a type can cross that line without a value following it.
+ */
+export type { SyncProgressEvent, SyncState, SyncSummary } from './sync-channel.js';

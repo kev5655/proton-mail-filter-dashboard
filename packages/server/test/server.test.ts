@@ -8,6 +8,7 @@ import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from '@pms/sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { route } from '../src/handler.js';
+import { SyncChannel } from '../src/sync-channel.js';
 import { serveMailbox } from '../src/serve.js';
 import { buildSnapshot } from '../src/snapshot.js';
 
@@ -134,8 +135,8 @@ describe('the mailbox snapshot', () => {
 });
 
 describe('the server refuses to write', () => {
-    // Not "there is no write route" — that is true of any server until someone adds one. The method
-    // is rejected before the path is looked at, so there is no route table a write could join.
+    // Every method that is not GET is rejected, and the single exception is named rather than
+    // being an entry in a table anyone could extend.
     it.each(['POST', 'PUT', 'PATCH', 'DELETE'])('answers 405 to %s', (method) => {
         const reply = route(method, '/api/mailbox', db);
 
@@ -144,6 +145,21 @@ describe('the server refuses to write', () => {
 
     it('answers 405 to a write even on a path that does not exist', () => {
         expect(route('POST', '/api/anything', db).status).toBe(405);
+    });
+
+    it('accepts exactly one non-GET path, and only that one', () => {
+        // If this list ever grows, it should be because someone meant it to.
+        const accepted = ['/api/sync', '/api/mailbox', '/api/health', '/api/anything', '/api/rules'].filter(
+            (path) => route('POST', path, db, new SyncChannel(async () => summary())).status !== 405
+        );
+
+        expect(accepted).toEqual(['/api/sync']);
+    });
+
+    it('refuses a sync when the server has no way to reach Proton', () => {
+        const reply = route('POST', '/api/sync', db);
+
+        expect(reply.status).toBe(503);
     });
 
     it('still serves a GET', () => {
@@ -183,5 +199,74 @@ describe('the running server', () => {
         } finally {
             await server.close();
         }
+    });
+});
+
+
+/** A sync that reports nothing and finishes immediately. */
+function summary(): { labels: number; filters: number; messages: number; truncated: boolean } {
+    return { labels: 0, filters: 0, messages: 0, truncated: false };
+}
+
+describe('the sync channel', () => {
+    it('reports idle before anything happens', () => {
+        expect(new SyncChannel(async () => summary()).state).toEqual({ state: 'idle' });
+    });
+
+    it('says it cannot sync when no runner was given', () => {
+        const channel = new SyncChannel();
+
+        expect(channel.available).toBe(false);
+        expect(channel.start()).toContain('keine Verbindung');
+    });
+
+    it('runs one at a time, and says so rather than queueing', async () => {
+        // Two concurrent syncs would double the request rate against Proton — the pacing in
+        // ProtonHttp is per client, not global — and both would write the same tables.
+        let release = (): void => {};
+        const channel = new SyncChannel(async () => {
+            await new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            return summary();
+        });
+
+        expect(channel.start()).toBeUndefined();
+        expect(channel.start()).toContain('bereits');
+
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(channel.state.state).toBe('done');
+    });
+
+    it('passes progress through to subscribers', async () => {
+        const seen: Array<string | undefined> = [];
+        const channel = new SyncChannel(async (report) => {
+            report({ stage: 'labels', done: 3, total: 3 });
+            report({ stage: 'messages', done: 100 });
+            return summary();
+        });
+
+        channel.subscribe((state) => {
+            seen.push(state.state === 'running' ? state.progress?.stage : state.state);
+        });
+        channel.start();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(seen).toContain('labels');
+        expect(seen).toContain('messages');
+        expect(seen.at(-1)).toBe('done');
+    });
+
+    it('reports a failure instead of leaving the state running', async () => {
+        const channel = new SyncChannel(async () => {
+            throw new Error('Proton nicht erreichbar');
+        });
+
+        channel.start();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(channel.state.state).toBe('failed');
+        expect(channel.state).toMatchObject({ error: 'Proton nicht erreichbar' });
     });
 });

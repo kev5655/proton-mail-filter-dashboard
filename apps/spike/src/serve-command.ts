@@ -2,19 +2,29 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { AppError } from '@pms/core/errors';
-import { serveMailbox } from '@pms/server';
+import { serveMailbox, SyncChannel } from '@pms/server';
 import { closeDatabase, openDatabase } from '@pms/store';
-import { getMeta } from '@pms/sync';
+import { getMeta, syncAll } from '@pms/sync';
 
 import { DATA_DIR } from './paths.js';
-import { resolvePassphrase } from './session.js';
+import { connect } from './session.js';
 
 /**
- * Hand the dashboard the mirrored mailbox.
+ * Hand the dashboard the mirrored mailbox, and let it ask for a fresh one.
  *
- * The dividing line the whole design rests on: `pnpm sync` talks to Proton, this does not. It opens
- * the local copy, serves it on the loopback interface and has no Proton client anywhere in reach —
- * so a browser pointed at it cannot cause a request to the account no matter what it asks for.
+ * This process now signs in at start-up and keeps the session, so the dashboard's „jetzt
+ * synchronisieren" can do something. That is a deliberate change from the previous arrangement,
+ * where the serving process had no way to reach Proton at all, and it is worth being precise about
+ * what it does and does not give up.
+ *
+ * What it gives up: the server can now cause a request to Proton. What it does not: that request is
+ * always a read. `syncAll` performs GETs and writes only into the local mirror, the routing code
+ * cannot reach a Proton client of its own, and nothing here can change a filter, a folder or a
+ * message. Anything that would goes a different way entirely, and `write-isolation.test.ts` is what
+ * keeps that true rather than this paragraph.
+ *
+ * The sign-in happens here, in a terminal, where a password prompt and a second factor make sense.
+ * A server that had to authenticate in the middle of an HTTP request could not do either.
  *
  * It runs until interrupted, because the dashboard needs it for as long as it is open.
  */
@@ -35,11 +45,23 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         });
     }
 
-    const passphrase = await resolvePassphrase();
+    // `connect()` rather than `resolvePassphrase()`: the same credentials, but it also establishes
+    // the session. It reuses a stored one when it can — a login is the expensive thing here, and
+    // starting the dashboard must not become a reason to spend one.
+    const { http, passphrase } = await connect();
     const db = await openDatabase({ path: DATABASE, passphrase });
 
     try {
-        const server = await serveMailbox({ db, port: Number.isFinite(port) ? port : 5174 });
+        const sync = new SyncChannel(async (report) => {
+            const result = await syncAll(db, http, {
+                window: { begin: Math.floor(Date.now() / 1000) - 365 * 86_400 },
+                maxMessages: 20_000,
+                onProgress: report,
+            });
+            return result;
+        });
+
+        const server = await serveMailbox({ db, port: Number.isFinite(port) ? port : 5174, sync });
 
         const lastSync = getMeta(db, 'lastSyncAt');
         console.log(
@@ -48,6 +70,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 : `\n  Stand: ${new Date(Number(lastSync) * 1000).toLocaleString('de-CH')}`
         );
         console.log(`  Server: ${server.url} (nur von diesem Rechner erreichbar)`);
+        console.log('  Synchronisieren lässt sich aus dem Dashboard heraus — gelesen wird, geschrieben nur lokal.');
         console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
         console.log('  Beenden mit Ctrl+C.\n');
 
