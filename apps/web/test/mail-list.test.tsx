@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MailList, type ListableMessage } from '../src/components/MailList.js';
@@ -37,14 +37,29 @@ beforeEach(() => {
     document.body.append(container);
 });
 
+/*
+ * Unmounted, not merely detached.
+ *
+ * Removing the container leaves the React root alive with work still scheduled against it. That
+ * work runs after Vitest has torn the DOM environment down, and „ReferenceError: window is not
+ * defined" then surfaces as an unhandled error attributed to whichever file happened to be running
+ * — which is why the failure moved around and only appeared in the full suite.
+ */
 afterEach(() => {
+    act(() => {
+        root?.unmount();
+    });
+    root = undefined;
     container.remove();
 });
 
+let root: Root | undefined;
+
 function render(element: React.JSX.Element): void {
-    const root = createRoot(container);
+    const next = createRoot(container);
+    root = next;
     act(() => {
-        root.render(<Providers>{element}</Providers>);
+        next.render(<Providers>{element}</Providers>);
     });
 }
 
