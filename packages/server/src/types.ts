@@ -158,19 +158,19 @@ export interface MailboxSnapshot {
 /** One applied change, as the dashboard reads it back. */
 export interface JournalEntryDto {
     id: string;
-    /** Unix seconds. */
-    at: number;
+    /** Unix **seconds**, when the change was applied. */
+    atSeconds: number;
     kind: string;
     /** The wording as it stood when the change was made. */
     summary: string;
     /** The messages this change moved, and where each one was before. */
     moved: Array<{ messageId: string; previousLabelIds: string[]; movedTo: string | undefined }>;
     /** What the check afterwards saw. Absent when nothing was expected to move. */
-    verification?: { confirmed: number; stragglers: number; checkedAt: number } | undefined;
+    verification?: { confirmed: number; stragglers: number; checkedAtSeconds: number } | undefined;
     /** The full backup taken before the write. */
     backupPath: string;
-    /** Set once this entry has been taken back. */
-    undoneAt?: number | undefined;
+    /** Unix **seconds**, set once this entry has been taken back. */
+    undoneAtSeconds?: number | undefined;
     /** Set when this entry is itself an undo, naming what it took back. */
     undoesId?: string | undefined;
 }

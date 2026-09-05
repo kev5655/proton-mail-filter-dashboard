@@ -257,7 +257,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             entry: StoredEntry,
             performInverse: (inverse: PendingChange) => Promise<void>
         ): Promise<{ restored: number; skipped: number; unrestorable: number }> => {
-            if (entry.undoneAt !== undefined) {
+            if (entry.undoneAtSeconds !== undefined) {
                 throw new AppError('UNDO_ENTRY_ALREADY_UNDONE', {
                     message: 'Diese Änderung wurde bereits zurückgenommen.',
                     hint: 'Ein zweites Zurücknehmen wäre etwas anderes als das erste.',

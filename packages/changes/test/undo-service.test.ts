@@ -55,7 +55,7 @@ const FOLDER_IDS = new Map([
 function entry(over: Partial<JournalEntry> = {}): JournalEntry {
     return {
         id: 'j-1',
-        at: 1_700_000_000,
+        atSeconds: 1_700_000_000,
         change: { id: 'c-1', kind: 'create-rule', summary: 'Regel anlegen' },
         inverse: { id: 'c-1-undo', kind: 'delete-rule', summary: 'Regel entfernen' },
         moved: [
@@ -186,7 +186,7 @@ describe('undoing a change', () => {
         const proton = fakeProton();
 
         await expect(
-            undoChange(entry({ undoneAt: 1_700_000_100 }), {
+            undoChange(entry({ undoneAtSeconds: 1_700_000_100 }), {
                 http: proton.http,
                 applyInverse: async () => undefined,
                 readCurrent: allStillThere,
@@ -201,7 +201,7 @@ describe('undoing a change', () => {
         const proton = fakeProton();
         const record = entry();
 
-        expect(record.undoneAt).toBeUndefined();
+        expect(record.undoneAtSeconds).toBeUndefined();
         await undoChange(record, {
             http: proton.http,
             applyInverse: async () => undefined,
@@ -209,7 +209,7 @@ describe('undoing a change', () => {
             folderIds: FOLDER_IDS,
         });
 
-        expect(record.undoneAt).toBeDefined();
+        expect(record.undoneAtSeconds).toBeDefined();
     });
 
     it('does not mark it undone when the move fails, so it can be retried', async () => {
@@ -233,7 +233,7 @@ describe('undoing a change', () => {
         ).rejects.toThrow();
 
         // An entry that looks reversed but is not would be unrecoverable through the interface.
-        expect(record.undoneAt).toBeUndefined();
+        expect(record.undoneAtSeconds).toBeUndefined();
     });
 });
 

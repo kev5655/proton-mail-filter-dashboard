@@ -49,7 +49,8 @@ export interface UndoContext {
     readCurrent: (ids: string[]) => Promise<MessageState[]>;
     /** Folder name to label id — the journal speaks in names, Proton answers in ids. */
     folderIds: Map<string, string>;
-    now?: () => number;
+    /** Unix **seconds**. The whole journal is in seconds; see `JournalEntry`. */
+    nowSeconds?: () => number;
 }
 
 export interface UndoOutcome {
@@ -64,9 +65,9 @@ export interface UndoOutcome {
 }
 
 export async function undoChange(entry: JournalEntry, context: UndoContext): Promise<UndoOutcome> {
-    const now = context.now ?? Date.now;
+    const nowSeconds = context.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
 
-    if (entry.undoneAt !== undefined) {
+    if (entry.undoneAtSeconds !== undefined) {
         throw new AppError('UNDO_ENTRY_ALREADY_UNDONE', {
             message: 'Diese Änderung wurde bereits rückgängig gemacht.',
             hint: 'Ein zweites Zurücknehmen würde etwas anderes bedeuten als das erste.',
@@ -147,7 +148,7 @@ export async function undoChange(entry: JournalEntry, context: UndoContext): Pro
                   },
               });
 
-    entry.undoneAt = now();
+    entry.undoneAtSeconds = nowSeconds();
     return { entryId: entry.id, restored, skippedMovedSince, unrestorable, partial };
 }
 

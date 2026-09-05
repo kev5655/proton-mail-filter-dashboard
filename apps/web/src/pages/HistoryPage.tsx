@@ -38,13 +38,13 @@ export function HistoryPage(): React.JSX.Element {
         source === 'demo'
             ? journal.map((entry) => ({
                   id: entry.id,
-                  at: entry.at,
+                  at: entry.atSeconds * 1000,
                   summary: describeChange(entry.change),
                   confirmed: entry.verification?.confirmed,
                   stragglers: entry.verification?.stragglers.length,
-                  undoneAt: entry.undoneAt,
+                  undoneAt: entry.undoneAtSeconds === undefined ? undefined : entry.undoneAtSeconds * 1000,
                   backupPath: undefined as string | undefined,
-                  undoable: entry.undoneAt === undefined,
+                  undoable: entry.undoneAtSeconds === undefined,
                   moved: entry.moved.length,
                   snapshot: entry.moved,
                   take: () => {
@@ -53,16 +53,16 @@ export function HistoryPage(): React.JSX.Element {
               }))
             : history.map((entry) => ({
                   id: entry.id,
-                  at: entry.at * 1000,
+                  at: entry.atSeconds * 1000,
                   summary: entry.summary,
                   confirmed: entry.verification?.confirmed,
                   stragglers: entry.verification?.stragglers,
-                  undoneAt: entry.undoneAt === undefined ? undefined : entry.undoneAt * 1000,
+                  undoneAt: entry.undoneAtSeconds === undefined ? undefined : entry.undoneAtSeconds * 1000,
                   backupPath: entry.backupPath,
                   // An undo is not itself undoable. Redoing is a different act from reversing, it
                   // needs its own diff, and offering it here would let two entries in the record
                   // disagree about what the account looks like.
-                  undoable: entry.undoneAt === undefined && entry.undoesId === undefined,
+                  undoable: entry.undoneAtSeconds === undefined && entry.undoesId === undefined,
                   moved: entry.moved.length,
                   snapshot: entry.moved,
                   take: () => {

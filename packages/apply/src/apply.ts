@@ -215,6 +215,9 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 
 export async function applyChange(request: ChangeRequest, context: ApplyContext): Promise<ApplyOutcome> {
     const now = context.now ?? Date.now;
+    // The journal speaks Unix seconds throughout — see `JournalEntry`. `now()` is milliseconds,
+    // and writing it straight into a seconds field is the bug this conversion exists to prevent.
+    const nowSeconds = (): number => Math.floor(now() / 1000);
     const sleep = context.sleep ?? defaultSleep;
 
     // 1 — freshness
@@ -315,15 +318,17 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
 
     // 7 — journal, opened at once
     const entry: JournalEntry = {
+        // Milliseconds here on purpose: two changes in the same second would otherwise collide
+        // on the primary key. The timestamp below is the one that is read as a time.
         id: `j-${String(now())}`,
-        at: now(),
+        atSeconds: nowSeconds(),
         change: request.change,
         inverse: inverseOf(request.change),
         moved: [],
     };
 
     // 8 — verify by looking, twice if need be, because Proton files asynchronously
-    let verification: VerificationResult = { confirmed: 0, stragglers: [], checkedAt: now() };
+    let verification: VerificationResult = { confirmed: 0, stragglers: [], checkedAtSeconds: nowSeconds() };
     let partial: AppError | undefined;
 
     if (request.plan.moves.length > 0) {
@@ -352,7 +357,7 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
                 await sleep(2_000);
             }
             const actual = await readStates(context.http, request.affectedMessageIds);
-            const result = verifyMoves({ expected: request.plan.moves, actual, folderIds, now: now() });
+            const result = verifyMoves({ expected: request.plan.moves, actual, folderIds, nowSeconds: nowSeconds() });
             if (result.confirmed >= verification.confirmed) {
                 verification = result;
             }

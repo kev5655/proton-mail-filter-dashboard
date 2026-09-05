@@ -266,7 +266,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
 
         const entry = journal.record({
             id: `j-${now}`,
-            at: now,
+            atSeconds: Math.floor(now / 1000),
             change: staged.change,
             moved: staged.moves.map((move) => ({
                 messageId: move.messageId,
@@ -288,7 +288,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
                     LabelIDs: [move.to ?? '0'],
                 })),
                 folderIds: new Map(staged.moves.map((move) => [move.to ?? '', move.to ?? '0'])),
-                now,
+                nowSeconds: Math.floor(now / 1000),
             })
         );
 
@@ -299,7 +299,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }): Reac
 
     const undo = useCallback(
         (entryId: string) => {
-            const result = journal.undo(entryId, rules, Date.now());
+            const result = journal.undo(entryId, rules, Math.floor(Date.now() / 1000));
             setRules(result.rules as MailboxRule[]);
             setVersion((current) => current + 1);
         },

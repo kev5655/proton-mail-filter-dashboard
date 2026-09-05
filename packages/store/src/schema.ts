@@ -185,4 +185,45 @@ export const MIGRATIONS: readonly Migration[] = [
             CREATE INDEX journal_entries_at ON journal_entries (at);
         `,
     },
+    {
+        summary: 'the journal timestamps, which were milliseconds in columns that meant seconds',
+        sql: `
+            -- The column always said Unix seconds. The writer sent Date.now(), which is
+            -- milliseconds, so every applied change was recorded a thousand times too far in the
+            -- future: the history rendered them in the year 58647, and readJournalSince compared a
+            -- rewind chain against a number no row could ever reach. Nothing caught it because the
+            -- only disagreement was between a name and its value -- so the names now carry the
+            -- unit (atSeconds, undoneAtSeconds, checkedAtSeconds), and this step repairs what is
+            -- already on disk.
+            --
+            -- The threshold is the whole trick: 100000000000 is the year 5138 read as seconds and
+            -- the year 1973 read as milliseconds. No plausible instant is ambiguous between the
+            -- two, so this is safe on a database that was never affected, and safe run twice.
+
+            UPDATE journal_entries
+               SET at = at / 1000
+             WHERE at > 100000000000;
+
+            UPDATE journal_entries
+               SET undone_at = undone_at / 1000
+             WHERE undone_at IS NOT NULL AND undone_at > 100000000000;
+
+            -- The verification blob carried the same instant under the old name.
+            UPDATE journal_entries
+               SET verification_json = json_remove(
+                       json_set(
+                           verification_json,
+                           '$.checkedAtSeconds',
+                           CASE
+                               WHEN json_extract(verification_json, '$.checkedAt') > 100000000000
+                                   THEN json_extract(verification_json, '$.checkedAt') / 1000
+                               ELSE json_extract(verification_json, '$.checkedAt')
+                           END
+                       ),
+                       '$.checkedAt'
+                   )
+             WHERE verification_json IS NOT NULL
+               AND json_extract(verification_json, '$.checkedAt') IS NOT NULL;
+        `,
+    },
 ];

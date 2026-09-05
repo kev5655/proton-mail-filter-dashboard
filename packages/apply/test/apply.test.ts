@@ -361,6 +361,30 @@ describe('when it is confirmed', () => {
         expect(outcome.entry.verification?.confirmed).toBe(1);
     });
 
+    it('dates the entry in seconds, which is what the column and everything reading it mean', async () => {
+        // The writer sent `Date.now()` — milliseconds — into a field the schema, the DTO, the
+        // tests and `undoneAt` in the very same row all read as seconds. The history therefore
+        // showed every change happening in the year 58647, and `readJournalSince` compared a
+        // rewind chain against a number no row could reach. Asserted against a fixed clock rather
+        // than a range, so the failure names the factor instead of a vague „too big".
+        const proton = fakeProton({ movedIds: ['m-1'] });
+        const milliseconds = 1_700_000_000_500;
+
+        const outcome = await applyChange(request(), {
+            http: proton.http,
+            backupDir,
+            confirm: always('granted'),
+            sleep: async () => undefined,
+            now: () => milliseconds,
+        });
+
+        expect(outcome.entry.atSeconds).toBe(1_700_000_000);
+        expect(outcome.entry.verification?.checkedAtSeconds).toBe(1_700_000_000);
+        // The id keeps milliseconds on purpose: two changes in one second would otherwise collide
+        // on the primary key.
+        expect(outcome.entry.id).toBe(`j-${String(milliseconds)}`);
+    });
+
     it('raises a partial result rather than rounding it up', async () => {
         const proton = fakeProton({ movedIds: ['m-1'] });
 

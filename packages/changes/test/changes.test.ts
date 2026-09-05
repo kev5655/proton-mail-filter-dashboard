@@ -164,7 +164,7 @@ describe('undo', () => {
         const journal = new Journal();
         journal.record({
             id: 'e1',
-            at: 1000,
+            atSeconds: 1000,
             change,
             moved: [
                 { messageId: 'm1', previousLabelIds: ['0'], movedTo: 'Newsletter' },
@@ -183,7 +183,7 @@ describe('undo', () => {
 
     it('refuses to undo the same entry twice', () => {
         const journal = new Journal();
-        journal.record({ id: 'e1', at: 1000, change, moved: [] });
+        journal.record({ id: 'e1', atSeconds: 1000, change, moved: [] });
         journal.undo('e1', [created], 2000);
 
         expect(() => journal.undo('e1', [created], 3000)).toThrow(/bereits rückgängig/);
@@ -191,8 +191,8 @@ describe('undo', () => {
 
     it('lists the newest entry first', () => {
         const journal = new Journal();
-        journal.record({ id: 'old', at: 1000, change, moved: [] });
-        journal.record({ id: 'new', at: 2000, change, moved: [] });
+        journal.record({ id: 'old', atSeconds: 1000, change, moved: [] });
+        journal.record({ id: 'new', atSeconds: 2000, change, moved: [] });
 
         expect(journal.entries.map((entry) => entry.id)).toEqual(['new', 'old']);
     });
@@ -213,7 +213,7 @@ describe('verifying that Proton did it', () => {
                 { ID: 'm2', LabelIDs: ['lbl-news'] },
             ],
             folderIds,
-            now: 1,
+            nowSeconds: 1,
         });
 
         expect(result.confirmed).toBe(2);
@@ -230,7 +230,7 @@ describe('verifying that Proton did it', () => {
                 { ID: 'm2', LabelIDs: ['0'] },
             ],
             folderIds,
-            now: 1,
+            nowSeconds: 1,
         });
 
         const error = partialMoveError(result, 'Newsletter');
@@ -239,14 +239,14 @@ describe('verifying that Proton did it', () => {
     });
 
     it('treats a message missing from the read-back as unconfirmed', () => {
-        const result = verifyMoves({ expected, actual: [{ ID: 'm1', LabelIDs: ['lbl-news'] }], folderIds, now: 1 });
+        const result = verifyMoves({ expected, actual: [{ ID: 'm1', LabelIDs: ['lbl-news'] }], folderIds, nowSeconds: 1 });
 
         expect(result.confirmed).toBe(1);
         expect(result.stragglers).toEqual(['m2']);
     });
 
     it('puts no subject line in the error, only ids', () => {
-        const result = verifyMoves({ expected, actual: [], folderIds, now: 1 });
+        const result = verifyMoves({ expected, actual: [], folderIds, nowSeconds: 1 });
         const serialised = JSON.stringify(partialMoveError(result, 'Newsletter')?.toJSON());
 
         expect(serialised).not.toContain('Betreff');

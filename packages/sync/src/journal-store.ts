@@ -55,7 +55,7 @@ export function recordJournalEntry(db: Db, entry: StoredEntry): void {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
         entry.id,
-        entry.at,
+        entry.atSeconds,
         entry.change.kind,
         describeChange(entry.change),
         JSON.stringify(entry.change),
@@ -63,7 +63,7 @@ export function recordJournalEntry(db: Db, entry: StoredEntry): void {
         JSON.stringify(entry.moved),
         entry.verification === undefined ? null : JSON.stringify(entry.verification),
         entry.backupPath,
-        entry.undoneAt ?? null,
+        entry.undoneAtSeconds ?? null,
         entry.undoesId ?? null
     );
     log.info({ id: entry.id, kind: entry.change.kind, moved: entry.moved.length }, 'journal entry recorded');
@@ -122,8 +122,8 @@ export function clearJournal(db: Db): number {
 }
 
 /** Mark an entry taken back, so it is not offered a second time. */
-export function markUndone(db: Db, entryId: string, at: number): void {
-    db.prepare('UPDATE journal_entries SET undone_at = ? WHERE id = ?').run(at, entryId);
+export function markUndone(db: Db, entryId: string, atSeconds: number): void {
+    db.prepare('UPDATE journal_entries SET undone_at = ? WHERE id = ?').run(atSeconds, entryId);
 }
 
 /** Newest first: the thing most likely to need taking back is the thing just done. */
@@ -158,7 +158,7 @@ export function readJournalSince(db: Db, entryId: string): StoredEntry[] {
              WHERE at >= ? AND undone_at IS NULL AND undoes_id IS NULL
              ORDER BY at DESC, id DESC`
         )
-        .all(anchor.at) as Row[];
+        .all(anchor.atSeconds) as Row[];
 
     return rows.map(toEntry);
 }
@@ -166,7 +166,7 @@ export function readJournalSince(db: Db, entryId: string): StoredEntry[] {
 function toEntry(row: Row): StoredEntry {
     return {
         id: row.id,
-        at: row.at,
+        atSeconds: row.at,
         change: JSON.parse(row.change_json) as StoredEntry['change'],
         inverse: JSON.parse(row.inverse_json) as StoredEntry['inverse'],
         moved: JSON.parse(row.moved_json) as StoredEntry['moved'],
@@ -175,7 +175,7 @@ function toEntry(row: Row): StoredEntry {
                 ? undefined
                 : (JSON.parse(row.verification_json) as StoredEntry['verification']),
         backupPath: row.backup_path,
-        undoneAt: row.undone_at ?? undefined,
+        undoneAtSeconds: row.undone_at ?? undefined,
         undoesId: row.undoes_id ?? undefined,
     };
 }

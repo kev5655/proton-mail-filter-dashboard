@@ -44,7 +44,7 @@ afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
 });
 
-function entry(over: Partial<JournalEntry> & { id: string; at: number }): JournalEntry & { backupPath: string } {
+function entry(over: Partial<JournalEntry> & { id: string; atSeconds: number }): JournalEntry & { backupPath: string } {
     return {
         change: { id: 'c-1', kind: 'create-rule' },
         inverse: { id: 'c-1-undo', kind: 'delete-rule' },
@@ -61,7 +61,7 @@ describe('keeping the record', () => {
     it('returns what undo needs, per message', () => {
         // Two messages that came from two different places. A description of the change could not
         // express that, which is exactly why the snapshot exists.
-        recordJournalEntry(db, entry({ id: 'j-1', at: 1_700_000_000 }));
+        recordJournalEntry(db, entry({ id: 'j-1', atSeconds: 1_700_000_000 }));
 
         expect(readJournalEntry(db, 'j-1')?.moved).toEqual([
             { messageId: 'm-1', previousLabelIds: ['0'], movedTo: 'Werbung' },
@@ -70,7 +70,7 @@ describe('keeping the record', () => {
     });
 
     it('survives being closed and reopened', async () => {
-        recordJournalEntry(db, entry({ id: 'j-1', at: 1_700_000_000 }));
+        recordJournalEntry(db, entry({ id: 'j-1', atSeconds: 1_700_000_000 }));
         closeDatabase(db);
 
         db = await openDatabase({ path: join(directory, 'mailbox.db'), passphrase: PASSPHRASE });
@@ -79,8 +79,8 @@ describe('keeping the record', () => {
     });
 
     it('lists the newest first, because that is what needs taking back', () => {
-        recordJournalEntry(db, entry({ id: 'j-1', at: 1_700_000_000 }));
-        recordJournalEntry(db, entry({ id: 'j-2', at: 1_700_000_100 }));
+        recordJournalEntry(db, entry({ id: 'j-1', atSeconds: 1_700_000_000 }));
+        recordJournalEntry(db, entry({ id: 'j-2', atSeconds: 1_700_000_100 }));
 
         expect(readJournal(db).map((row) => row.id)).toEqual(['j-2', 'j-1']);
     });
@@ -88,19 +88,19 @@ describe('keeping the record', () => {
     it('marks an entry taken back rather than deleting it', () => {
         // A history that removes its own entries is not a history. „Rückgängig gemacht" is itself
         // something that happened and belongs on the screen.
-        recordJournalEntry(db, entry({ id: 'j-1', at: 1_700_000_000 }));
+        recordJournalEntry(db, entry({ id: 'j-1', atSeconds: 1_700_000_000 }));
         markUndone(db, 'j-1', 1_700_000_500);
 
         expect(readJournal(db)).toHaveLength(1);
-        expect(readJournalEntry(db, 'j-1')?.undoneAt).toBe(1_700_000_500);
+        expect(readJournalEntry(db, 'j-1')?.undoneAtSeconds).toBe(1_700_000_500);
     });
 });
 
 describe('the chain a rewind would follow', () => {
     beforeEach(() => {
-        recordJournalEntry(db, entry({ id: 'j-1', at: 1_700_000_000 }));
-        recordJournalEntry(db, entry({ id: 'j-2', at: 1_700_000_100 }));
-        recordJournalEntry(db, entry({ id: 'j-3', at: 1_700_000_200 }));
+        recordJournalEntry(db, entry({ id: 'j-1', atSeconds: 1_700_000_000 }));
+        recordJournalEntry(db, entry({ id: 'j-2', atSeconds: 1_700_000_100 }));
+        recordJournalEntry(db, entry({ id: 'j-3', atSeconds: 1_700_000_200 }));
     });
 
     it('runs newest first, and includes the anchor', () => {
@@ -118,7 +118,7 @@ describe('the chain a rewind would follow', () => {
     it('never walks back over an undo', () => {
         // An undo is itself an entry. Rewinding across one would undo the undoing, which is a redo
         // wearing the wrong name — and would let two entries disagree about the account.
-        recordJournalEntry(db, { ...entry({ id: 'j-4', at: 1_700_000_400 }), undoesId: 'j-3' });
+        recordJournalEntry(db, { ...entry({ id: 'j-4', atSeconds: 1_700_000_400 }), undoesId: 'j-3' });
 
         expect(readJournalSince(db, 'j-1').map((row) => row.id)).toEqual(['j-3', 'j-2', 'j-1']);
     });
@@ -127,7 +127,7 @@ describe('the chain a rewind would follow', () => {
 describe('how much the record keeps', () => {
     function record(count: number): void {
         for (let index = 0; index < count; index++) {
-            recordJournalEntry(db, entry({ id: `j-${String(index)}`, at: 1_700_000_000 + index }));
+            recordJournalEntry(db, entry({ id: `j-${String(index)}`, atSeconds: 1_700_000_000 + index }));
         }
     }
 
@@ -149,8 +149,8 @@ describe('how much the record keeps', () => {
     it('drops the oldest by time, not whichever row came back last', () => {
         // Written newest first, so an implementation deleting by insertion order would throw away
         // exactly the wrong ones.
-        recordJournalEntry(db, entry({ id: 'neu', at: 1_700_009_999 }));
-        recordJournalEntry(db, entry({ id: 'alt', at: 1_700_000_001 }));
+        recordJournalEntry(db, entry({ id: 'neu', atSeconds: 1_700_009_999 }));
+        recordJournalEntry(db, entry({ id: 'alt', atSeconds: 1_700_000_001 }));
 
         pruneJournal(db, 1);
 

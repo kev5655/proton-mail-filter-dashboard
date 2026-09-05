@@ -117,7 +117,7 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
          */
         history: readJournal(db).map((entry) => ({
             id: entry.id,
-            at: entry.at,
+            atSeconds: entry.atSeconds,
             kind: entry.change.kind,
             summary: describeChange(entry.change),
             moved: entry.moved,
@@ -127,11 +127,11 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
                       verification: {
                           confirmed: entry.verification.confirmed,
                           stragglers: entry.verification.stragglers.length,
-                          checkedAt: entry.verification.checkedAt,
+                          checkedAtSeconds: entry.verification.checkedAtSeconds,
                       },
                   }),
             backupPath: entry.backupPath,
-            ...(entry.undoneAt === undefined ? {} : { undoneAt: entry.undoneAt }),
+            ...(entry.undoneAtSeconds === undefined ? {} : { undoneAtSeconds: entry.undoneAtSeconds }),
             ...(entry.undoesId === undefined ? {} : { undoesId: entry.undoesId }),
         })),
     };
