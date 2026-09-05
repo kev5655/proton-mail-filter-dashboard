@@ -41,3 +41,4 @@ export type {
     MailboxSnapshot,
     UnreadableRule,
 } from './types.js';
+export { refuseForeignOrigin, type OriginPolicy } from './origins.js';

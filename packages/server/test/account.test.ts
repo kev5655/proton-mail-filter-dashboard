@@ -51,9 +51,57 @@ function runner(overrides: Partial<AccountRunner> = {}): AccountRunner {
     };
 }
 
-async function post(channel: AccountChannel, body: unknown): Promise<Reply> {
-    return (await route('POST', '/api/account', undefined, { account: channel }, body)) as Reply;
+async function post(channel: AccountChannel, body: unknown, requestOrigin?: string): Promise<Reply> {
+    return (await route(
+        'POST',
+        '/api/account',
+        undefined,
+        { account: channel },
+        body,
+        requestOrigin
+    )) as Reply;
 }
+
+describe('which origin WebAuthn is verified against', () => {
+    /*
+     * The header, not a field in the body.
+     *
+     * `rpIdFor` derives the relying-party id from this value, so taking it from the body let the
+     * caller choose the scope their own credential is bound to — the one thing a relying party
+     * must never delegate. The header is the browser's own account of where the page came from,
+     * and it has already been through `refuseForeignOrigin` by the time it gets here.
+     */
+    function channelSeeingOrigin(seen: string[]): AccountChannel {
+        return new AccountChannel(
+            runner({
+                beginPasskeyRegistration: async (origin) => {
+                    seen.push(origin);
+                    return { challenge: 'server-side-challenge', options: {} };
+                },
+            })
+        );
+    }
+
+    it('ignores the body when the request carried one', async () => {
+        const seen: string[] = [];
+
+        await post(
+            channelSeeingOrigin(seen),
+            { action: 'passkey-register-begin', origin: 'https://boese.example' },
+            'http://localhost:5173'
+        );
+
+        expect(seen).toEqual(['http://localhost:5173']);
+    });
+
+    it('falls back to the body when there is no header, because there is nothing safer', async () => {
+        const seen: string[] = [];
+
+        await post(channelSeeingOrigin(seen), { action: 'passkey-register-begin', origin: 'http://127.0.0.1:5174' });
+
+        expect(seen).toEqual(['http://127.0.0.1:5174']);
+    });
+});
 
 describe('a locked server', () => {
     it('says the mailbox is locked rather than answering with an empty one', () => {

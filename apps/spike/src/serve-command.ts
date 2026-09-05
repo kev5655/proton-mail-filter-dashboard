@@ -88,6 +88,14 @@ const DEFAULT_AUTO_SYNC_MINUTES = 5;
 
 export async function runServe(argv: readonly string[]): Promise<void> {
     const port = Number(value(argv, '--port') ?? process.env['PMS_SERVER_PORT'] ?? 5174);
+    /*
+     * The origin this installation is reached under, when it is not simply loopback — a tailnet
+     * host with its own certificate, say. Absent is the ordinary case and means „loopback only".
+     *
+     * Read here rather than inside the server package, so the one file that knows how this process
+     * is configured stays the one that says so.
+     */
+    const publicOrigin = process.env['PMS_PUBLIC_ORIGIN']?.replace(/\/+$/, '') || undefined;
 
     console.log('\nProton Mail Sorter — lokaler Server\n');
     console.log('Liest die lokale Kopie. Zu Proton wird keine Verbindung aufgebaut.');
@@ -833,6 +841,8 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             ...(process.env['PMS_OLLAMA_URL'] === undefined
                 ? {}
                 : { ollamaUrl: process.env['PMS_OLLAMA_URL'] }),
+            // Everything that is neither loopback nor this is refused before it reaches a route.
+            ...(publicOrigin === undefined ? {} : { publicOrigin }),
         });
 
         /*

@@ -120,6 +120,22 @@ records an offer and answers `202` while nothing has happened yet.
 `packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
 One file to read when someone asks what this tool can change.
 
+**Who the server takes instructions from is now a decision rather than an accident.** There was no
+CSRF token, no `Origin` check and no look at `Host`: anything that could reach the port could drive
+every one of those routes. On loopback that was tolerable — a process on this machine having the
+mailbox is the premise — but it was tolerable by luck, and it stops being tolerable the moment the
+dashboard is reachable under a name. `origins.ts` refuses every non-`GET` whose `Origin` is missing,
+is not loopback, and is not exactly `PMS_PUBLIC_ORIGIN`; `Host` is checked the same way, which
+closes DNS rebinding by comparison rather than by argument. Reads pass, because a `GET` changes
+nothing and the two streams are `GET`s. Loopback is allowed in general rather than on one exact
+port, because `pnpm dev` serves the page from vite with `changeOrigin: false` — a rule pinned to one
+port would lock the author out of his own dashboard and look like a broken server.
+
+The same change took WebAuthn's origin out of the request body. `rpIdFor` derives the relying-party
+id from it, so a body field let the caller choose the scope their own credential is bound to — the
+one thing a relying party must never delegate. It comes from the header now, which the guard above
+has already checked.
+
 ### Where the second question is asked, and what giving up the terminal cost
 
 `weigh()` decides which changes are asked about twice — anything that moves mail (a category move,

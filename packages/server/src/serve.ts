@@ -9,6 +9,7 @@ import { proxyToOllama } from './ollama-proxy.js';
 import { serveStatic } from './static.js';
 import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
+import { refuseForeignOrigin } from './origins.js';
 import type { SessionChannel } from './session-channel.js';
 import type { SyncChannel } from './sync-channel.js';
 
@@ -61,6 +62,14 @@ export interface ServeOptions {
      * user to widen a service's access rules to accommodate this page.
      */
     ollamaUrl?: string | undefined;
+    /**
+     * The origin this installation is actually reached under, when it is not simply loopback.
+     *
+     * Set it when the dashboard is served through something else — a tailnet name with its own
+     * certificate, say. Everything else that is not loopback is refused before it reaches a route;
+     * see `origins.ts` for why the rule is drawn where it is.
+     */
+    publicOrigin?: string | undefined;
 }
 
 export interface RunningServer {
@@ -128,6 +137,27 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
         path: string,
         body: unknown
     ): Promise<void> {
+        /*
+         * Refuse, or route. Before anything is parsed and before any channel is touched, so a
+         * route added later cannot forget the check by not knowing about it.
+         */
+        const refused = refuseForeignOrigin(request.method, {
+            origin: request.headers.origin,
+            host: request.headers.host,
+        }, { publicOrigin: served.publicOrigin });
+        if (refused !== undefined) {
+            log.warn(
+                { path, method: request.method, detail: (refused.body as { detail?: string }).detail },
+                'request refused by origin'
+            );
+            response.writeHead(refused.status, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'no-store',
+            });
+            response.end(JSON.stringify(refused.body));
+            return;
+        }
+
         let reply;
         try {
             // The login channel was missing from this list, which made `POST /api/login` answer
@@ -137,7 +167,7 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
                 apply: served.apply,
                 login: served.login,
                 account: served.account,
-            }, body);
+            }, body, request.headers.origin);
         } catch (cause) {
             // One failing request must not take the server with it: the dashboard is meant to stay
             // up while the copy underneath it is being re-synced.

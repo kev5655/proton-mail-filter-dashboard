@@ -91,7 +91,19 @@ PMS_OP_ACCOUNT=my.1password.eu             # only if several accounts are signed
 PMS_BROWSER_CHANNEL=chrome    # use installed Chrome rather than the bundled Chromium
 PMS_BROWSER_HEADLESS=false    # show the window; needed to switch to the 2FA code
 PMS_BROWSER_PROFILE=data/browser-profile   # remember the device between runs
+PMS_PUBLIC_ORIGIN=https://pi.tailnet.ts.net  # only if you reach it under a name, not loopback
 ```
+
+`PMS_PUBLIC_ORIGIN` is the one to know about if you ever put this behind something. The server
+binds to `127.0.0.1` and refuses any non-`GET` whose `Origin` is neither loopback nor exactly this
+value — so a page on the internet cannot make your dashboard do anything, and a name that merely
+resolves to your machine cannot either. Leave it unset for the ordinary case, where the only way in
+is from this machine.
+
+Two consequences worth knowing before you set it. A passkey is scoped to the name it was registered
+under, so one registered on `localhost` will not be offered on a `ts.net` address and has to be
+registered again. And the password is still required either way — a passkey has always been the
+second factor here, never the key.
 
 ### Signing in
 

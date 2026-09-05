@@ -72,7 +72,15 @@ export function route(
     path: string,
     db: Db | undefined,
     channels: Channels = {},
-    body?: unknown
+    body?: unknown,
+    /**
+     * The `Origin` header of this request, already checked by `refuseForeignOrigin`.
+     *
+     * Only WebAuthn needs it, and it needs it badly: the relying-party id is derived from it, so
+     * taking it from the request body would let the caller choose the scope their own credential
+     * is bound to.
+     */
+    requestOrigin?: string
 ): Reply | Promise<Reply> {
     const { sync, apply, login, account } = channels;
 
@@ -222,7 +230,7 @@ export function route(
                 },
             };
         }
-        return account.perform(body);
+        return account.perform(body, requestOrigin);
     }
 
     /*

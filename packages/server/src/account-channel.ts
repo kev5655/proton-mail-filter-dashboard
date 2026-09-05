@@ -143,9 +143,23 @@ export class AccountChannel {
      * adding a line to a list — which is precisely the property the write surface is built to
      * refuse, and this surface holds the key to everything the write surface protects.
      */
-    async perform(body: unknown): Promise<Reply> {
+    async perform(body: unknown, requestOrigin?: string): Promise<Reply> {
         const input = (body ?? {}) as Record<string, unknown>;
         const action = typeof input['action'] === 'string' ? input['action'] : '';
+
+        /*
+         * Which origin WebAuthn is verified against.
+         *
+         * The request header, not a field in the body. The header is the browser's own account of
+         * where the page came from and has already been through `refuseForeignOrigin`; the body is
+         * whatever the caller decided to type. Since `rpIdFor` derives the relying-party id from
+         * this, a body field meant the caller chose the scope their own credential is bound to —
+         * which is the one thing a relying party is not allowed to let them do.
+         *
+         * The body value remains the fallback, because a request that never reached this server
+         * through a browser has no header to offer and there is nothing safer to fall back to.
+         */
+        const origin = requestOrigin !== undefined && requestOrigin !== '' ? requestOrigin : text(input['origin']);
 
         try {
             switch (action) {
@@ -169,7 +183,7 @@ export class AccountChannel {
                                       // The server's own challenge. What the browser sent back is
                                       // an answer to a question, not the question.
                                       challenge: this.#take(),
-                                      origin: text(input['origin']),
+                                      origin,
                                   },
                               }),
                     });
@@ -223,7 +237,7 @@ export class AccountChannel {
                     return this.#ok();
 
                 case 'passkey-register-begin': {
-                    const offer = await this.#runner.beginPasskeyRegistration(text(input['origin']));
+                    const offer = await this.#runner.beginPasskeyRegistration(origin);
                     this.#outstanding = offer.challenge;
                     return { status: 200, body: { options: offer.options } };
                 }
@@ -233,7 +247,7 @@ export class AccountChannel {
                         label: text(input['label']),
                         response: input['response'],
                         challenge: this.#take(),
-                        origin: text(input['origin']),
+                        origin,
                     });
                     return this.#ok();
 
@@ -242,7 +256,7 @@ export class AccountChannel {
                     return this.#ok();
 
                 case 'passkey-login-begin': {
-                    const offer = await this.#runner.beginPasskeyLogin(text(input['origin']));
+                    const offer = await this.#runner.beginPasskeyLogin(origin);
                     this.#outstanding = offer.challenge;
                     return { status: 200, body: { options: offer.options } };
                 }
