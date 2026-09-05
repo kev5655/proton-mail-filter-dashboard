@@ -8,6 +8,7 @@ import {
     readCategoryObservations,
     readFilters,
     readFolderTree,
+    readHiddenSuggestions,
     readJournal,
     readMessages,
     type StoredFolder,
@@ -115,6 +116,12 @@ export function buildSnapshot(db: Db, limit = MESSAGE_LIMIT): MailboxSnapshot {
          * database for undo to work from and have no business in a browser tab, where they would
          * end up in a copied bug report.
          */
+        /*
+         * Which suggestions have been put away, riding along rather than on a route of its own.
+         * It is read-only data about this mailbox exactly like the rest of it, and the screen that
+         * needs it already waits for this response.
+         */
+        hiddenSuggestions: readHiddenSuggestions(db),
         history: readJournal(db).map((entry) => ({
             id: entry.id,
             atSeconds: entry.atSeconds,

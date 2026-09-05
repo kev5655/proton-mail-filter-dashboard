@@ -34,8 +34,8 @@ somewhere; the service runs the rules it already has. That is what lets a new ru
 backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
 because for months the terminal announced it and nothing did it.
 
-**There are six non-GET routes, not two, and every addition is named here because each was made on
-purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
+**There are seven non-GET routes, not two, and every addition is named here because each was made
+on purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
 writes nothing to Proton's data, but it is the most consequential thing the tool does. `POST
 /api/logout` is the only route on the list that *only ever takes away* — it ends the session, forgets
 it, and deletes the local copy of the mailbox — and a tool that makes connecting easy and
@@ -58,6 +58,18 @@ can no longer be reversed. The backups are untouched: they are files, this is a 
 a history must not quietly throw away the copy of every filter as it was before each change. The
 record also caps itself at `JOURNAL_LIMIT` entries on write, not on read — a record that grew for
 ever on disk and was merely *displayed* short would still be a growing pile of mail metadata.
+
+`POST /api/suggestions/hidden` is the seventh and the cheapest to justify, which is exactly why it
+is written down: it stores one row saying that a suggestion has been put away — a group key, which
+describes a pattern rather than a message, and the moment somebody decided. No Proton client, no
+channel, no second confirmation, because the act is undone by the same screen that performed it with
+the same button. It exists because „Nicht vorschlagen" was a React state and nothing else, so every
+hidden suggestion came back on the next reload and the button really meant „until you look away".
+It is in the database rather than in the browser because the same account is read from more than
+one device, and three browsers would keep three lists that disagree about what is still open.
+Unlike the journal it has **no cap**: that one holds message ids and exists to be undone from, this
+one holds a decision per pattern, and dropping the oldest would make a suggestion reappear months
+later with nothing to explain it.
 
 What makes it defensible is not the route count. **No password passes through this process:**
 `loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser

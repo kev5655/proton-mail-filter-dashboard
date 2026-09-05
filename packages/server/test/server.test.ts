@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import type { MessageMetadata, ProtonFilter, ProtonLabel } from '@pms/proton-api/schemas';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
-import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from '@pms/sync';
+import { mirrorFilters, mirrorLabels, mirrorMessages, readHiddenSuggestions, setMeta } from '@pms/sync';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApplyChannel } from '../src/apply-channel.js';
@@ -149,19 +149,26 @@ describe('the server refuses to write', () => {
         expect(route('POST', '/api/anything', db).status).toBe(405);
     });
 
-    it('accepts exactly five non-GET paths, and only those', () => {
+    it('accepts exactly seven non-GET paths, and only those', () => {
         // If this list ever grows, it should be because someone meant it to — which is why it is a
-        // list rather than a rule. Each of the five is named in CLAUDE.md with its own reason:
-        // `/api/apply` records an offer and writes nothing yet, `/api/sync` only reads at Proton,
-        // `/api/login` opens a browser window that this process never types into, `/api/logout` is
-        // the one route that only ever takes away, and `/api/account` is the one that cannot reach
-        // Proton at all — it opens and closes the local key.
+        // list rather than a rule. Each is named in CLAUDE.md with its own reason: `/api/apply`
+        // records an offer and writes nothing yet, `/api/sync` only reads at Proton, `/api/login`
+        // opens a browser window that this process never types into, `/api/logout` is the one
+        // route that only ever takes away. Three cannot reach Proton at all: `/api/account` opens
+        // and closes the local key, `/api/history/clear` deletes rows from the local record, and
+        // `/api/suggestions/hidden` marks a suggestion as put away.
+        //
+        // It said „five" and listed five while the server already answered six, because
+        // `/api/history/clear` was added without this list. A guard that names a subset guards a
+        // subset, so the count in the title is part of the assertion now.
         const paths = [
             '/api/sync',
             '/api/apply',
             '/api/login',
             '/api/logout',
             '/api/account',
+            '/api/history/clear',
+            '/api/suggestions/hidden',
             '/api/mailbox',
             '/api/health',
             '/api/anything',
@@ -175,7 +182,7 @@ describe('the server refuses to write', () => {
                 }).status !== 405
         );
 
-        // All five are *recognised* — `/api/apply` and `/api/account` answer 503 here because no
+        // All seven are *recognised* — `/api/apply` and `/api/account` answer 503 here because no
         // such channel was given, which is a different answer from „this server does not write".
         // Everything else is refused before the path is even looked at.
         expect(accepted).toEqual([
@@ -184,7 +191,51 @@ describe('the server refuses to write', () => {
             '/api/login',
             '/api/logout',
             '/api/account',
+            '/api/history/clear',
+            '/api/suggestions/hidden',
         ]);
+    });
+
+    /*
+     * Putting a suggestion away.
+     *
+     * The seventh non-GET route, and the one with the least to check — which is exactly why it is
+     * checked: it writes to the local record, and „it only writes a little" is how a route stops
+     * being read carefully.
+     */
+    describe('hiding a suggestion', () => {
+        it('stores it, and reports back what it stored', () => {
+            const reply = route('POST', '/api/suggestions/hidden', db, {}, { groupKey: 'sender:a@b.example', hidden: true });
+
+            expect(reply).toMatchObject({ status: 200, body: { groupKey: 'sender:a@b.example', hidden: true } });
+            expect(readHiddenSuggestions(db).map((entry) => entry.groupKey)).toEqual(['sender:a@b.example']);
+        });
+
+        it('takes it back out again, because a hide with no way back is a loss', () => {
+            route('POST', '/api/suggestions/hidden', db, {}, { groupKey: 'sender:a@b.example', hidden: true });
+            route('POST', '/api/suggestions/hidden', db, {}, { groupKey: 'sender:a@b.example', hidden: false });
+
+            expect(readHiddenSuggestions(db)).toEqual([]);
+        });
+
+        it('defaults to hiding when the flag is missing, and never to unhiding', () => {
+            // The destructive reading of a malformed request would be to quietly bring something
+            // back that somebody had put away.
+            route('POST', '/api/suggestions/hidden', db, {}, { groupKey: 'sender:a@b.example' });
+
+            expect(readHiddenSuggestions(db)).toHaveLength(1);
+        });
+
+        it('refuses a request with no key rather than writing an empty row', () => {
+            const reply = route('POST', '/api/suggestions/hidden', db, {}, { groupKey: '   ' });
+
+            expect(reply.status).toBe(400);
+            expect(readHiddenSuggestions(db)).toEqual([]);
+        });
+
+        it('answers 423 while the tool is locked, like everything else that reads the copy', () => {
+            expect(route('POST', '/api/suggestions/hidden', undefined, {}, { groupKey: 'x' }).status).toBe(423);
+        });
     });
 
     it('refuses a login when the server has no way to open one', () => {

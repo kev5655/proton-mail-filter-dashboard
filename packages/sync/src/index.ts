@@ -31,3 +31,8 @@ export {
     recordJournalEntry,
     type StoredEntry,
 } from './journal-store.js';
+export {
+    readHiddenSuggestions,
+    setSuggestionHidden,
+    type HiddenSuggestion,
+} from './hidden-suggestions.js';

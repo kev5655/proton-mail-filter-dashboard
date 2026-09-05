@@ -168,7 +168,7 @@ describe('the triage page', () => {
 
     it('offers nothing destructive without a click', () => {
         expect(text(html)).toContain('Regel anlegen');
-        expect(text(html)).toContain('Nicht vorschlagen');
+        expect(text(html)).toContain('Ausblenden');
     });
 });
 

@@ -226,4 +226,26 @@ export const MIGRATIONS: readonly Migration[] = [
                AND json_extract(verification_json, '$.checkedAt') IS NOT NULL;
         `,
     },
+    {
+        summary: 'the suggestions the user has put away, so they survive a reload',
+        sql: `
+            -- „Nicht vorschlagen" was a React state and nothing else: it lasted until the page was
+            -- reloaded or another screen was opened, and then every dismissed suggestion came
+            -- back. The identity to store it under already existed — group.key is documented as
+            -- stable precisely so a group „can be dismissed persistently" — only the storing did
+            -- not.
+            --
+            -- Here rather than in the browser, because the same account is read from more than one
+            -- device and three browsers with three lists would disagree about what is still open.
+            --
+            -- Nothing here is mail. A group key is a description of a pattern — a sender, a
+            -- subject shape, a domain — and this table holds only that and when it was put away.
+            CREATE TABLE hidden_suggestions (
+                group_key   TEXT PRIMARY KEY,
+                -- Unix seconds, when it was hidden. Shown in the list, so putting something away
+                -- for good can be told from putting it away last Tuesday.
+                at_seconds  INTEGER NOT NULL
+            ) STRICT;
+        `,
+    },
 ];

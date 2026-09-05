@@ -8,7 +8,12 @@ import {
     DEMO_RULES,
     generateMailbox,
 } from '@pms/demo';
-import type { JournalEntryDto, MailboxSnapshot, UnreadableRule } from '@pms/server/types';
+import type {
+    HiddenSuggestionDto,
+    JournalEntryDto,
+    MailboxSnapshot,
+    UnreadableRule,
+} from '@pms/server/types';
 
 import { buildMailbox, type MailboxData } from './data.js';
 
@@ -63,6 +68,14 @@ export interface MailboxStatus {
      * drift. Undefined against an older server, and the screen simply says nothing then.
      */
     historyLimit: number | undefined;
+    /**
+     * Which suggestions have been put away, newest first.
+     *
+     * Beside the history for the same reason: not a fact about the mailbox but about a decision
+     * somebody made about it, kept in the local database so it survives a reload and so a second
+     * device sees the same list. The demo keeps its own in memory — there is nowhere to write to.
+     */
+    hiddenSuggestions: HiddenSuggestionDto[];
 }
 
 interface MailboxContext {
@@ -88,6 +101,7 @@ const DEMO_STATUS: MailboxStatus = {
     problem: undefined,
     history: [],
     historyLimit: undefined,
+    hiddenSuggestions: [],
 };
 
 export function MailboxProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -158,6 +172,9 @@ export function MailboxProvider({ children }: { children: React.ReactNode }): Re
                         problem: undefined,
                         history: snapshot.history ?? [],
                         historyLimit: snapshot.meta.historyLimit,
+                        // Absent against a server from before this existed; an empty list is the
+                        // honest reading of that — nothing has been put away yet.
+                        hiddenSuggestions: snapshot.hiddenSuggestions ?? [],
                     },
                 });
             } catch (cause) {

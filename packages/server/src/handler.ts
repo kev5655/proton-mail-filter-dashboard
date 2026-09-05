@@ -1,7 +1,7 @@
 import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
-import { clearJournal } from '@pms/sync';
+import { clearJournal, setSuggestionHidden } from '@pms/sync';
 
 import { buildSnapshot } from './snapshot.js';
 import type { AccountChannel } from './account-channel.js';
@@ -17,12 +17,17 @@ const log = getLogger('server');
  * Nothing here changes anything at Proton, and the shape of the code is what says so rather than a
  * promise in a comment.
  *
- * Six routes are not a `GET`, and each is named in an `if` of its own rather than entered in a
- * table, so adding a seventh is a decision somebody has to write down. Four of them concern Proton:
+ * Seven routes are not a `GET`, and each is named in an `if` of its own rather than entered in a
+ * table, so adding an eighth is a decision somebody has to write down. Four of them concern Proton:
  * `/api/sync` reads, `/api/apply` records an offer that only a second answer can accept,
- * `/api/login` opens a browser window, `/api/logout` takes the connection away. Two cannot reach
- * Proton at all: `/api/account` opens and closes the local key, and `/api/history/clear` deletes
- * rows from the local record.
+ * `/api/login` opens a browser window, `/api/logout` takes the connection away. Three cannot reach
+ * Proton at all: `/api/account` opens and closes the local key, `/api/history/clear` deletes rows
+ * from the local record, and `/api/suggestions/hidden` marks a suggestion as put away.
+ *
+ * The seventh was the cheapest to justify and is written down anyway, because the count is a
+ * promise about what reaches Proton and a promise nobody re-reads is not one. It touches one table
+ * of pattern keys, holds no mail, and is reversible by construction — the screen that hides a
+ * suggestion is the same screen that brings it back.
  *
  * The rule this file keeps is that it cannot perform anything. It parses a request and calls a
  * `SyncChannel` handed to it; it holds no Proton client, imports nothing that does, and has no way
@@ -227,6 +232,34 @@ export function route(
         }
         const removed = clearJournal(db);
         return { status: 200, body: { removed } };
+    }
+
+    /*
+     * Putting a suggestion away, and taking it back out.
+     *
+     * The seventh non-GET route, and the smallest. It writes one row of the local record: a group
+     * key — a sender, a subject shape, a domain — and the moment somebody decided about it. No
+     * Proton client, no channel, no second confirmation, because there is nothing here to confirm:
+     * the act is undone by the same screen that performed it, with the same button.
+     *
+     * It exists at all because the decision used to live in a React state and was lost on every
+     * reload, which made „Nicht vorschlagen" mean „until you look away".
+     */
+    if (method === 'POST' && path === '/api/suggestions/hidden') {
+        if (db === undefined) {
+            return { status: 423, body: { error: LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' } };
+        }
+        const input = (body ?? {}) as { groupKey?: unknown; hidden?: unknown };
+        const groupKey = typeof input.groupKey === 'string' ? input.groupKey.trim() : '';
+        if (groupKey === '') {
+            return {
+                status: 400,
+                body: { error: 'Ohne Kennung lässt sich kein Vorschlag ausblenden.', code: 'SERVER_BAD_REQUEST' },
+            };
+        }
+        const hidden = input.hidden !== false;
+        setSuggestionHidden(db, groupKey, hidden, Math.floor(Date.now() / 1000));
+        return { status: 200, body: { groupKey, hidden } };
     }
 
     if (method !== 'GET') {

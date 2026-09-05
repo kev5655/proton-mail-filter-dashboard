@@ -153,6 +153,21 @@ export interface MailboxSnapshot {
      * and did not need to keep them.
      */
     history: JournalEntryDto[];
+    /**
+     * Suggestions the user has put away, newest first.
+     *
+     * A group key and a moment, and nothing else — a key describes a pattern (a sender, a subject
+     * shape, a domain), so there is no mail in this list. It travels in the snapshot because the
+     * screen that needs it is already waiting for this response.
+     */
+    hiddenSuggestions: HiddenSuggestionDto[];
+}
+
+/** One suggestion the user has put away, as the dashboard reads it back. */
+export interface HiddenSuggestionDto {
+    groupKey: string;
+    /** Unix **seconds**, when it was hidden. */
+    atSeconds: number;
 }
 
 /** One applied change, as the dashboard reads it back. */

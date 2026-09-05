@@ -6,7 +6,7 @@ import { explainScore } from '@pms/grouping';
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
 import { log } from '../log.js';
-import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { useMailbox, useMailboxStatus, useReloadMailbox } from '../mailbox.js';
 import { useSettings } from '../llm.js';
 import { ModelStatus } from '../components/ModelStatus.js';
 import { protonMailUrl } from '../proton-link.js';
@@ -32,15 +32,83 @@ export function TriagePage(): React.JSX.Element {
             ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
             : undefined;
     const { stage, rules } = useStore();
-    const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'dismissed'>>({});
+    const reload = useReloadMailbox();
+    const { hiddenSuggestions } = useMailboxStatus();
+    const [decisions, setDecisions] = useState<Record<string, 'accepted'>>({});
+    /*
+     * Hiding, kept where it survives.
+     *
+     * „Nicht vorschlagen" was a React state and nothing else, so every hidden suggestion came back
+     * on the next reload — the button meant „until you look away". It goes to the local database
+     * now, which is also what lets a second device see the same list.
+     *
+     * The demo has no database, so it keeps its own set in memory and says so by simply working:
+     * the screens must be interchangeable, and one that offers a button the demo cannot honour
+     * would make the demo stop being a test of anything.
+     */
+    const [demoHidden, setDemoHidden] = useState<Record<string, number>>({});
+    const [hideError, setHideError] = useState<string | undefined>(undefined);
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
     const [query, setQuery] = useState('');
     // Sections start open: the page's job is to show what there is. Collapsing is for putting a
     // section aside once it has been dealt with, not a state to have to undo on arrival.
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+    // The one section that starts closed, and for the opposite reason to the others: this is an
+    // archive, not a list of work.
+    const [showHidden, setShowHidden] = useState(false);
 
-    const open = suggestions.filter((entry) => decisions[entry.group.key] === undefined);
+    const hiddenAt = new Map<string, number>(
+        source === 'demo'
+            ? Object.entries(demoHidden)
+            : hiddenSuggestions.map((entry) => [entry.groupKey, entry.atSeconds])
+    );
+
+    const open = suggestions.filter(
+        (entry) => decisions[entry.group.key] === undefined && !hiddenAt.has(entry.group.key)
+    );
+    const hidden = suggestions.filter((entry) => hiddenAt.has(entry.group.key));
     const grouped = suggestions.reduce((total, entry) => total + entry.group.size, 0);
+
+    /*
+     * Putting one away, and taking it back, through one function.
+     *
+     * Two would let the halves drift, and this is a toggle in the interface as well: the same card
+     * carries „Ausblenden" in one list and „Wieder einblenden" in the other.
+     */
+    const setHidden = (groupKey: string, next: boolean): void => {
+        setHideError(undefined);
+        if (source === 'demo') {
+            setDemoHidden((current) => {
+                const copy = { ...current };
+                if (next) {
+                    copy[groupKey] = Math.floor(Date.now() / 1000);
+                } else {
+                    delete copy[groupKey];
+                }
+                return copy;
+            });
+            return;
+        }
+        void (async () => {
+            try {
+                const response = await fetch('/api/suggestions/hidden', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groupKey, hidden: next }),
+                });
+                if (!response.ok) {
+                    const problem = (await response.json()) as { error?: string };
+                    setHideError(problem.error ?? `Der Server antwortete mit ${String(response.status)}.`);
+                    return;
+                }
+                // The list on screen comes from the snapshot, so it has to be fetched again —
+                // otherwise the card stays put and the click reads as having failed.
+                reload();
+            } catch {
+                setHideError('Der lokale Server ist nicht erreichbar. Läuft `pnpm serve`?');
+            }
+        })();
+    };
 
     /*
      * Sections by how the group was found.
@@ -179,6 +247,42 @@ export function TriagePage(): React.JSX.Element {
                 );
             })}
 
+            {/*
+             * Where the put-away ones live.
+             *
+             * A section rather than a screen, and collapsed to start with: it is the one list here
+             * nobody opens the page to read. But it has to exist and be reachable, because
+             * „Ausblenden" without a way back is „verlieren" — and the old button, which forgot
+             * everything on reload, was somehow both at once.
+             */}
+            {hidden.length > 0 && (
+                <section className="suggestion-section">
+                    <h2>
+                        <button
+                            type="button"
+                            className="section-toggle"
+                            aria-expanded={showHidden}
+                            onClick={() => setShowHidden(!showHidden)}
+                        >
+                            <span aria-hidden="true">{showHidden ? '▾' : '▸'}</span> Ausgeblendet
+                        </button>{' '}
+                        <span className="faint">({hidden.length})</span>
+                    </h2>
+                    {showHidden && (
+                        <>
+                            <p className="faint">
+                                Diese Vorschläge stehen nicht mehr oben. Sie sind nicht weg —
+                                „Wieder einblenden" holt einen zurück, und ausgeblendet zu sein
+                                ändert nichts an deinem Konto.
+                            </p>
+                            <div className="column-grid">{renderEntries(hidden)}</div>
+                        </>
+                    )}
+                </section>
+            )}
+
+            {hideError !== undefined && <p className="notice notice-danger">{hideError}</p>}
+
             {Object.keys(decisions).length > 0 && (
                 <p className="notice notice-info">
                     {Object.values(decisions).filter((value) => value === 'accepted').length} Regeln
@@ -314,14 +418,9 @@ export function TriagePage(): React.JSX.Element {
                             <button
                                 type="button"
                                 className="button button-quiet"
-                                onClick={() =>
-                                    setDecisions((current) => ({
-                                        ...current,
-                                        [entry.group.key]: 'dismissed',
-                                    }))
-                                }
+                                onClick={() => setHidden(entry.group.key, !hiddenAt.has(entry.group.key))}
                             >
-                                Nicht vorschlagen
+                                {hiddenAt.has(entry.group.key) ? 'Wieder einblenden' : 'Ausblenden'}
                             </button>
                         </div>
 

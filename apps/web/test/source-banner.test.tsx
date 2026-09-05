@@ -33,6 +33,7 @@ const DEMO = {
     problem: undefined,
     history: [],
     historyLimit: undefined,
+    hiddenSuggestions: [],
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 
@@ -45,6 +46,7 @@ const REAL = {
     problem: undefined,
     history: [],
     historyLimit: undefined,
+    hiddenSuggestions: [],
     loading: false,
 } satisfies MailboxStatus & { loading: boolean };
 
