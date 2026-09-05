@@ -218,9 +218,10 @@ function Shell(): React.JSX.Element {
                 {/*
                  * Wrapped, and the wrapper is `display: contents` on anything wider than a phone —
                  * so above that breakpoint the buttons are still direct children of the sidebar and
-                 * nothing about the layout changes. On a phone the wrapper becomes a horizontal
-                 * strip: eight full-width rows there filled the entire first screen, so every page
-                 * began with a menu somebody had to scroll past to reach their own mail.
+                 * nothing about the layout changes. On a phone the wrapper becomes a field of
+                 * chips that wraps onto as many lines as it needs: eight full-width rows there
+                 * filled the entire first screen, so every page began with a menu somebody had to
+                 * scroll past to reach their own mail.
                  */}
                 <div className="nav-items">
                     {nav_.map((entry) => (
@@ -243,11 +244,24 @@ function Shell(): React.JSX.Element {
                  * are looking at their real mailbox.
                  */}
                 <SourceBanner status={status} />
+            </nav>
 
+            {/*
+             * Connecting, syncing and locking — the three things that are about the dashboard
+             * rather than about a page.
+             *
+             * A sibling of the bar rather than a child of it, because on a phone the bar sits
+             * *above* the content and these belong after it: they are what somebody reaches for
+             * once they are done reading, and every page started with them in the way.
+             *
+             * The source banner deliberately does not travel with them. It answers „whose mailbox
+             * is this" and has to be legible *before* the list is, not underneath it.
+             */}
+            <div className="sidebar-tools">
                 <LoginPanel />
                 <SyncPanel />
                 <LockButton />
-            </nav>
+            </div>
 
             <main className="main">
                 {/*

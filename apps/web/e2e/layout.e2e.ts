@@ -66,11 +66,12 @@ const WIDTHS = [1440, 1280, 1160, 1024, 900, 780, 620, 390];
 async function sidewaysScrollers(): Promise<string[]> {
     return harness.page.evaluate(() => {
         /*
-         * `.nav-items` is on this list for the same reason `.sieve-code` is: on a phone it is a
-         * strip that scrolls sideways *on purpose* — eight entries in one swipe instead of eight
-         * rows filling the first screen. Its overflow is the mechanism, not a fault.
+         * `.nav-items` used to be on this list: on a phone it was a strip that scrolled sideways
+         * on purpose. It is a field of wrapping chips now, so the exemption is gone and the
+         * navigation is held to the same rule as every other element — which is the whole reason
+         * for taking it off.
          */
-        const allowed = ['.sieve-code', 'select', 'pre', 'code', '.nav-items'];
+        const allowed = ['.sieve-code', 'select', 'pre', 'code'];
         const found: string[] = [];
 
         for (const element of document.querySelectorAll<HTMLElement>('body *')) {
@@ -218,5 +219,56 @@ describe('the navigation while the content scrolls', () => {
 
         expect(scrolled).toBeGreaterThan(0);
         expect(after).toBeLessThan(before);
+    });
+});
+
+/**
+ * Where connecting, syncing and locking sit.
+ *
+ * On a phone the bar is above the content, so anything at the end of the bar is *before* the page.
+ * Three panels nobody needs on the way in therefore stood between every screen and its own first
+ * line. They belong after the content there, and in the bar where the bar has its own column.
+ *
+ * Measured by position rather than by class, because the arrangement is done entirely in the grid:
+ * the markup order is the same at both widths, which is exactly the kind of thing a reading of the
+ * source would get wrong.
+ */
+describe('the tools panel', () => {
+    async function toolsAndContent(width: number): Promise<{ tools: number; content: number }> {
+        await harness.page.setViewportSize({ width, height: 800 });
+        await harness.page.goto(harness.url, { waitUntil: 'networkidle' });
+        await harness.page.waitForTimeout(200);
+
+        const tools = (await harness.page.locator('.sidebar-tools').boundingBox())?.y ?? 0;
+        const content = (await harness.page.locator('.main').boundingBox())?.y ?? 0;
+        return { tools, content };
+    }
+
+    it('comes after the page on a phone', async () => {
+        const { tools, content } = await toolsAndContent(390);
+
+        expect(tools).toBeGreaterThan(content);
+    });
+
+    it('sits beside the page on a wide screen, where there is a column for it', async () => {
+        const { tools, content } = await toolsAndContent(1440);
+
+        // Same top edge region rather than below: it is in the left column, not under the content.
+        const left = (await harness.page.locator('.sidebar-tools').boundingBox())?.x ?? 0;
+        const mainLeft = (await harness.page.locator('.main').boundingBox())?.x ?? 0;
+        expect(left).toBeLessThan(mainLeft);
+        expect(tools).toBeLessThan(content + 800);
+    });
+
+    it('keeps the source banner out of the move, because that one has to be read first', async () => {
+        // „Whose mailbox is this" is not a tool. Somebody looking at a plausible list of their own
+        // folder names must be able to tell whether it is theirs before they read the list.
+        await harness.page.setViewportSize({ width: 390, height: 800 });
+        await harness.page.goto(harness.url, { waitUntil: 'networkidle' });
+
+        const banner = (await harness.page.locator('.demo-banner').first().boundingBox())?.y ?? 0;
+        const content = (await harness.page.locator('.main').boundingBox())?.y ?? 0;
+
+        expect(banner).toBeLessThan(content);
     });
 });
