@@ -252,8 +252,11 @@ describe('creating a folder', () => {
         harness.setConfirmAnswer('declined');
         await open('Ordner');
 
+        // Named for the folder it removes. The label is hidden on a phone, where the button is
+        // only an icon, so the accessible name is the whole name — and „Löschen" alone would not
+        // say which folder, on a screen listing several.
         await harness.page
-            .getByRole('button', { name: 'Löschen', exact: true })
+            .getByRole('button', { name: /löschen$/ })
             .first()
             .click();
         await harness.page.waitForTimeout(300);

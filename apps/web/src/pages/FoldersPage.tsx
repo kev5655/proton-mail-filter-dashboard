@@ -3,6 +3,8 @@ import { useState } from 'react';
 import type { MailboxFolder } from '@pms/server/types';
 
 import { FolderRenameDialog } from '../components/FolderRenameDialog.js';
+import { PencilIcon, TrashIcon } from '../components/icons.js';
+import { SwipeToDelete } from '../components/SwipeToDelete.js';
 import { log } from '../log.js';
 import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
@@ -116,43 +118,63 @@ function FolderNode({
     const isHighlighted = highlight === folder.Name || highlight?.endsWith(`/${folder.Name}`) === true;
     const [renaming, setRenaming] = useState(false);
 
+    /*
+     * Staging a deletion, from the button and from the gesture alike.
+     *
+     * One function rather than two call sites, so there is no way for the swipe to acquire a
+     * shorter route than the button has. It stages: the diff and the confirmation follow.
+     */
+    const stageDelete = (): void => {
+        log('warn', 'folder.stage-delete', {
+            rules: referencing.length,
+            mails: count,
+        });
+        stage({
+            id: `delete-${folder.ID}`,
+            kind: 'delete-folder',
+            folder: { name: folder.Name },
+        });
+    };
+
     return (
         <li>
-            <div className={isHighlighted ? 'folder-row highlighted' : 'folder-row'}>
-                <span className="folder-name">{folder.Name}</span>
+            <SwipeToDelete label="Löschen" onTrigger={stageDelete}>
+                <div className={isHighlighted ? 'folder-row highlighted' : 'folder-row'}>
+                    <span className="folder-name">{folder.Name}</span>
 
-                {folder.shadowsSystemFolder !== undefined && (
-                    <span className="badge badge-warning">doppelt „{folder.shadowsSystemFolder}"</span>
-                )}
-                {count > 0 && <span className="nav-count">{count} Mails</span>}
+                    {folder.shadowsSystemFolder !== undefined && (
+                        <span className="badge badge-warning">doppelt „{folder.shadowsSystemFolder}"</span>
+                    )}
+                    {count > 0 && <span className="nav-count">{count} Mails</span>}
 
-                <button
-                    type="button"
-                    className="button button-quiet"
-                    onClick={() => {
-                        setRenaming(true);
-                    }}
-                >
-                    Umbenennen
-                </button>
-                <button
-                    type="button"
-                    className="button button-danger-quiet"
-                    onClick={() => {
-                        log('warn', 'folder.stage-delete', {
-                            rules: referencing.length,
-                            mails: count,
-                        });
-                        stage({
-                            id: `delete-${folder.ID}`,
-                            kind: 'delete-folder',
-                            folder: { name: folder.Name },
-                        });
-                    }}
-                >
-                    Löschen
-                </button>
-            </div>
+                    {/*
+                     * Icon and label both. The label is hidden below the phone breakpoint, where
+                     * two words per button took more width than the folder name they sat beside —
+                     * and the name is what the screen is for. `aria-label` carries it either way,
+                     * so nothing is lost to anybody reading by ear.
+                     */}
+                    <button
+                        type="button"
+                        className="button button-quiet icon-button"
+                        aria-label={`„${folder.Name}" umbenennen`}
+                        onClick={() => {
+                            setRenaming(true);
+                        }}
+                    >
+                        <PencilIcon />
+                        <span className="button-label">Umbenennen</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="button button-danger-quiet icon-button"
+                        aria-label={`„${folder.Name}" löschen`}
+                        onClick={stageDelete}
+                    >
+                        <TrashIcon />
+                        <span className="button-label">Löschen</span>
+                    </button>
+                </div>
+            </SwipeToDelete>
 
             {renaming && (
                 <FolderRenameDialog

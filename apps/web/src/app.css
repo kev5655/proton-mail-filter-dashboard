@@ -464,6 +464,87 @@
     padding-left: 22px;
 }
 
+/*
+ * The surface a folder row can be pushed across.
+ *
+ * `overflow: hidden` here is not the thing `css-overflow.test.ts` forbids. That rule is about
+ * hiding a *page-level* symptom — a column wider than the window, clipped so nobody notices. This
+ * is the clip a swipe needs: a moving child has to disappear at the edge of its own row rather
+ * than lengthening the document while a finger is down. At rest nothing overflows at all.
+ */
+.folder-swipe {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* Behind the row, and only ever seen through it. */
+.folder-swipe-action {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.folder-swipe-row {
+    position: relative;
+    background: var(--surface);
+    /* Ours is the horizontal axis; the page keeps the vertical one, so the list still scrolls. */
+    touch-action: pan-y;
+}
+
+.folder-swipe-row.is-sliding {
+    /* No transition while a finger is on it — the row should track the thumb, not chase it. */
+    transition: none;
+}
+
+.folder-swipe-row:not(.is-sliding) {
+    transition: transform 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .folder-swipe-row:not(.is-sliding) {
+        transition: none;
+    }
+}
+
+/*
+ * A button that is a mark on a wide screen and only a mark on a phone.
+ *
+ * The label is hidden rather than dropped from the markup, so the accessible name never depends on
+ * the width of the window. `min-height` is the touch target: 44px is the smallest thing a thumb
+ * hits reliably, and two of these sit beside a name somebody is trying to read.
+ */
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+}
+
+.icon-button > svg {
+    flex: none;
+}
+
+@media (max-width: 620px) {
+    .icon-button > .button-label {
+        display: none;
+    }
+
+    .icon-button {
+        min-width: 44px;
+        min-height: 44px;
+        justify-content: center;
+        padding: 6px;
+    }
+}
+
 .folder-row {
     display: flex;
     align-items: center;
