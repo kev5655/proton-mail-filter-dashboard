@@ -10,19 +10,27 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@pms/apply": "workspace:*",
     "@pms/changes": "workspace:*",
     "@pms/demo": "workspace:*",
     "@pms/grouping": "workspace:*",
     "@pms/llm": "workspace:*",
     "@pms/mail-view": "workspace:*",
+    "@pms/proton-api": "workspace:*",
     "@pms/rules": "workspace:*",
+    "@pms/server": "workspace:*",
+    "@pms/store": "workspace:*",
+    "@pms/sync": "workspace:*",
     "@proton/sieve": "workspace:*",
+    "@simplewebauthn/browser": "^13.3.0",
     "react": "^19.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "react-dom": "^19.2.0"
+    "playwright": "^1.62.1",
+    "react-dom": "^19.2.0",
+    "vite": "^8.2.2"
   }
 }

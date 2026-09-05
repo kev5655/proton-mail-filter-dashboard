@@ -2,17 +2,17 @@ import { FilterStatement } from '@proton/sieve/filterModel';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { App } from '../src/App.js';
+import { Dashboard } from '../src/App.js';
 import { FoldersPage } from '../src/pages/FoldersPage.js';
 import { RulesPage } from '../src/pages/RulesPage.js';
 import { TriagePage } from '../src/pages/TriagePage.js';
 import { MailList } from '../src/components/MailList.js';
 import { RuleConditions } from '../src/components/RuleConditions.js';
-import { rules } from '../src/data.js';
-import { AppStateProvider } from '../src/state.js';
+import { DEMO_RULES as rules } from '@pms/demo';
+import { Providers } from './harness.js';
 import { ChangesPage } from '../src/pages/ChangesPage.js';
 import { HistoryPage } from '../src/pages/HistoryPage.js';
-import { LogPage } from '../src/pages/LogPage.js';
+import { ActivityLog } from '../src/components/ActivityLog.js';
 import { StoreProvider } from '../src/store.js';
 
 /**
@@ -31,9 +31,7 @@ import { StoreProvider } from '../src/store.js';
  */
 function render(element: React.JSX.Element): string {
     return renderToStaticMarkup(
-        <AppStateProvider>
-            <StoreProvider>{element}</StoreProvider>
-        </AppStateProvider>
+<Providers withStore>{element}</Providers>
     );
 }
 
@@ -64,6 +62,28 @@ describe('the rules page', () => {
 
     it('warns when a rule files into a folder that shadows a Proton system folder', () => {
         expect(text(html)).toContain('Zielordner doppelt');
+    });
+
+    it('marks a rule nobody has taken responsibility for, and does not offer it for editing', () => {
+        // It used to sit here indistinguishable from the rest and fully editable, while at the same
+        // time asking to be adopted on „Änderungen" — so the same rule was both under management and
+        // awaiting a decision about whether it should be. Editing it would have answered that
+        // question by accident.
+        const body = text(html);
+        expect(body).toContain('nicht bestätigt');
+        expect(body).toContain('sie läuft trotzdem');
+        // Listed, not hidden: it is running at Proton right now, and a list of rules that leaves
+        // out a running rule is worse than one that explains it.
+        expect(body).toContain('Zahnarzt');
+    });
+
+    it('does not call a switched-off rule active', () => {
+        // The badge used to be a verdict about how well a rule works, and its `default:` branch
+        // said „aktiv" — including for a rule Proton is not running at all. Being confidently wrong
+        // in green about somebody else's account is the worst version of this bug.
+        const body = text(html);
+        expect(body).toContain('Rechnungen ablegen (pausiert)');
+        expect(body).toContain('deaktiviert');
     });
 
     it('distinguishes a script filter from a clickable Proton filter', () => {
@@ -148,7 +168,7 @@ describe('the triage page', () => {
 
     it('offers nothing destructive without a click', () => {
         expect(text(html)).toContain('Regel anlegen');
-        expect(text(html)).toContain('Nicht vorschlagen');
+        expect(text(html)).toContain('Ausblenden');
     });
 });
 
@@ -173,7 +193,10 @@ describe('the folders page', () => {
 });
 
 describe('the shell', () => {
-    const html = render(<App />);
+    // The dashboard, not `App`: `App` waits for the server's answer about whether anything is
+    // locked, and a synchronous render never gets past that wait. The gate is checked in
+    // `lock-screen.test.tsx`, which can await.
+    const html = render(<Dashboard />);
 
     it('says on every screen that this is demo data', () => {
         // Someone looking at a plausible list of folder names must never wonder whether it is real.
@@ -209,16 +232,22 @@ describe('changes made in Proton itself', () => {
         expect(text(html)).toContain('Steuern 2026');
     });
 
-    it('rejects by disabling, not deleting', () => {
-        // Someone wrote that rule on purpose. Losing it to a misclick in a review screen would be a
-        // poor trade for tidiness.
-        expect(text(html)).toContain('Ablehnen (deaktivieren)');
-        expect(text(html)).toContain('zweite, ausdrückliche Entscheidung');
+    it('offers disabling alongside deleting, and names both', () => {
+        // Someone wrote that rule on purpose, so „ablehnen" must not silently mean „delete". Both
+        // are offered and both say what they are; deleting additionally asks in the terminal, which
+        // is `weigh`'s job rather than this screen's.
+        expect(text(html)).toContain('Deaktivieren');
+        expect(text(html)).toContain('Löschen');
+    });
+
+    it('says that adopting changes nothing at the account', () => {
+        // The distinction the screen turns on: two of the three answers write, one does not.
+        expect(text(html)).toContain('Übernehmen ändert nichts am Konto');
     });
 });
 
 describe('the log', () => {
-    const html = render(<LogPage />);
+    const html = render(<ActivityLog />);
 
     it('offers an export and says what it does not contain', () => {
         expect(text(html)).toContain('Bericht kopieren');

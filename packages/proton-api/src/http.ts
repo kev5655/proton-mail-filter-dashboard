@@ -69,6 +69,14 @@ interface RequestOptions {
     anonymous?: boolean;
     /** Extra headers for this one request. Merged last, so it can override the defaults. */
     headers?: Record<string, string>;
+    /**
+     * Look at the successful response before its body is read.
+     *
+     * Only `auth/refresh` needs this, and only for `Set-Cookie`: in cookie mode Proton rotates the
+     * session in the headers, and a caller that reads the body alone keeps sending the cookies it
+     * was given at login until they stop working.
+     */
+    observe?: (response: Response) => void;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -168,6 +176,24 @@ export class ProtonHttp {
     }
 
     async #send(options: RequestOptions): Promise<unknown> {
+        /*
+         * No session, no request — unless the caller said the request is anonymous.
+         *
+         * Clearing the session used to be quieter than it looked: the request still went out, just
+         * without the auth headers, and Proton answered 401. That is a pointless request to a
+         * service this project is deliberately polite to, and it made "signed out" a weaker
+         * statement than it reads as — the client was still talking, just badly.
+         *
+         * Only the first call of the login handshake is genuinely anonymous, and it says so.
+         */
+        if (options.anonymous !== true && this.#session === undefined) {
+            throw new AppError('SESSION_DISCONNECTED', {
+                message: 'Es besteht keine Sitzung zu Proton.',
+                hint: 'Im Dashboard neu verbinden. Es wurde nichts gesendet.',
+                context: { endpoint: `${options.method} ${options.path}` },
+            });
+        }
+
         const url = new URL(`${this.#baseUrl}/${options.path}`);
         for (const [key, value] of Object.entries(options.query ?? {})) {
             if (value !== undefined) {
@@ -224,6 +250,7 @@ export class ProtonHttp {
             }
 
             log.debug({ endpoint, status: response.status, attempt }, 'proton request ok');
+            options.observe?.(response);
             return (await response.json()) as unknown;
         }
 

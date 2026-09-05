@@ -1,13 +1,17 @@
-export { syncAll, type SyncOptions, type SyncProgress, type SyncResult, type SyncWindow } from './sync.js';
+export { refreshAccountObjects, syncAll, type SyncOptions, type SyncProgress, type SyncResult, type SyncWindow } from './sync.js';
 export {
+    markAdopted,
     mirrorFilters,
     mirrorLabels,
     mirrorMessages,
+    recordCategoryObservations,
     getMeta,
     setMeta,
     type Snapshot,
 } from './mirror.js';
 export {
+    readCategoryChanges,
+    readCategoryObservations,
     readFilters,
     readFolderTree,
     readMessages,
@@ -16,3 +20,19 @@ export {
     type StoredFolder,
     type StoredMessage,
 } from './query.js';
+export {
+    clearJournal,
+    JOURNAL_LIMIT,
+    markUndone,
+    pruneJournal,
+    readJournal,
+    readJournalEntry,
+    readJournalSince,
+    recordJournalEntry,
+    type StoredEntry,
+} from './journal-store.js';
+export {
+    readHiddenSuggestions,
+    setSuggestionHidden,
+    type HiddenSuggestion,
+} from './hidden-suggestions.js';

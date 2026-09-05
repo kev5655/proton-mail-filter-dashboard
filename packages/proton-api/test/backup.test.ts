@@ -42,7 +42,11 @@ function fakeProton(): ProtonHttp {
         });
     }) as typeof fetch;
 
-    return new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 });
+    const http = new ProtonHttp({ version: '0.0.0', fetchImpl, minIntervalMs: 0, jitterMs: 0 });
+    // A client with no session refuses anything that is not the login handshake, so a test about
+    // backups has to have one.
+    http.setSession({ uid: 'u', accessToken: 'a', refreshToken: 'r' });
+    return http;
 }
 
 describe('backing up before a write', () => {

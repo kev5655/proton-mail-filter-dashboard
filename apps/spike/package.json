@@ -8,10 +8,14 @@
     "start": "vite-node --config ../../vite.config.ts src/main.ts"
   },
   "dependencies": {
+    "@pms/account": "workspace:*",
+    "@pms/apply": "workspace:*",
     "@pms/browser-auth": "workspace:*",
+    "@pms/changes": "workspace:*",
     "@pms/core": "workspace:*",
     "@pms/credentials": "workspace:*",
     "@pms/proton-api": "workspace:*",
+    "@pms/server": "workspace:*",
     "@pms/store": "workspace:*",
     "@pms/sync": "workspace:*",
     "@proton/sieve": "workspace:*"

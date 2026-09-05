@@ -13,11 +13,13 @@ import {
 } from '@pms/proton-api';
 
 import { credentialConfig } from './credentials.js';
-import { FIXTURE_DIR, loadEnvFile } from './paths.js';
+import { FIXTURE_DIR, loadEnvFile, logFilePath } from './paths.js';
 import { terminal } from './prompt.js';
 import { scrub, SCRUB_NOTE } from './scrub.js';
 import { clearLockout, connect } from './session.js';
+import { runServe } from './serve-command.js';
 import { runSync } from './sync-command.js';
+import { runWriteProbe } from './write-probe.js';
 import { describeItem } from '@pms/credentials';
 
 /**
@@ -107,15 +109,35 @@ async function describeCredentialItem(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-    loadEnvFile();
-    configureLogging({ level: (process.env['LOG_LEVEL'] as 'info') ?? 'info' });
+    const env = loadEnvFile();
+    const logFile = logFilePath();
+    configureLogging({
+        level: (process.env['LOG_LEVEL'] as 'info') ?? 'info',
+        ...(logFile === undefined ? {} : { file: logFile, fileLevel: 'debug' }),
+    });
+
+    // Said once, up front. A setting that was never read looks exactly like a setting that was read
+    // and ignored, and the difference is usually a `.env` sitting one directory over.
+    if (!env.found) {
+        console.log(`\nKeine .env gefunden (erwartet unter ${env.path}). Es gelten nur die Vorgaben.`);
+    }
 
     if (process.argv.includes('--sync')) {
         await runSync(process.argv);
         return;
     }
 
-    if (process.argv.includes('--sperre-geklaert')) {
+    if (process.argv.includes('--write-test')) {
+        await runWriteProbe(process.argv);
+        return;
+    }
+
+    if (process.argv.includes('--serve')) {
+        await runServe(process.argv);
+        return;
+    }
+
+    if (process.argv.includes('--lockout-cleared')) {
         const cleared = await clearLockout();
         if (cleared === undefined) {
             console.log('\nKeine Kontosperre vermerkt — es gibt nichts freizugeben.\n');

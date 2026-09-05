@@ -42,6 +42,7 @@ export default defineConfig({
     },
     test: {
         include: ['packages/*/test/**/*.test.{ts,tsx}', 'apps/*/test/**/*.test.{ts,tsx}'],
+        setupFiles: ['./vitest.setup.ts'],
         environment: 'node',
         server: {
             deps: { inline: protonSources },

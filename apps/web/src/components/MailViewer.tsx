@@ -3,6 +3,9 @@ import { useMemo, useState } from 'react';
 import { bodyFor } from '@pms/demo';
 import { buildFrameDocument, sanitizeMailHtml } from '@pms/mail-view';
 
+import { useMailboxStatus } from '../mailbox.js';
+import { useSettings } from '../llm.js';
+import { protonMailUrl } from '../proton-link.js';
 import type { ListableMessage } from './MailList.js';
 
 /**
@@ -19,6 +22,14 @@ import type { ListableMessage } from './MailList.js';
  *
  * Links are listed with their real targets, because the sandbox stops them navigating and because a
  * link whose text disagrees with its destination should be visible, not discovered.
+ *
+ * **There is no body for real mail, and this says so.** Proton encrypts bodies end to end; their
+ * metadata endpoint carries none, and nothing is stored locally. Until then this component called
+ * `bodyFor(subject)` from the demo package for *every* message, which for a real subject fell
+ * through to a placeholder reading "Diese Demo-Mail hat keinen eigenen Inhalt." So a real
+ * advertising mail appeared to have no content and no images — and the check that remote images
+ * stay blocked passed against a body that never existed. A test that passes for the wrong reason
+ * is worse than one that fails.
  */
 export function MailViewer({
     message,
@@ -28,11 +39,16 @@ export function MailViewer({
     onClose: () => void;
 }): React.JSX.Element {
     const [allowImages, setAllowImages] = useState(false);
-    const body = bodyFor(message.Subject);
+    const { source } = useMailboxStatus();
+    const settings = useSettings();
+
+    // Only the demo has bodies, and not for every message even there. Inventing one was the whole
+    // bug this component just had.
+    const body = source === 'demo' ? bodyFor(message.Subject) : undefined;
 
     const sanitized = useMemo(
-        () => sanitizeMailHtml(body.html, { allowRemoteImages: allowImages }),
-        [body.html, allowImages]
+        () => sanitizeMailHtml(body?.html ?? '', { allowRemoteImages: allowImages }),
+        [body?.html, allowImages]
     );
 
     const frame = useMemo(
@@ -69,6 +85,26 @@ export function MailViewer({
                 </header>
 
                 <div className="viewer-notices">
+                    {body === undefined && (
+                        <div className="notice notice-info">
+                            <strong>Kein Inhalt vorhanden.</strong>{' '}
+                            {source === 'demo'
+                                ? 'Für diese Demo-Mail wurde kein Text hinterlegt.'
+                                : 'Proton verschlüsselt den Text einer Mail Ende zu Ende; über die Schnittstelle, aus der dieses Dashboard liest, kommt er nicht mit.'}{' '}
+                            Angezeigt werden hier deshalb nur Absender, Betreff und Datum.
+                            <div style={{ marginTop: 8 }}>
+                                <a
+                                    className="button button-secondary"
+                                    href={protonMailUrl(message, settings.proton)}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                >
+                                    Bei Proton öffnen
+                                </a>
+                            </div>
+                        </div>
+                    )}
+
                     {sanitized.blockedImageCount > 0 && !allowImages && (
                         <div className="notice notice-warning">
                             <strong>
@@ -130,6 +166,7 @@ export function MailViewer({
                  * access. Combined with the CSP inside the document, a reference the sanitiser
                  * missed still cannot fetch or execute anything.
                  */}
+                {body !== undefined && (
                 <iframe
                     className="viewer-frame"
                     title={`Inhalt: ${message.Subject}`}
@@ -137,6 +174,7 @@ export function MailViewer({
                     srcDoc={frame}
                     referrerPolicy="no-referrer"
                 />
+                )}
 
                 {sanitized.links.length > 0 && (
                     <section className="viewer-links">

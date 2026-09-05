@@ -1,7 +1,64 @@
+/*
+ * A grid track sized `1fr` still takes its *automatic minimum* from its content, so one long
+ * subject or one wide table pushed this column past the viewport and made the whole page scroll
+ * sideways. `minmax(0, …)` is what actually says "you may be narrower than your content"; every
+ * flexible track in this file needs it, and `css-overflow.test.ts` checks that they have it.
+ */
 .shell {
     display: grid;
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: 232px minmax(0, 1fr);
+    /*
+     * Named areas rather than source order, because the two differ on a phone: the tools follow
+     * the content there and sit under the navigation here. `minmax(0, max-content)` on the first
+     * row is what lets the bar keep its natural height when there is room and still shrink — and
+     * therefore scroll — when there is not.
+     */
+    grid-template-rows: minmax(0, max-content) minmax(0, 1fr);
+    grid-template-areas:
+        'nav main'
+        'tools main';
     min-height: 100vh;
+}
+
+.sidebar {
+    grid-area: nav;
+}
+
+.sidebar-tools {
+    grid-area: tools;
+}
+
+.main {
+    grid-area: main;
+}
+
+/*
+ * The navigation stays put; only the content beside it scrolls.
+ *
+ * Above the breakpoint the two columns sit side by side, and letting the *page* scroll moved both —
+ * so reading down a long rule list carried the navigation off the top of the screen. Making the
+ * shell exactly one viewport tall and giving each column its own scrollport fixes that.
+ *
+ * Only above the breakpoint, and that matters: below it the grid collapses to one column with the
+ * bar *above* the content, where a fixed bar would eat half a narrow screen. 780px is one of the
+ * five widths `layout.e2e.ts` checks, so this case is exercised rather than assumed.
+ *
+ * The sidebar gets a scrollport of its own as well. It carries the brand, nine entries, the source
+ * banner and the login and sync panels — on a short window that is taller than the screen, and
+ * "fixed" must not come to mean "unreachable".
+ */
+@media (min-width: 861px) {
+    .shell {
+        height: 100vh;
+        /* The window itself has nothing left to scroll, which is what keeps the bar still. */
+        overflow: hidden;
+    }
+
+    .sidebar,
+    .sidebar-tools,
+    .main {
+        overflow-y: auto;
+    }
 }
 
 /* ---------------------------------------------------------------- sidebar */
@@ -9,7 +66,20 @@
 .sidebar {
     background: var(--sidebar);
     border-right: 1px solid var(--border);
-    padding: 16px 12px;
+    padding: 16px 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/*
+ * The lower half of the same column, and it has to look like the same column: two elements with
+ * one background, the padding split between them so the seam falls inside the gap.
+ */
+.sidebar-tools {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    padding: 4px 12px 16px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -18,8 +88,13 @@
 .brand {
     padding: 4px 10px 16px;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 10px;
+}
+
+.brand-mark {
+    flex: none;
+    border-radius: 7px;
 }
 
 .brand strong {
@@ -75,9 +150,14 @@
 
 /* ---------------------------------------------------------------- layout */
 
+/*
+ * Full width on purpose: the lists are the content, and capping them at 1080px cut them off on a
+ * wide screen. Prose is capped where prose lives (`.page-head p`, `.notice`) rather than by
+ * narrowing everything to suit it.
+ */
 .main {
     padding: 24px 28px 48px;
-    max-width: 1080px;
+    min-width: 0;
 }
 
 .page-head {
@@ -103,6 +183,33 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
+    min-width: 0;
+}
+
+/*
+ * The heading side takes whatever room is left.
+ *
+ * Without it both sides shrink together, so a long title wrapped to two lines while the buttons
+ * beside it wrapped one under the other — and the buttons then sat at a different left edge on
+ * every card, which is what made the column look accidental.
+ */
+.card-head > .stack {
+    flex: 1 1 auto;
+}
+
+/*
+ * What a card offers, against its right edge.
+ *
+ * One group rather than loose buttons: they wrap together onto the next line and stay aligned with
+ * each other, instead of each finding its own place.
+ */
+.card-actions {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
 }
 
 .stack {
@@ -193,23 +300,50 @@
     background: var(--bg);
 }
 
+/*
+ * The quiet button is still a button.
+ *
+ * It used to be transparent with no border, which made „Umbenennen" and „Löschen" read as labels
+ * sitting next to a folder name — you had to hover to discover they did anything. Quiet means less
+ * emphasis than the primary action, not invisible: a surface a shade off the page and a real border
+ * are the two things that say „this is pressable" before the pointer arrives.
+ */
 .button-quiet {
-    background: transparent;
-    color: var(--text-muted);
-    border-color: transparent;
-    padding: 6px 8px;
+    background: var(--bg);
+    color: var(--text);
+    border-color: var(--border);
+    padding: 6px 10px;
 }
 
 .button-quiet:hover {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border-strong);
+}
+
+/*
+ * The result of the last change, above whichever screen is showing.
+ *
+ * Its dialog closes itself when the change lands; this is what stays. It sits at the top of the
+ * main column rather than floating, because a floating toast that disappears takes the backup path
+ * with it.
+ */
+.apply-result {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.apply-result code {
+    overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- rule + mail lists */
 
 .rule-row {
     display: grid;
-    grid-template-columns: 28px 1fr auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
     gap: 12px;
     align-items: center;
     padding: 12px 14px;
@@ -259,9 +393,12 @@
     flex-direction: column;
 }
 
+/* Flex rather than grid: a row carries between two and five things — checkbox, the message, an
+   optional note, the date, an optional link to Proton — and a fixed set of grid tracks cannot hold
+   an optional middle child without the others sliding under it. */
 .mail-list li {
-    display: grid;
-    grid-template-columns: 1fr auto;
+    display: flex;
+    align-items: center;
     gap: 12px;
     padding: 7px 0;
     border-top: 1px solid var(--border);
@@ -277,13 +414,24 @@
 .mail-sender {
     color: var(--text-faint);
     font-size: 12px;
+    /* A long address widens the row exactly like a long subject does. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
+/* Prose, not data: capped so it stays readable now that `.main` is full width. */
 .notice {
+    max-width: 78ch;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
     font-size: 13px;
-    margin: 10px 0 0;
+    /*
+     * Spaced on both sides. It used to carry a top margin only, which reads fine when a notice is
+     * the last thing in a block and wrong the moment something follows it: on „Vorschläge" the
+     * search field sat flush against the coloured box with no gap at all.
+     */
+    margin: 12px 0;
     line-height: 1.45;
 }
 
@@ -314,6 +462,87 @@
     list-style: none;
     margin: 0;
     padding-left: 22px;
+}
+
+/*
+ * The surface a folder row can be pushed across.
+ *
+ * `overflow: hidden` here is not the thing `css-overflow.test.ts` forbids. That rule is about
+ * hiding a *page-level* symptom — a column wider than the window, clipped so nobody notices. This
+ * is the clip a swipe needs: a moving child has to disappear at the edge of its own row rather
+ * than lengthening the document while a finger is down. At rest nothing overflows at all.
+ */
+.folder-swipe {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* Behind the row, and only ever seen through it. */
+.folder-swipe-action {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.folder-swipe-row {
+    position: relative;
+    background: var(--surface);
+    /* Ours is the horizontal axis; the page keeps the vertical one, so the list still scrolls. */
+    touch-action: pan-y;
+}
+
+.folder-swipe-row.is-sliding {
+    /* No transition while a finger is on it — the row should track the thumb, not chase it. */
+    transition: none;
+}
+
+.folder-swipe-row:not(.is-sliding) {
+    transition: transform 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .folder-swipe-row:not(.is-sliding) {
+        transition: none;
+    }
+}
+
+/*
+ * A button that is a mark on a wide screen and only a mark on a phone.
+ *
+ * The label is hidden rather than dropped from the markup, so the accessible name never depends on
+ * the width of the window. `min-height` is the touch target: 44px is the smallest thing a thumb
+ * hits reliably, and two of these sit beside a name somebody is trying to read.
+ */
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+}
+
+.icon-button > svg {
+    flex: none;
+}
+
+@media (max-width: 620px) {
+    .icon-button > .button-label {
+        display: none;
+    }
+
+    .icon-button {
+        min-width: 44px;
+        min-height: 44px;
+        justify-content: center;
+        padding: 6px;
+    }
 }
 
 .folder-row {
@@ -366,12 +595,24 @@
 
 @media (max-width: 860px) {
     .shell {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+        /* One column, and the tools move to the end — after the page, not before it. */
+        grid-template-rows: max-content max-content max-content;
+        grid-template-areas:
+            'nav'
+            'main'
+            'tools';
     }
 
     .sidebar {
         border-right: 0;
         border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-tools {
+        border-right: 0;
+        border-top: 1px solid var(--border);
+        padding: 12px;
     }
 }
 
@@ -381,14 +622,67 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    align-items: flex-start;
+    /*
+     * `flex-start` here sized the children to their content instead of to the button, so a long
+     * subject took its full width inside a narrow row and the ellipsis never had anything to clip.
+     * Found by measuring in a browser: 232 pixels of text in a 168 pixel button.
+     */
+    align-items: stretch;
     background: none;
     border: 0;
     padding: 0;
     text-align: left;
+    /* The growing child in a flex row, and the only one allowed to shrink below its content. */
+    flex: 1 1 auto;
     min-width: 0;
     color: inherit;
     border-radius: 4px;
+}
+
+/*
+ * A row that holds space and nothing else.
+ *
+ * The pager sits under a list whose height is however many rows it has, so a last page with three
+ * of ten moved „Weiter" up by seven rows — out from under the cursor that had just been clicking
+ * it. Filler rows rather than a min-height in pixels: they reuse the real row's own boxes, so they
+ * are exactly one row tall and stay that way when a row changes.
+ */
+/*
+ * A section heading that is also its own collapse control.
+ *
+ * Styled to stay a heading: the button carries no chrome of its own, so the page still reads as
+ * headings and sections rather than as a row of controls. The caret is the only thing that says it
+ * can be clicked, and `aria-expanded` says it to anything that cannot see the caret.
+ */
+/*
+ * A rule this tool did not write and nobody has taken responsibility for.
+ *
+ * Dimmed rather than hidden: it is running at Proton right now, and a list of rules that leaves out
+ * a running rule is worse than one that explains it. It is not editable — a decision about whether
+ * to manage it belongs on „Änderungen", and editing it here would answer that question by accident.
+ */
+.rule-row.unconfirmed {
+    opacity: 0.72;
+    border-left: 3px solid var(--warning);
+}
+
+.section-toggle {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.section-toggle:hover {
+    color: var(--accent);
+}
+
+.mail-row-filler {
+    visibility: hidden;
+    pointer-events: none;
 }
 
 .mail-open:hover .mail-subject {
@@ -545,7 +839,6 @@
 /* ---------------------------------------------------------------- selection */
 
 .mail-list li {
-    grid-template-columns: auto 1fr auto;
     align-items: center;
 }
 
@@ -644,8 +937,11 @@
     padding: 2px 10px 8px 10px;
 }
 
+/* `width: 100%` is ignored by a table whose min-content is wider, so the layout has to be fixed
+   and long values have to be allowed to break. Without both, the diff dragged the page sideways. */
 .diff-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     margin-top: 12px;
     font-size: 13px;
@@ -665,11 +961,58 @@
     padding: 8px 10px 8px 0;
     border-top: 1px solid var(--border);
     vertical-align: top;
+    overflow-wrap: anywhere;
 }
 
 .diff-table .mail-subject,
 .diff-table .mail-sender {
     display: block;
+}
+
+/* ---------------------------------------------------------------- list tools */
+
+.mail-list-block {
+    min-width: 0;
+}
+
+.mail-list-tools {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.mail-search {
+    flex: 0 1 280px;
+    min-width: 0;
+}
+
+.mail-date {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.mail-link {
+    flex: 0 0 auto;
+    text-decoration: none;
+    color: var(--text-faint);
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+}
+
+.mail-link:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.pager {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
 }
 
 .text-input {
@@ -689,4 +1032,900 @@
 .button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- rule editor */
+
+/*
+ * List left, editor right. Both tracks are minmax(0, …) for the same reason every other flexible
+ * track in this file is: a long subject in the preview would otherwise widen the column.
+ */
+.rules-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .rules-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.rule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.rule-list .rule-row[aria-current='true'] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.rule-detail {
+    min-width: 0;
+}
+
+.rule-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    background: var(--surface);
+    min-width: 0;
+}
+
+.editor-section {
+    min-width: 0;
+}
+
+.editor-section > h3 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
+
+.editor-section > h4 {
+    margin: 0 0 6px;
+    font-size: 13px;
+}
+
+.bare-fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}
+
+.statement-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.radio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    min-width: 0;
+}
+
+/*
+ * Options where the explanation starts at the same place on every row.
+ *
+ * As plain flex rows, each explanation began wherever its own label happened to end, so „Aus" and
+ * „Anbieter mit API-Schlüssel" pushed their text to two very different columns and the list read
+ * as three unrelated sentences. One grid for the whole group, with the rows dissolved into it,
+ * gives all of them the same three columns.
+ *
+ * A class of its own rather than a change to `.radio-row`, which the rule editor uses for single
+ * rows where a shared column width would mean nothing.
+ */
+.choice-grid {
+    display: grid;
+    grid-template-columns: auto max-content minmax(0, 1fr);
+    align-items: baseline;
+    gap: 6px 8px;
+    font-size: 13px;
+}
+
+.choice-grid > .radio-row {
+    display: contents;
+}
+
+/* The label column may wrap on a narrow screen; the grid keeps the explanations lined up anyway. */
+@media (max-width: 620px) {
+    .choice-grid {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .choice-grid > .radio-row > .faint {
+        grid-column: 2;
+    }
+}
+
+.condition-editor {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 10px;
+    min-width: 0;
+}
+
+.condition-editor-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.condition-editor-row select {
+    flex: 0 1 auto;
+}
+
+.chips {
+    min-width: 0;
+}
+
+.chips-input {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.chips-input .text-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.chip-joiner {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-right: 6px;
+}
+
+.value-chip-warning {
+    border-color: var(--warning, #c98a00);
+}
+
+.chip-remove {
+    background: none;
+    border: 0;
+    padding: 0 0 0 6px;
+    cursor: pointer;
+    color: inherit;
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* The two preview columns. Each scrolls its own content rather than the page. */
+.split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.suggestion-section {
+    margin-bottom: 28px;
+    min-width: 0;
+}
+
+.suggestion-section > h2 {
+    margin: 0 0 2px;
+    font-size: 15px;
+}
+
+.suggestion-section > p.faint {
+    margin: 0 0 12px;
+    max-width: 78ch;
+}
+
+/* ---------------------------------------------------------------- sync */
+
+.sync-panel {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.progress-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 200ms linear;
+}
+
+/*
+ * The indeterminate state, and it is meant to look different rather than full.
+ *
+ * Proton does not report a message total until the first page comes back, so for a moment there is
+ * genuinely no percentage. A bar filled to an invented number would be a small lie in a tool whose
+ * argument is that it does not tell them.
+ */
+.progress-unknown {
+    width: 40%;
+    animation: progress-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-sweep {
+    0% { margin-left: -40%; }
+    100% { margin-left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .progress-unknown {
+        animation: none;
+        width: 100%;
+        opacity: 0.4;
+    }
+}
+
+/*
+ * The spinner inside a button that is waiting on something.
+ *
+ * Sized in `em` so it follows the button's text rather than needing its own scale, and drawn from a
+ * border so it costs no image. `currentColor` on one edge means it works on the accent button and
+ * on a quiet one without a second rule.
+ */
+.spinner {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 6px;
+    vertical-align: -0.08em;
+    border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* Still visible as a state, just not moving. Someone who asked for less motion still needs to
+       know the button is busy. */
+    .spinner {
+        animation: none;
+        border-top-color: transparent;
+        opacity: 0.6;
+    }
+}
+
+/*
+ * The two preview columns, kept in step.
+ *
+ * Their search boxes have to start at the same y, and they did not: the right column carries a
+ * toggle and a longer sentence, which pushed it down by its own height. Fixing it by nudging a
+ * margin would break again the moment either sentence changes length, so the header is a fixed
+ * block of one heading plus one line and the columns are a grid whose rows align.
+ */
+.preview-column {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    align-content: start;
+    min-width: 0;
+}
+
+.preview-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 52px;
+    margin-bottom: 6px;
+}
+
+.preview-head > h4 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0;
+}
+
+.preview-head > p {
+    margin: 0;
+}
+
+/*
+ * Lists on the Auto-Regeln screen.
+ *
+ * No bullets: every entry there is a full sentence about one sender, and a bullet in front of a
+ * sentence reads as a fragment. The indent is dropped for the same reason the folder tree keeps
+ * one — this list has no hierarchy to show.
+ */
+.plain-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.plain-list li {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- lock screen */
+
+/*
+ * The gate. Deliberately not the dashboard shell: there is no navigation to offer, nothing to
+ * scroll and no mailbox behind it — the server cannot open one until this form is answered.
+ */
+.lock-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+}
+
+.lock-card {
+    width: 100%;
+    max-width: 460px;
+    padding: 28px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.lock-card h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+.lock-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.field-error {
+    font-weight: 400;
+    color: var(--danger);
+}
+
+/*
+ * A column of form controls with one rhythm.
+ *
+ * Buttons and `.row` carry no margin of their own, and for a long time none was needed: everywhere
+ * they were first used they sat inside a container with its own `gap`. Placed straight under an
+ * input or a notice they ended up flush against it, which is what a button under a text field looks
+ * like when nobody has said how far apart they should be.
+ *
+ * The gap lives on the container rather than on the button, so the answer stays in one place: a
+ * margin on `.button` would be wrong inside every `.row` that already spaces its children.
+ */
+.form-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+/* Margins would add to the gap and make the rhythm depend on which element came first. */
+.form-stack > .field,
+.form-stack > .notice,
+.form-stack > p,
+.form-stack > h1,
+.form-stack > h3,
+.form-stack > .plain-list {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Buttons take only the width they need; everything else fills the column. */
+.form-stack > .field,
+.form-stack > .notice,
+.form-stack > p,
+.form-stack > h1,
+.form-stack > h3,
+.form-stack > .plain-list {
+    align-self: stretch;
+}
+
+/*
+ * A capped field, because a card is wider than any of these answers.
+ *
+ * A password box the full width of a settings card reads as a place to write a sentence. The cap is
+ * on the field rather than on the input so the label and its explanation wrap with it.
+ */
+.form-stack > .field {
+    max-width: 420px;
+}
+
+/* Six digits, or a number of minutes. A wide box invites a wide answer. */
+.form-stack > .field-narrow {
+    max-width: 220px;
+}
+
+/* A block inside a settings card: its own heading, separated from the one above it. */
+.settings-block {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.settings-block:first-of-type {
+    margin-top: 14px;
+}
+
+.settings-block h3 {
+    font-size: 14px;
+    margin: 0 0 4px;
+}
+
+/*
+ * Everything inside a card is spaced from the thing above it. One rule, not a list.
+ *
+ * It was a list, and the list kept being incomplete: buttons had no margin, then rows had none,
+ * then a mail list unfolded straight against the row of buttons above it. Each was fixed where it
+ * was noticed, which is how a fourth one was always going to appear.
+ *
+ * Two halves, and the order matters. First the elements that carry a top margin of their own are
+ * stripped of it — through `:where()`, which contributes no specificity, so the rule below can
+ * still win. Then every child except the first is spaced. The first is exempt because a card's
+ * padding already spaces it, and pushing it down would read as the card having two paddings.
+ */
+.card > :where(p, .notice, .field, .plain-list, .mail-list-block, table, .row, .button),
+.editor-section > :where(p, .notice, .field, .plain-list, .mail-list-block, table, .row, .button, .split) {
+    margin-top: 0;
+}
+
+.card > * + *,
+.editor-section > * + * {
+    margin-top: 12px;
+}
+
+/*
+ * Headings and notices keep their own bottom margin, which would add to the gap above whatever
+ * follows.
+ *
+ * Zeroed here rather than in their own rules, because outside these containers the margin is still
+ * what spaces them — a notice standing on a page has nothing else to hold the next thing off it.
+ */
+.card > :where(h2, h3, h4, .notice),
+.editor-section > :where(h2, h3, h4, .notice) {
+    margin-bottom: 0;
+}
+
+/*
+ * A mail list unfolds under whatever asked for it — a row of buttons, a sentence, a notice — and
+ * needs its own space wherever that is, not only as a card's direct child.
+ */
+.mail-list-block:not(:first-child) {
+    margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------- two columns */
+
+/*
+ * A list of cards that becomes two columns when there is room for two.
+ *
+ * `minmax(0, 1fr)` for the same reason every other flexible track in this file has it: a `1fr`
+ * track still takes its automatic minimum from its content, so one long subject would push the
+ * column past the viewport and make the page scroll sideways.
+ *
+ * The breakpoint is a width, not a count: below it the content column is too narrow for two cards
+ * to be anything but cramped, and one column is the right answer rather than a fallback.
+ */
+.column-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+/* The cards space themselves through the grid's gap; their own margin would double it. */
+.column-grid > .card {
+    margin-bottom: 0;
+}
+
+@media (min-width: 1160px) {
+    .column-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    /*
+     * A card that has unfolded a mail list takes the width back.
+     *
+     * A list of subjects and senders in half a column is worse than a second column is good — and
+     * the card is only that wide while somebody is actually reading it.
+     */
+    .column-span {
+        grid-column: 1 / -1;
+    }
+}
+
+/*
+ * A button that is a word inside a sentence.
+ *
+ * Not a `.button`: it sits in running text — „verschiebt 209 davon nach Junk. Welche?" — and a
+ * button with a border and padding there would break the line it belongs to.
+ */
+.link-button {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.link-button:hover {
+    text-decoration-thickness: 2px;
+}
+
+/* ---------------------------------------------------------------- phones */
+
+/*
+ * Above a phone the wrapper is not a box at all: the buttons stay direct children of the sidebar's
+ * flex column, so its `gap` still spaces them and nothing about the wide layout changes.
+ */
+.nav-items {
+    display: contents;
+}
+
+/*
+ * A phone, where the navigation cannot be a column.
+ *
+ * Eight full-width rows, a brand and a source banner filled the entire first screen at 390px: every
+ * page began with a menu to scroll past before any mail appeared. The entries become a strip that
+ * scrolls sideways instead — the whole menu in one swipe, and the content starts where the screen
+ * does.
+ *
+ * The source banner stays. It is the one thing on this screen that must never be traded for space:
+ * somebody looking at a plausible list of their own folder names has to be able to tell whether it
+ * is theirs.
+ */
+@media (max-width: 620px) {
+    .sidebar {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+
+    .brand {
+        padding: 2px 2px 0;
+    }
+
+    /* The subtitle is the first thing to go: the logo and the name already say what this is. */
+    .brand .stack span {
+        display: none;
+    }
+
+    /*
+     * Chips that wrap, not a strip that scrolls.
+     *
+     * It scrolled sideways once, which put the last entries off-screen behind a gesture with no
+     * affordance — and made the page the one place in the app where swiping right did something,
+     * so the whole window felt draggable. Wrapping costs a second line and hides nothing.
+     */
+    .nav-items {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .nav-item {
+        flex: none;
+        width: auto;
+        border-radius: 999px;
+        padding: 7px 12px;
+        white-space: nowrap;
+        background: var(--bg);
+    }
+
+    .demo-banner {
+        margin-top: 0;
+    }
+
+    .main {
+        padding: 12px;
+    }
+
+    /* Prose was capped for a wide column; on a phone the cap is the screen. */
+    .notice,
+    .page-head p {
+        max-width: none;
+    }
+
+    /*
+     * A row of buttons becomes a column when the buttons no longer fit side by side.
+     *
+     * `.row` already wraps, but a half-width button next to a wrapped one reads as two unrelated
+     * controls. Full width each is unambiguous and is what a thumb wants.
+     */
+    .card > .row > .button,
+    .form-stack > .row > .button {
+        flex: 1 1 160px;
+        justify-content: center;
+    }
+
+    .form-stack > .field,
+    .form-stack > .field-narrow {
+        max-width: none;
+    }
+}
+
+/* ---------------------------------------------------------------- settings tabs */
+
+/*
+ * The two halves of the settings, kept apart.
+ *
+ * „Wie viele Mails pro Seite" and „ändere das Passwort, an dem der Schlüssel zu deinem Postfach
+ * hängt" are not the same kind of decision, and they are not even saved the same way — one waits
+ * for a „Speichern", the other takes effect when it is answered.
+ */
+.settings-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.settings-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.settings-tab {
+    flex: none;
+    padding: 8px 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.settings-tab:hover {
+    color: var(--text);
+}
+
+.settings-tab[aria-selected='true'] {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- dangerous buttons */
+
+/*
+ * A button that takes something away looks like one.
+ *
+ * The colour is not decoration: „Verbindung trennen" and „Speichern" sat side by side in the same
+ * grey, so the only thing separating them was the word on them. Every button that deletes, revokes
+ * or disconnects wears this — and nothing else does, or it stops meaning anything.
+ *
+ * It never replaces the confirmation. A red button is a warning before the click; the diff, the
+ * password and the terminal are what happen after it.
+ */
+.button-danger {
+    background: var(--danger);
+    color: var(--danger-text);
+    border-color: transparent;
+}
+
+.button-danger:hover {
+    /* No separate hover colour in the palette; darkening by hand keeps one source for the hue. */
+    filter: brightness(0.92);
+}
+
+.button-danger:disabled {
+    filter: none;
+}
+
+/* The quieter half of the same idea: a destructive choice that is not the main one on its card. */
+.button-danger-quiet {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: transparent;
+}
+
+.button-danger-quiet:hover {
+    background: var(--danger-soft);
+    filter: brightness(0.95);
+}
+
+/*
+ * Who is signed in, and the way out — at the foot of the navigation.
+ *
+ * Not in the settings: locking is what you do on the way out of the room, and a control needed on
+ * the way out should not be behind a tab.
+ */
+.sidebar-account {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------- info bubbles */
+
+/*
+ * The reasoning, one click away.
+ *
+ * A real element rather than a `title` attribute: `title` does not exist on a phone, cannot be
+ * opened from a keyboard, and vanishes while it is being read.
+ */
+.info,
+.hint {
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.info-mark {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-faint);
+    font-size: 10px;
+    font-weight: 700;
+    font-style: italic;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.info-mark:hover,
+.info-mark[aria-expanded='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/*
+ * Not in the page: the bubble is rendered into `document.body` and placed from the trigger's
+ * rectangle, so it belongs to no scroll container and cannot grow one. It was absolute inside its
+ * trigger once, and hovering the sign-out button made the sidebar scroll in both directions.
+ *
+ * It is mounted only while open rather than hidden. A bubble that is merely transparent still takes
+ * clicks and is still read out, which is worse than not being there.
+ */
+.info-bubble {
+    position: fixed;
+    z-index: 60;
+    /* Wide enough to read, and never wider than the screen it opens on. */
+    width: max-content;
+    max-width: min(46ch, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    white-space: normal;
+    text-align: left;
+}
+
+/* A heading with something at the far end of its line — a count, a button, a mark. */
+.head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    /* The same gap a card leaves below itself. Without it the first card sits against the heading
+       and reads as part of it. */
+    margin-bottom: 12px;
+}
+
+.head-row > h2 {
+    margin: 0;
+}
+
+/* ---------------------------------------------------------------- status strip */
+
+/*
+ * States, in the corner, without sentences.
+ *
+ * Connected, how old the copy is, when it refreshes next: read dozens of times a day and never
+ * needing a paragraph. The paragraph is behind the mark next to each one.
+ */
+.status-strip {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-faint);
+}
+
+.status-pill.is-good .status-dot {
+    background: var(--success);
+}
+
+.status-pill.is-bad {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.status-pill.is-bad .status-dot {
+    background: var(--danger);
+}
+
+@media (max-width: 620px) {
+    .status-strip {
+        justify-content: flex-start;
+    }
 }

@@ -27,10 +27,11 @@ export interface VerifyInput {
     actual: MessageState[];
     /** Folder name to label id, since a plan speaks in names and Proton answers in ids. */
     folderIds: Map<string, string>;
-    now: number;
+    /** Unix **seconds**. The whole journal is in seconds; see `JournalEntry`. */
+    nowSeconds: number;
 }
 
-export function verifyMoves({ expected, actual, folderIds, now }: VerifyInput): VerificationResult {
+export function verifyMoves({ expected, actual, folderIds, nowSeconds }: VerifyInput): VerificationResult {
     const byId = new Map(actual.map((message) => [message.ID, message]));
     const stragglers: string[] = [];
     let confirmed = 0;
@@ -57,7 +58,7 @@ export function verifyMoves({ expected, actual, folderIds, now }: VerifyInput): 
         }
     }
 
-    return { confirmed, stragglers, checkedAt: now };
+    return { confirmed, stragglers, checkedAtSeconds: nowSeconds };
 }
 
 /**

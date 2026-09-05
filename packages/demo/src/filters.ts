@@ -42,6 +42,13 @@ function rule(
 export interface DemoRule extends OrderedRule {
     /** Sieve-authored rules have no Simple field in the API and cannot be edited in Proton's UI. */
     authoredAs: 'tree' | 'sieve';
+    /**
+     * `false` for a rule that appeared at Proton and has not been taken responsibility for.
+     *
+     * Absent means adopted, the same convention the real snapshot uses — so the demo can show the
+     * state without every other rule having to declare it.
+     */
+    adopted?: boolean;
 }
 
 export const DEMO_RULES: DemoRule[] = [
@@ -99,5 +106,40 @@ export const DEMO_RULES: DemoRule[] = [
         enabled: true,
         authoredAs: 'tree',
         rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['newsletter@versandhaus.example'], 'Junk'),
+    },
+    {
+        /*
+         * Written in Proton's own interface, and not yet taken responsibility for.
+         *
+         * The state the „Änderungen" screen exists for, and one the demo never had — so the screen
+         * showed two invented items whose ids matched no rule, which left both of its write
+         * answers permanently greyed out. A demo that cannot exercise its own screen teaches
+         * nothing.
+         *
+         * It runs at Proton like any other rule. That is exactly why it is listed rather than
+         * hidden, and exactly why it is not editable until somebody decides.
+         */
+        id: 'r-fremd',
+        name: 'Zahnarzt',
+        priority: 8,
+        enabled: true,
+        adopted: false,
+        authoredAs: 'tree',
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['praxis@zahnarzt.example'], 'Wichtig'),
+    },
+    {
+        // Switched off in Proton's own interface, which is a state the dashboard has to render
+        // honestly and used to get wrong: the list called it „aktiv", in green, because the only
+        // badge it had was a verdict about how well the rule works. A rule that does not run works
+        // neither well nor badly.
+        //
+        // It is in the demo because a state nothing exercises is a state nobody notices breaking,
+        // and because a switched-off rule is exactly the sort of thing a real mailbox accumulates.
+        id: 'r-abgeschaltet',
+        name: 'Rechnungen ablegen (pausiert)',
+        priority: 7,
+        enabled: false,
+        authoredAs: 'tree',
+        rule: rule(ConditionType.SENDER, ConditionComparator.CONTAINS, ['rechnung@'], 'Rechnungen'),
     },
 ];

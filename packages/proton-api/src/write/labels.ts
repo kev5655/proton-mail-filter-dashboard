@@ -26,12 +26,30 @@ export interface FolderPayload {
     Notify?: number;
 }
 
-export async function createFolder(http: ProtonHttp, payload: FolderPayload): Promise<ProtonLabel> {
+/**
+ * Create a folder, or a label.
+ *
+ * They are the same object at Proton with a different `Type`, and the same endpoint makes both. The
+ * difference is entirely in what a filter filing into the name then does: a folder moves the mail
+ * out of the inbox, a label marks it and leaves it there.
+ *
+ * `Type` is a parameter rather than a hardcoded constant now, and the default is still `FOLDER` —
+ * the caller that means a label has to say so. Somebody typing a new label name used to get a
+ * folder, silently, and then a rule that moved mail they meant to merely mark.
+ */
+export async function createFolder(
+    http: ProtonHttp,
+    payload: FolderPayload,
+    type: number = LABEL_TYPE.FOLDER
+): Promise<ProtonLabel> {
     const response = await http.request(
-        { method: 'POST', path: 'core/v4/labels', body: { ...payload, Type: LABEL_TYPE.FOLDER } },
+        { method: 'POST', path: 'core/v4/labels', body: { ...payload, Type: type } },
         labelResponseSchema
     );
-    log.info({ name: payload.Name, nested: payload.ParentID !== undefined }, 'folder created');
+    log.info(
+        { name: payload.Name, nested: payload.ParentID !== undefined, type },
+        type === LABEL_TYPE.LABEL ? 'label created' : 'folder created'
+    );
     return response.Label;
 }
 

@@ -41,6 +41,20 @@ export const ERROR_CODES = [
     'BROWSER_LOGIN_UI_CHANGED',
     'BROWSER_LOGIN_TIMEOUT',
     'BROWSER_LOGIN_2FA_UNSUPPORTED',
+    // A login started from the dashboard that could not even open: no profile, no browser.
+    'BROWSER_LOGIN_NOT_CONFIGURED',
+    // Asked to do something at Proton after the connection was cut.
+    'SESSION_DISCONNECTED',
+    // The app's own account: the gate in front of the local data.
+    'ACCOUNT_PASSWORD_EMPTY',
+    'ACCOUNT_PASSWORD_WRONG',
+    'ACCOUNT_EXISTS',
+    'ACCOUNT_MISSING',
+    'ACCOUNT_LOCKED',
+    'ACCOUNT_SECOND_FACTOR_REQUIRED',
+    'ACCOUNT_SECOND_FACTOR_WRONG',
+    // A WebAuthn answer arrived without the server having an open question for it.
+    'ACCOUNT_NO_CHALLENGE',
 
     // Getting credentials from wherever the user keeps them
     'CREDENTIALS_TOOL_MISSING',
@@ -48,6 +62,32 @@ export const ERROR_CODES = [
     'CREDENTIALS_NOT_FOUND',
     'CREDENTIALS_EMPTY',
     'CREDENTIALS_MALFORMED',
+
+    // The local server that hands the dashboard the mirrored mailbox
+    'SERVER_PORT_IN_USE',
+    'SERVER_DATABASE_MISSING',
+
+    // Applying a confirmed change to the account. The whole point of these being distinct is that
+    // "it did not happen" and "it half happened" are different situations for the person reading.
+    'APPLY_NOT_CONFIRMED',
+    'APPLY_CONFIRMATION_EXPIRED',
+    'APPLY_STATE_STALE',
+    'APPLY_BACKUP_FAILED',
+    'APPLY_PARTIAL',
+    'APPLY_ORDER_INCOMPLETE',
+    'APPLY_BUSY',
+    'APPLY_MALFORMED',
+    'FOLDER_ALREADY_EXISTS',
+    'WRITE_FILTER_FAILED',
+    'WRITE_FOLDER_FAILED',
+
+    // Reading back afterwards, because a write returning 200 means Proton accepted it, not that
+    // any mail moved.
+    'VERIFY_FILTER_NOT_STORED',
+
+    // Undo
+    'UNDO_ENTRY_ALREADY_UNDONE',
+    'UNDO_PARTIAL_RESTORE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

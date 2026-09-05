@@ -11,16 +11,23 @@
   "scripts": {
     "spike": "pnpm --filter @pms/spike start",
     "sync": "pnpm --filter @pms/spike start --sync",
+    "serve": "pnpm --filter @pms/spike start --serve",
+    "write-test": "pnpm --filter @pms/spike start --write-test",
     "build:vendor": "pnpm --filter @proton/sieve build",
     "check-types": "pnpm build:vendor && tsc && tsc -p tsconfig.browser.json",
     "test": "pnpm build:vendor && vitest run",
     "test:watch": "vitest",
+    "test:e2e": "pnpm build:vendor && vitest run --config vitest.e2e.config.ts",
     "vendor:update": "./scripts/vendor-update.sh",
     "install:browser": "pnpm --filter @pms/browser-auth exec playwright install chromium",
-    "dev": "pnpm --filter @pms/web dev"
+    "dev": "pnpm --filter @pms/web dev",
+    "icons": "node scripts/make-icons.mjs",
+    "package": "node scripts/package-app.mjs",
+    "smoke": "node scripts/smoke-release.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "esbuild": "^0.28.2",
     "happy-dom": "^20.0.0",
     "typescript": "7.0.2",
     "vite": "^8.2.2",

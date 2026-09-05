@@ -1,3 +1,4 @@
+export { describeChange } from './describe.js';
 export {
     Journal,
     inverseOf,
@@ -8,12 +9,17 @@ export {
 export {
     applyChangeToRules,
     describePlan,
+    planCategoryMove,
     planChange,
+    planRewind,
+    planUndo,
+    type CategoryMoveInput,
     type ChangeKind,
     type ChangePlan,
     type Move,
     type PendingChange,
     type PlanInput,
+    type UndoableEntry,
 } from './plan.js';
 export {
     findRulesNotFiring,

@@ -2,11 +2,45 @@
 <html lang="de">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Proton Mail Sorter — Demo</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+
+        <!-- Installable on a phone, which is the reason any of this exists: the dashboard has to be
+             usable from a device that is not the one the server runs on. -->
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <!-- iOS ignores the manifest's icons for the home screen and wants this one, as a PNG.
+             Without it the icon becomes a screenshot of whatever the page happened to show. -->
+        <link rel="apple-touch-icon" href="/icon-180.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Mail Sorter" />
+        <meta name="theme-color" content="#12121a" />
+
+        <!-- Not „Demo": the dashboard renders whichever mailbox it is given, and the tab said demo
+             even when it was showing a real account. Which one it is belongs on the screen, where
+             the banner says it, rather than in a title that cannot be kept honest. -->
+        <title>Proton Mail Sorter</title>
     </head>
     <body>
         <div id="root"></div>
         <script type="module" src="/src/main.tsx"></script>
+        <script>
+            /*
+             * The shell, cached so the app opens from a home screen without waiting.
+             *
+             * Only in a secure context, which a service worker requires anyway: `http://localhost`
+             * counts as one, and so does the tailnet name once it has its own certificate. Plain
+             * HTTP under any other name simply does not register one, and the app works exactly as
+             * it always has.
+             *
+             * Registration is deliberately not awaited and its failure is ignored. Nothing on this
+             * page depends on it — the worker never answers an `/api` request, because a cached
+             * mailbox would make every „so alt ist diese Kopie" on screen a lie.
+             */
+            if ('serviceWorker' in navigator && window.isSecureContext) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+                });
+            }
+        </script>
     </body>
 </html>

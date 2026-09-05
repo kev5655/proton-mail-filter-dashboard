@@ -89,7 +89,7 @@ export class LoginGuard {
                     'Kein Browser gestartet, kein Kontakt zu Proton.',
                 hint:
                     'Warten löst das nicht. Wenn die Anmeldung auf mail.proton.me funktioniert: ' +
-                    '`pnpm spike --sperre-geklaert`, danach ist wieder genau ein Versuch frei.',
+                    '`pnpm spike --lockout-cleared`, danach ist wieder genau ein Versuch frei.',
                 context: {
                     blockedBy: 'login-guard',
                     consecutiveFailures: state.consecutiveFailures,

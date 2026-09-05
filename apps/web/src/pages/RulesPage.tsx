@@ -1,123 +1,226 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { createDemoProvider, type SieveExplanation } from '@pms/llm';
+import type { MailboxRule } from '@pms/server/types';
 
-import { MailList } from '../components/MailList.js';
-import { RuleConditions } from '../components/RuleConditions.js';
-import { analysisFor, matchedBy, shadowFolders, sieveTextFor } from '../data.js';
+import { RuleEditor } from '../components/RuleEditor.js';
 import { log } from '../log.js';
+import { useMailbox } from '../mailbox.js';
+import { fromRule, isDirty, newDraft, toSimpleObject, type RuleDraft } from '../rules/draft.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
 /**
- * Every filter in execution order, and for each one the three things Proton's own list withholds:
- * what the rule actually says, which messages it catches, and whether it decides anything at all.
+ * Every filter in execution order, and the one being edited beside them.
  *
- * Order is a number rather than an implication, because with filters the order *is* the outcome.
+ * Two panes rather than an expanding row: the rule and its consequences are what the screen is for,
+ * and an accordion that pushes the list down every time it opens makes comparing two rules a matter
+ * of scrolling. Order stays a number on the left, because with filters the order *is* the outcome —
+ * the last rule to file a message wins.
+ *
+ * The editor is in the page, not in a dialog. A dialog would be the natural place for a form, but
+ * this form's whole value is the live preview beside it, and a preview in a modal is a preview
+ * nobody can compare against anything.
  */
 export function RulesPage(): React.JSX.Element {
+    const { analysisFor, shadowFolders } = useMailbox();
     const { nav, goTo, setOpen } = useAppState();
     const { rules, stage } = useStore();
-    const [openId, setOpenId] = useState<string | undefined>(nav.focusRuleId);
 
-    // Arriving from a folder should land on the rule that folder pointed at, opened.
+    const [editing, setEditing] = useState<string | undefined>(nav.focusRuleId);
+    const [draft, setDraft] = useState<RuleDraft | undefined>(undefined);
+
+    const selected = useMemo(
+        () => (editing === undefined ? undefined : rules.find((entry) => entry.id === editing)),
+        [editing, rules]
+    );
+
+    const original = useMemo(
+        () => (selected === undefined ? undefined : fromRule(selected)),
+        [selected]
+    );
+
+    // Arriving from a folder or a category should land on the rule that pointed here, open.
     useEffect(() => {
         if (nav.focusRuleId !== undefined) {
-            setOpenId(nav.focusRuleId);
+            setEditing(nav.focusRuleId);
+            setDraft(undefined);
         }
     }, [nav.focusRuleId]);
 
+    const activeDraft = draft ?? original;
+    const dirty = original !== undefined && activeDraft !== undefined && isDirty(original, activeDraft);
+
+    /** Leaving an edited rule without saying so would lose the edit silently. */
+    const leaveEditor = (next: string | undefined): void => {
+        if (dirty && !window.confirm('Die Änderung ist nicht vorgemerkt. Verwerfen?')) {
+            return;
+        }
+        setEditing(next);
+        setDraft(undefined);
+    };
+
     const shadowNames = new Set(shadowFolders.map((folder) => folder.Name));
+
+    const startNew = (): void => {
+        if (dirty && !window.confirm('Die Änderung ist nicht vorgemerkt. Verwerfen?')) {
+            return;
+        }
+        setEditing(undefined);
+        setDraft(newDraft());
+    };
+
+    const save = (): void => {
+        if (activeDraft === undefined) {
+            return;
+        }
+        const compiled = toSimpleObject(activeDraft);
+        const rule: MailboxRule = {
+            id: activeDraft.ruleId ?? `r-neu-${String(Date.now())}`,
+            name: activeDraft.name.trim(),
+            priority: selected?.priority ?? rules.length + 1,
+            enabled: activeDraft.enabled,
+            authoredAs: 'tree',
+            rule: compiled,
+        };
+
+        log('info', activeDraft.ruleId === undefined ? 'rule.stage-create' : 'rule.stage-update', {
+            conditions: compiled.Conditions.length,
+        });
+
+        stage(
+            activeDraft.ruleId === undefined
+                ? {
+                      id: `create-${rule.id}`,
+                      kind: 'create-rule',
+                      after: rule,
+                      // Travels with the change because the compiled rule cannot carry it: Proton
+                      // puts the name in `FileInto` whether it is a folder or a label.
+                      targetKind: activeDraft.targetKind,
+                  }
+                : {
+                      id: `update-${rule.id}`,
+                      kind: 'update-rule',
+                      before: selected,
+                      after: rule,
+                      targetKind: activeDraft.targetKind,
+                  }
+        );
+    };
 
     return (
         <>
             <header className="page-head">
                 <h1>Regeln</h1>
                 <p>
-                    In der Reihenfolge, in der Proton sie ausführt. Eine Regel anklicken zeigt, was sie
-                    prüft und welche Mails sie trifft — lokal berechnet, weil Proton das nicht verrät.
+                    In der Reihenfolge, in der Proton sie ausführt. Links auswählen, rechts bearbeiten
+                    — mit der Wirkung daneben, lokal berechnet, weil Proton sie nicht verrät.
                 </p>
             </header>
 
-            {rules.map((entry, index) => {
-                const report = analysisFor(entry.id);
-                const isOpen = openId === entry.id;
-                const target = entry.rule.Actions.FileInto.at(-1) ?? '—';
+            <div className="rules-layout">
+                <div className="rule-list">
+                    <button type="button" className="button" onClick={startNew} style={{ marginBottom: 10 }}>
+                        Neue Regel
+                    </button>
 
-                return (
-                    <div key={entry.id}>
-                        <button
-                            type="button"
-                            className="rule-row"
-                            aria-expanded={isOpen}
-                            onClick={() => setOpenId(isOpen ? undefined : entry.id)}
-                        >
-                            <span className="rule-order">{index + 1}</span>
+                    {rules.map((entry, index) => {
+                        const report = analysisFor(entry.id);
+                        const target = entry.rule.Actions.FileInto.at(-1) ?? '—';
+                        /*
+                         * A rule this tool did not write and nobody has taken responsibility for.
+                         *
+                         * It used to sit here indistinguishable from the rest and fully editable,
+                         * while simultaneously asking to be adopted on „Änderungen" — so the same
+                         * rule was both under management and awaiting a decision about whether it
+                         * should be. Editing it would have answered that question by accident.
+                         *
+                         * It is not hidden: it is running at Proton right now, and a list of rules
+                         * that leaves out a running rule is worse than one that explains it.
+                         */
+                        const unconfirmed = entry.adopted === false;
 
-                            <span className="stack">
-                                <span className="row">
-                                    <strong>{entry.name}</strong>
-                                    <FilterKind kind={entry.authoredAs} />
-                                    {shadowNames.has(target) && (
-                                        <span className="badge badge-warning">Zielordner doppelt</span>
-                                    )}
+                        return (
+                            <button
+                                key={entry.id}
+                                type="button"
+                                className={unconfirmed ? 'rule-row unconfirmed' : 'rule-row'}
+                                aria-current={editing === entry.id ? 'true' : undefined}
+                                aria-expanded={editing === entry.id}
+                                onClick={() => {
+                                    if (unconfirmed) {
+                                        goTo({ page: 'changes' });
+                                        return;
+                                    }
+                                    leaveEditor(entry.id);
+                                }}
+                            >
+                                <span className="rule-order">{index + 1}</span>
+
+                                <span className="stack">
+                                    <span className="row">
+                                        <strong>{entry.name}</strong>
+                                        <FilterKind kind={entry.authoredAs} />
+                                        {unconfirmed && (
+                                            <span className="badge badge-warning">nicht bestätigt</span>
+                                        )}
+                                        {shadowNames.has(target) && (
+                                            <span className="badge badge-warning">Zielordner doppelt</span>
+                                        )}
+                                    </span>
+                                    <span className="faint">
+                                        {unconfirmed
+                                            ? 'In Proton angelegt, hier noch nicht übernommen — sie läuft trotzdem. Unter „Änderungen" entscheiden.'
+                                            : `→ ${target} · ${String(report?.matchedCount ?? 0)} Treffer · ${String(
+                                                  report?.decidedCount ?? 0
+                                              )}× entscheidend`}
+                                    </span>
                                 </span>
-                                <span className="faint">
-                                    → {target} · {report?.matchedCount ?? 0} Treffer ·{' '}
-                                    {report?.decidedCount ?? 0}× entscheidend
-                                </span>
-                            </span>
 
-                            <Verdict verdict={report?.verdict} />
-                        </button>
+                                <Verdict verdict={report?.verdict} enabled={entry.enabled} />
+                            </button>
+                        );
+                    })}
+                </div>
 
-                        {isOpen && (
-                            <div className="detail">
-                                {report !== undefined && report.verdict !== 'active' && (
-                                    <p
-                                        className={
-                                            report.verdict === 'always-overridden'
-                                                ? 'notice notice-danger'
-                                                : 'notice notice-warning'
-                                        }
-                                    >
-                                        {report.explanation}
-                                    </p>
-                                )}
+                <div className="rule-detail">
+                    {activeDraft === undefined && (
+                        <p className="muted">
+                            Links eine Regel auswählen, um sie zu bearbeiten — oder eine neue anlegen.
+                        </p>
+                    )}
 
-                                {shadowNames.has(target) && (
-                                    <p className="notice notice-warning">
-                                        „{target}" doppelt einen Proton-Systemordner. Mail, die hier
-                                        landet, liegt nicht dort, wo Proton sie erwartet.
-                                    </p>
-                                )}
-
-                                <h3>Was die Regel prüft</h3>
-                                <RuleConditions
-                                    rule={entry.rule}
+                    {activeDraft !== undefined && (
+                        <>
+                            {selected !== undefined && (
+                                <RuleNotices
+                                    report={analysisFor(selected.id)}
+                                    shadowed={shadowNames.has(selected.rule.Actions.FileInto.at(-1) ?? '')}
+                                    target={selected.rule.Actions.FileInto.at(-1) ?? ''}
                                     onFolderClick={(folder) => goTo({ page: 'folders', focusFolder: folder })}
                                 />
+                            )}
 
-                                {entry.authoredAs === 'sieve' && <SieveDetail ruleId={entry.id} />}
+                            <RuleEditor
+                                draft={activeDraft}
+                                original={original ?? activeDraft}
+                                savedRule={selected}
+                                onChange={setDraft}
+                                onSave={save}
+                                onCancel={() => leaveEditor(undefined)}
+                                onOpenMail={setOpen as (message: { ID: string }) => void}
+                            />
 
-                                <h3 style={{ marginTop: 16 }}>Getroffene Mails</h3>
-                                <p className="faint">
-                                    Lokal berechnet und bis zur Verifikation gegen das echte Verhalten
-                                    eine Schätzung.
-                                </p>
-                                <MailList messages={matchedBy(entry.id)} onOpen={setOpen} />
-
+                            {selected !== undefined && (
                                 <div className="row" style={{ marginTop: 16 }}>
                                     <button
                                         type="button"
                                         className="button button-secondary"
                                         onClick={() => {
-                                            log('info', 'rule.stage-disable', { ruleId: entry.id });
+                                            log('info', 'rule.stage-disable', { ruleId: selected.id });
                                             stage({
-                                                id: `disable-${entry.id}`,
+                                                id: `disable-${selected.id}`,
                                                 kind: 'disable-rule',
-                                                summary: `Regel „${entry.name}" deaktivieren`,
-                                                before: entry,
+                                                before: selected,
                                             });
                                         }}
                                     >
@@ -125,25 +228,66 @@ export function RulesPage(): React.JSX.Element {
                                     </button>
                                     <button
                                         type="button"
-                                        className="button button-quiet"
+                                        className="button button-danger-quiet"
                                         onClick={() => {
-                                            log('info', 'rule.stage-delete', { ruleId: entry.id });
+                                            log('info', 'rule.stage-delete', { ruleId: selected.id });
                                             stage({
-                                                id: `delete-${entry.id}`,
+                                                id: `delete-${selected.id}`,
                                                 kind: 'delete-rule',
-                                                summary: `Regel „${entry.name}" löschen`,
-                                                before: entry,
+                                                before: selected,
                                             });
                                         }}
                                     >
                                         Löschen
                                     </button>
                                 </div>
-                            </div>
-                        )}
-                    </div>
-                );
-            })}
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+}
+
+/**
+ * The findings about a stored rule, above its editor.
+ *
+ * Kept out of the editor itself because they are about the rule *as saved* — a verdict of
+ * "wirkungslos" describes what is running at Proton right now, not what the draft would do.
+ */
+function RuleNotices({
+    report,
+    shadowed,
+    target,
+    onFolderClick,
+}: {
+    report: { verdict: string; explanation: string } | undefined;
+    shadowed: boolean;
+    target: string;
+    onFolderClick: (folder: string) => void;
+}): React.JSX.Element {
+    return (
+        <>
+            {report !== undefined && report.verdict !== 'active' && (
+                <p
+                    className={
+                        report.verdict === 'always-overridden' ? 'notice notice-danger' : 'notice notice-warning'
+                    }
+                >
+                    {report.explanation}
+                </p>
+            )}
+
+            {shadowed && (
+                <p className="notice notice-warning">
+                    „{target}" doppelt einen Proton-Systemordner. Mail, die hier landet, liegt nicht
+                    dort, wo Proton sie erwartet.{' '}
+                    <button type="button" className="value-chip value-chip-link" onClick={() => onFolderClick(target)}>
+                        Ordner ansehen
+                    </button>
+                </p>
+            )}
         </>
     );
 }
@@ -167,79 +311,22 @@ function FilterKind({ kind }: { kind: 'tree' | 'sieve' }): React.JSX.Element {
     );
 }
 
-const provider = createDemoProvider();
-
 /**
- * The script itself, plus an explanation in prose.
+ * How a rule is doing, in one word.
  *
- * The structural rendering above is authoritative — it comes from Proton's own parser. This is a
- * language model's reading of the same script, and it is labelled as such rather than blended in.
- * The two are shown in that order deliberately: prose is easier to read and easier to be wrong
- * about, and a plausible-sounding wrong summary of what moves someone's mail is worse than none.
+ * „wirkungslos" is the finding Proton's own filter list cannot show: the rule matches plenty of
+ * mail and never decides where any of it goes, because a later rule files it again.
+ *
+ * `enabled` comes first and outranks every verdict, because it is the only one of them that is a
+ * fact about Proton rather than a conclusion of ours. A rule switched off in Proton's own interface
+ * used to read „aktiv" here — the `default:` branch caught it — which is the worst way to be wrong:
+ * confidently, in green, about somebody else's account.
  */
-function SieveDetail({ ruleId }: { ruleId: string }): React.JSX.Element {
-    const sieve = sieveTextFor(ruleId);
-    const [explanation, setExplanation] = useState<SieveExplanation | undefined>(undefined);
-    const [failed, setFailed] = useState(false);
+function Verdict({ verdict, enabled }: { verdict: string | undefined; enabled: boolean }): React.JSX.Element {
+    if (!enabled) {
+        return <span className="badge badge-neutral">deaktiviert</span>;
+    }
 
-    useEffect(() => {
-        let cancelled = false;
-        provider
-            .explainSieve(sieve)
-            .then((result) => {
-                if (!cancelled) {
-                    setExplanation(result);
-                }
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setFailed(true);
-                }
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [sieve]);
-
-    return (
-        <>
-            <h3 style={{ marginTop: 16 }}>Script-Filter</h3>
-            <p className="faint">
-                In Protons Oberfläche nur als Code sichtbar. Die Struktur oben ist aus dem Regelbaum
-                abgeleitet, den Proton mitliefert — sie ist massgeblich.
-            </p>
-            <code className="sieve-code">{sieve}</code>
-
-            {failed && (
-                <p className="notice notice-warning">
-                    Kein Sprachmodell erreichbar — ohne Erklärung. Die Struktur oben gilt trotzdem.
-                </p>
-            )}
-
-            {explanation !== undefined && (
-                <div className="generated">
-                    <div className="row">
-                        <strong>Erklärung</strong>
-                        <span className="badge badge-neutral">vom Modell erzeugt</span>
-                    </div>
-                    <p className="muted" style={{ margin: '4px 0 0' }}>
-                        {explanation.summary}
-                    </p>
-                    <ol>
-                        {explanation.steps.map((step) => (
-                            <li key={step}>{step}</li>
-                        ))}
-                    </ol>
-                    <p className="faint">
-                        Erzeugter Text, kann falsch sein. Im Zweifel gilt die abgeleitete Struktur.
-                    </p>
-                </div>
-            )}
-        </>
-    );
-}
-
-function Verdict({ verdict }: { verdict: string | undefined }): React.JSX.Element {
     switch (verdict) {
         case 'never-matches':
             return <span className="badge badge-warning">trifft nichts</span>;

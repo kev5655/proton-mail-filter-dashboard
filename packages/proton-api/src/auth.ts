@@ -125,6 +125,33 @@ export async function login(
 }
 
 /**
+ * End the session at Proton, so the token stops being a key.
+ *
+ * The inverse of `openUnauthSession` below, and it lives here for the same reason that one does:
+ * `write-isolation.test.ts` names `src/auth.ts` as the one file outside `src/write/` that may make
+ * a non-GET request to Proton, because authenticating cannot be done any other way. Ending an
+ * authentication belongs in the same place. Putting it under `src/write/` would also mean
+ * `serve-command.ts` importing the write barrel, which a different assertion forbids — only
+ * `steps.ts` may.
+ *
+ * **The path is the one unverified thing in this file.** `DELETE auth/v4/sessions` is the plausible
+ * inverse of the `POST` two functions down, but nothing in this repository has ever called it and
+ * nothing here documents it. That is normally the point at which this project stops guessing — and
+ * the exception is deliberate and narrow: a revoke that fails **takes nothing away that the user
+ * still has, and grants nothing.** The worst case is a token that stays alive, which is exactly the
+ * state we were in before asking. So it is attempted, its failure is reported rather than
+ * swallowed, and the caller signs out locally either way.
+ *
+ * It has to run while the session is still set. For a browser-derived session the access token can
+ * be empty and the cookies are the authority (`http.ts`), so this must go through the same client
+ * that has them.
+ */
+export async function revokeSession(http: ProtonHttp): Promise<void> {
+    await http.request({ method: 'DELETE', path: 'auth/v4/sessions' }, z.object({ Code: z.number() }));
+    log.info('session revoked at Proton');
+}
+
+/**
  * Open the unauthenticated session that the SRP handshake runs inside.
  *
  * This is the only call of the whole login that is genuinely anonymous. Everything after it carries
@@ -273,6 +300,8 @@ async function completeTwoFactor(http: ProtonHttp, twoFactor: number, prompt: Tw
  */
 export async function refreshSession(http: ProtonHttp, session: ProtonSession): Promise<ProtonSession> {
     http.setSession(session);
+
+    let setCookie: string[] = [];
     const response = await http.request(
         {
             method: 'POST',
@@ -283,24 +312,109 @@ export async function refreshSession(http: ProtonHttp, session: ProtonSession): 
                 RefreshToken: session.refreshToken,
                 RedirectURI: 'https://protonmail.com',
             },
+            observe: (raw) => {
+                setCookie = readSetCookie(raw);
+            },
         },
         refreshResponseSchema
     );
 
+    const uid = response.UID ?? session.uid;
+    const cookies = mergeCookies(session.cookies, setCookie);
+
+    // Cookie mode answers with empty token fields and rotates the session in `Set-Cookie` instead,
+    // so the cookies are the authority and the body only confirms which session it rotated. Falling
+    // back to the previous value rather than to an empty string matters: an empty access token
+    // makes `#headers` drop the `Authorization` header, which is correct for cookie mode and wrong
+    // for a token session that simply answered tersely.
     const refreshed: ProtonSession = {
-        uid: response.UID ?? session.uid,
-        accessToken: response.AccessToken,
-        refreshToken: response.RefreshToken,
+        uid,
+        accessToken: firstNonEmpty(response.AccessToken, cookieValue(cookies, `AUTH-${uid}`), session.accessToken),
+        refreshToken: firstNonEmpty(
+            response.RefreshToken,
+            cookieValue(cookies, `REFRESH-${uid}`),
+            session.refreshToken
+        ),
+        ...(cookies === undefined ? {} : { cookies }),
     };
+
     http.setSession(refreshed);
-    log.info({ uid: '[redacted]' }, 'session refreshed');
+    log.info({ uid: '[redacted]', cookieMode: setCookie.length > 0 }, 'session refreshed');
     return refreshed;
 }
 
+/**
+ * What `auth/refresh` returns.
+ *
+ * The token fields are optional on purpose. Proton's web login runs in cookie mode, where the
+ * refresh answers `{"Code":1000}` and puts the new session in `Set-Cookie`; requiring `AccessToken`
+ * here turned a successful refresh into `PROTON_SCHEMA_MISMATCH`, and every failed refresh costs a
+ * login — the one thing this project is built to avoid. Same mistake as the one already documented
+ * in `@pms/browser-auth`, one endpoint further along.
+ */
 const refreshResponseSchema = z.object({
     Code: z.number(),
-    AccessToken: z.string(),
-    RefreshToken: z.string(),
+    AccessToken: z.string().optional(),
+    RefreshToken: z.string().optional(),
     UID: z.string().optional(),
     ExpiresIn: z.number().optional(),
 });
+
+function firstNonEmpty(...candidates: Array<string | undefined>): string {
+    return candidates.find((value) => value !== undefined && value !== '') ?? '';
+}
+
+/**
+ * The `Set-Cookie` headers of one response.
+ *
+ * `getSetCookie` is the only accessor that keeps them apart — `get('set-cookie')` folds several
+ * into one comma-joined string, and cookie values may contain commas.
+ */
+function readSetCookie(response: Response): string[] {
+    const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+    return typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
+}
+
+/**
+ * Apply rotated cookies to the jar captured at login.
+ *
+ * Only the name/value pair is kept; the attributes describe how a browser should store a cookie,
+ * and we are the store. Order follows the existing jar so an unchanged session produces an
+ * unchanged header.
+ */
+function mergeCookies(existing: string | undefined, setCookie: string[]): string | undefined {
+    if (existing === undefined && setCookie.length === 0) {
+        return undefined;
+    }
+
+    const jar = new Map<string, string>();
+    for (const pair of (existing ?? '').split(';')) {
+        const [name, ...rest] = pair.trim().split('=');
+        if (name !== undefined && name !== '' && rest.length > 0) {
+            jar.set(name, rest.join('='));
+        }
+    }
+    for (const header of setCookie) {
+        const [pair] = header.split(';');
+        const [name, ...rest] = (pair ?? '').trim().split('=');
+        if (name !== undefined && name !== '' && rest.length > 0) {
+            jar.set(name, rest.join('='));
+        }
+    }
+
+    const merged = [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+    return merged === '' ? undefined : merged;
+}
+
+function cookieValue(cookies: string | undefined, name: string): string | undefined {
+    if (cookies === undefined) {
+        return undefined;
+    }
+    for (const pair of cookies.split(';')) {
+        const [key, ...rest] = pair.trim().split('=');
+        if (key === name) {
+            return rest.join('=');
+        }
+    }
+    return undefined;
+}

@@ -5,10 +5,14 @@
   "license": "GPL-3.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./undo": "./src/undo-service.ts",
+    "./category": "./src/category-service.ts"
   },
   "dependencies": {
     "@pms/core": "workspace:*",
+    "@pms/grouping": "workspace:*",
+    "@pms/proton-api": "workspace:*",
     "@pms/rules": "workspace:*",
     "@proton/sieve": "workspace:*"
   }

@@ -1,6 +1,6 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
-import type { Browser, BrowserContext, Page, Response } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page, Response } from 'playwright';
 
 import {
     AUTH_PATH,
@@ -363,27 +363,34 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
     }
 
     for (const pattern of TOTP_SWITCH_PATTERNS) {
-        try {
-            const control = page.getByRole('button', { name: pattern }).first();
-            if ((await control.count()) > 0) {
-                await control.click({ timeout: 2_000 });
+        for (const candidate of switchCandidates(page, pattern)) {
+            try {
+                if ((await candidate.count()) === 0) {
+                    continue;
+                }
+                await candidate.first().click({ timeout: 2_000 });
                 const revealed = await findTotpField(page, 2_000);
                 if (revealed !== undefined) {
                     return revealed;
                 }
+            } catch {
+                // A guess that did not land. The wait below is the part that is meant to work.
             }
-        } catch {
-            // A guess that did not land. The wait below is the part that is meant to work.
         }
     }
 
     if (headless) {
+        // The same diagnosis the visible path gets. Without it this error said only which selectors
+        // were tried — which we already knew — and the attempt it cost taught us nothing.
         throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
             message: 'Protons 2FA-Seite zeigt den Passkey, und das Code-Feld liess sich nicht öffnen.',
             hint:
                 'Unsichtbar kann das niemand umschalten. Mit PMS_BROWSER_HEADLESS=false starten — ' +
-                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen.',
-            context: { tried: [...TOTP_SELECTORS] },
+                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen. Was die Seite ' +
+                'tatsächlich anbietet, steht im Kontext unter `inputs` und `buttons`; daraus lässt ' +
+                'sich packages/browser-auth/src/selectors.ts anpassen, ohne noch einen Versuch zu ' +
+                'verbrauchen.',
+            context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
         });
     }
 
@@ -405,6 +412,22 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
             'anpassen, ohne noch einen Anmeldeversuch zu verbrauchen.',
         context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
     });
+}
+
+/**
+ * The things on the page that might be the switch to the code method, likeliest first.
+ *
+ * A button by its accessible name is the shape Proton uses today. The other two exist because that
+ * assumption has already been wrong once and cost a login attempt to find out: the control may be a
+ * link, and Proton's own components sometimes render one as neither — a styled `div` with a click
+ * handler, which has no role at all and is reachable only by its text.
+ */
+function switchCandidates(page: Page, pattern: RegExp): Locator[] {
+    return [
+        page.getByRole('button', { name: pattern }),
+        page.getByRole('link', { name: pattern }),
+        page.getByText(pattern),
+    ];
 }
 
 /** The first candidate that is actually on screen, or undefined. */
@@ -532,5 +555,72 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string, 
         if (timer !== undefined) {
             clearTimeout(timer);
         }
+    }
+}
+
+/**
+ * Sign in by opening the page and getting out of the way.
+ *
+ * The difference from `loginWithBrowser` is what this function does *not* do: it never sees a
+ * password. It opens Proton's login page and waits. The person types, or their password manager's
+ * browser extension fills the form the way it would on any other site, or they touch a passkey —
+ * and none of that passes through this process.
+ *
+ * That is the whole argument for it. `loginWithBrowser` has to be handed the credentials, which
+ * means fetching them out of 1Password and holding them in memory here. This version cannot leak
+ * what it never receives, and it is the only shape in which a browser extension can participate at
+ * all: the extension fills Proton's own form, in a real profile, exactly as if the page had been
+ * opened by hand.
+ *
+ * It follows that this needs a visible window and a profile the extension is installed in. Headless
+ * has nobody to type; a throwaway profile has no extension. Both are refused rather than left to
+ * fail obscurely several minutes later.
+ *
+ * The wait is long on purpose — somebody may have to find their phone — and it is bounded, because
+ * a browser window left open forever is a browser window nobody closes.
+ */
+export async function loginByHandInBrowser(options: {
+    /** Where the profile lives. Required: an extension cannot exist in a throwaway one. */
+    profileDir: string;
+    channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
+    /** How long the person has. Generous; a second factor can involve looking for a phone. */
+    timeoutMs?: number;
+    /** Called once the window is up, so a dashboard can say what is waiting for whom. */
+    onOpen?: () => void;
+}): Promise<BrowserLoginResult> {
+    const timeout = options.timeoutMs ?? 5 * 60_000;
+
+    const launched = await launchBrowser(
+        { username: '', password: '', promptTotp: async () => '', ...options },
+        // Never headless. There is nobody to type in a window that does not exist, and failing
+        // here is much cheaper than failing after a five-minute wait for input that cannot come.
+        false
+    );
+    const { browser, context } = launched;
+    try {
+        const page = context.pages()[0] ?? (await context.newPage());
+        page.setDefaultTimeout(timeout);
+
+        const seen = traceAuthRequests(page);
+        const auth = watchForAuthResponse(page, seen);
+
+        await page.goto(PROTON_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+        options.onOpen?.();
+
+        const payload = await withTimeout(
+            auth,
+            timeout,
+            'Im Browser-Fenster wurde die Anmeldung nicht abgeschlossen.',
+            seen
+        );
+
+        // Same reasoning as above: the session cookie is what is actually being waited for, and it
+        // is true however the login finished — password, passkey, or a code from an app.
+        const session = await collectSession(context, payload.UID, timeout);
+        log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in by hand in a browser');
+        return { session, userId: payload.UserID };
+    } finally {
+        await context.close().catch(() => undefined);
+        await browser?.close().catch(() => undefined);
     }
 }

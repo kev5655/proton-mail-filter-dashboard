@@ -27,18 +27,36 @@ export interface VerificationResult {
     confirmed: number;
     /** Messages that should have moved and did not — reported, never swallowed. */
     stragglers: string[];
-    checkedAt: number;
+    /** Unix **seconds**, when the check looked. */
+    checkedAtSeconds: number;
 }
 
+/**
+ * Every instant in this record is Unix **seconds**, and the field names say so.
+ *
+ * They did not, once. `at` was written from `Date.now()` — milliseconds — while the column, the
+ * DTO, the tests and `undoneAt` in the very same row all meant seconds, so the history displayed
+ * every change as happening in the year 58647 and `readJournalSince` compared a rewind chain
+ * against a number a thousand times too large. Nothing caught it because the only disagreement was
+ * between a name and its value. The unit is in the name now, so the next `= Date.now()` reads
+ * wrong to a person before it reads wrong to a user.
+ */
 export interface JournalEntry {
     id: string;
-    at: number;
+    /**
+     * Unix **seconds**, when the change was applied.
+     *
+     * The `id` is not this: it carries milliseconds, because two changes in one second would
+     * otherwise collide on a primary key.
+     */
+    atSeconds: number;
     change: PendingChange;
     /** The change that undoes this one. */
     inverse: PendingChange;
     moved: MovedMessage[];
     verification?: VerificationResult | undefined;
-    undoneAt?: number | undefined;
+    /** Unix **seconds**, set once this entry has been taken back. */
+    undoneAtSeconds?: number | undefined;
 }
 
 /**
@@ -55,7 +73,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'delete-rule',
-                summary: `Regel „${change.after?.name ?? '?'}" wieder entfernen`,
                 before: change.after,
             };
 
@@ -63,7 +80,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'create-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wiederherstellen`,
                 after: change.before,
             };
 
@@ -71,7 +87,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'update-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" zurücksetzen`,
                 before: change.after,
                 after: change.before,
             };
@@ -80,7 +95,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'disable-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wieder deaktivieren`,
                 before: change.before,
             };
 
@@ -88,7 +102,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'enable-rule',
-                summary: `Regel „${change.before?.name ?? '?'}" wieder aktivieren`,
                 before: change.before,
             };
 
@@ -96,7 +109,6 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'delete-folder',
-                summary: `Ordner „${change.folder?.name ?? '?'}" wieder entfernen`,
                 folder: change.folder,
             };
 
@@ -104,21 +116,60 @@ export function inverseOf(change: PendingChange): PendingChange {
             return {
                 ...base,
                 kind: 'create-folder',
-                summary: `Ordner „${change.folder?.name ?? '?'}" wiederherstellen`,
                 folder: change.folder,
+            };
+
+        // Undoing an adoption is disowning the rule again — the rule itself is untouched either way.
+        case 'adopt-rule':
+            return {
+                ...base,
+                kind: 'adopt-rule',
+                before: change.before,
+            };
+
+        /*
+         * Undoing a category move is the one inverse that is not in this object.
+         *
+         * Every other kind reverses by description — a create becomes a delete, a rename becomes
+         * the opposite rename — because the description is the whole change. Here it is not: the
+         * change moved twenty messages that came from four different places, and there is no single
+         * destination to name. That is what `entry.moved` is for. Each message carries its own
+         * `previousLabelIds`, observed before the write, and `undoChange` puts each one back where
+         * its own snapshot says it was.
+         *
+         * So the inverse deliberately carries no `category`. Naming one would be picking a
+         * destination for messages that did not share one, and `apply.ts` refuses a category move
+         * without ids rather than acting on it.
+         */
+        case 'move-to-category':
+            return {
+                ...base,
+                kind: 'move-to-category',
             };
 
         case 'rename-folder':
             return {
                 ...base,
                 kind: 'rename-folder',
-                summary: `Ordner „${change.folder?.newName ?? '?'}" zurück in „${change.folder?.name ?? '?'}" umbenennen`,
                 folder: {
                     name: change.folder?.newName ?? '',
                     newName: change.folder?.name ?? '',
                     parent: change.folder?.parent,
                 },
             };
+
+        /*
+         * Undoing an undo is not offered, and this is where that is decided.
+         *
+         * A redo would have to re-apply the original change — which is a different act from
+         * reversing this one, needs its own diff, and would let two entries in the record disagree
+         * about what the account looks like. The inverse therefore names no entry, `apply.ts`
+         * refuses an undo without one, and the history offers no button. Rewinding *past* an undo
+         * is likewise excluded, in the query that builds the chain.
+         */
+        case 'undo-entry':
+        case 'rewind-to':
+            return { ...base, kind: 'undo-entry' };
 
         default: {
             // Exhaustiveness: a new kind must decide how it is undone before it compiles.
@@ -133,7 +184,7 @@ export class Journal {
 
     get entries(): readonly JournalEntry[] {
         // Newest first: the thing most likely to need undoing is the thing just done.
-        return [...this.#entries].sort((a, b) => b.at - a.at);
+        return [...this.#entries].sort((a, b) => b.atSeconds - a.atSeconds);
     }
 
     record(entry: Omit<JournalEntry, 'inverse'>): JournalEntry {
@@ -148,16 +199,16 @@ export class Journal {
      * The caller performs the moves — this package computes, it does not reach for the network. The
      * separation is the reason the calculation can be tested at all.
      */
-    undo(entryId: string, rules: OrderedRule[], now: number): { rules: OrderedRule[]; restore: MovedMessage[] } {
+    undo(entryId: string, rules: OrderedRule[], nowSeconds: number): { rules: OrderedRule[]; restore: MovedMessage[] } {
         const entry = this.#entries.find((candidate) => candidate.id === entryId);
         if (entry === undefined) {
             throw new Error(`Kein Eintrag mit der Kennung ${entryId}.`);
         }
-        if (entry.undoneAt !== undefined) {
+        if (entry.undoneAtSeconds !== undefined) {
             throw new Error('Dieser Eintrag wurde bereits rückgängig gemacht.');
         }
 
-        entry.undoneAt = now;
+        entry.undoneAtSeconds = nowSeconds;
         return { rules: applyChangeToRules(rules, entry.inverse), restore: entry.moved };
     }
 

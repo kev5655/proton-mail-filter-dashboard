@@ -73,6 +73,24 @@ export const DEMO_FOLDERS: DemoFolder[] = [
     { ID: 'f-sent', Name: 'Sent Messages', ParentID: null, shadowsSystemFolder: 'Gesendet' },
 ];
 
+/**
+ * The account's own labels, which are not folders.
+ *
+ * Proton stores both as the same object with a different `Type`, and the difference is what a rule
+ * does with them: a folder *moves* the mail out of the inbox, a label *marks* it and leaves it
+ * there. The demo had none, so nothing exercised that distinction — and the dashboard was quietly
+ * reporting every real label in a live account as an unknown Proton category, because a label id
+ * looks like one by elimination.
+ *
+ * „Wichtig" deliberately shares its name with a folder above. Proton allows it, and it is the case
+ * where guessing what a rule's destination means goes wrong in the most confusing direction.
+ */
+export const DEMO_LABELS: DemoFolder[] = [
+    { ID: 'l-zutun', Name: 'Zu erledigen', ParentID: null },
+    { ID: 'l-steuer', Name: 'Steuerrelevant', ParentID: null },
+    { ID: 'l-wichtig', Name: 'Wichtig', ParentID: null },
+];
+
 interface SenderProfile {
     address: string;
     name: string;
