@@ -9,3 +9,11 @@ export {
     startPasskeyRegistration,
     type PasskeyChallenge,
 } from './passkey.js';
+export {
+    addAccount,
+    directoryOf,
+    findAccount,
+    loadAccounts,
+    slugify,
+    type AccountEntry,
+} from './registry.js';

@@ -51,6 +51,30 @@ export const DATA_DIR = process.env['PMS_DATA_DIR'] ?? join(REPO_ROOT, 'data');
 export const FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'recorded');
 
 /**
+ * The account this process currently holds, as a directory.
+ *
+ * Mutable, and that is what the process is: it holds exactly one account's key at a time, and this
+ * says which one. Everything that belongs to an account — its mailbox, its Proton session, its
+ * login-attempt record, its backups — hangs off this, so switching accounts cannot leave one of
+ * them pointing at the previous one. A session file shared between two accounts would mean
+ * account B reaching Proton as account A, which is the exact failure the separation exists against.
+ *
+ * It starts at the data directory itself, which is where an installation that predates the account
+ * index keeps its files. Nothing is ever moved there; see `registry.ts`.
+ *
+ * Set only after a password has been accepted, so a failed unlock cannot repoint it.
+ */
+let currentAccountDir = DATA_DIR;
+
+export function accountDir(): string {
+    return currentAccountDir;
+}
+
+export function useAccountDir(directory: string): void {
+    currentAccountDir = directory;
+}
+
+/**
  * Load `.env` from the repository root if present.
  *
  * Configuration like the 1Password vault name should not be baked into a repository that is headed

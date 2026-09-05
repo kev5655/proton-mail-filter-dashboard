@@ -10,8 +10,10 @@ const log = getLogger('account');
 /**
  * The account file: who may unlock this installation, and how.
  *
- * One account, deliberately. This is a tool somebody runs on their own machine against their own
- * mailbox; a user table would be inventing a multi-tenancy that has nowhere to be multi-tenant.
+ * One account per file, deliberately, and that has not changed: no user table, no rows, no tenancy
+ * inside this file. An installation may now hold *several* accounts, and it holds them as several
+ * directories with one of these in each — see `registry.ts`. The separation is a key per mailbox
+ * rather than a column, which is why holding one of them tells you nothing about the others.
  *
  * What is in here and what is not is the whole design:
  *

@@ -1,6 +1,6 @@
 # Was nur du prüfen kannst
 
-Alles, was ohne dein Konto prüfbar ist, prüft die Testsuite: **976 Tests ohne Netz** und **34 im
+Alles, was ohne dein Konto prüfbar ist, prüft die Testsuite: **993 Tests ohne Netz** und **34 im
 echten Browser**. Was hier steht, kann sie nicht — es braucht ein echtes Proton-Konto, echte Mail
 oder ein echtes Gerät.
 
@@ -203,7 +203,7 @@ erwartet. Für Intel-Macs gibt es kein Paket.
 
 Damit du es nicht doppelt tust:
 
-- **976 Unit-Tests, 34 E2E**, Typen und Build sauber.
+- **993 Unit-Tests, 34 E2E**, Typen und Build sauber.
 - Der Zeitstempel-Fehler und seine Migration, gegengeprüft durch Wiedereinbau.
 - Dass eine Bestätigung ohne Terminal **sofort ablehnt** statt zwei Minuten zu warten.
 - Dass kein Bildschirm bei acht Breiten von 1440 bis 390 seitwärts scrollt — die Navigation hat
@@ -213,7 +213,27 @@ Damit du es nicht doppelt tust:
 - Dass der Service Worker **niemals** eine `/api`-Antwort zwischenspeichert.
 - Dass es genau **sieben** Nicht-GET-Routen sind.
 
+## T-11 · Ein zweites Konto
+
+**Neu**, und nur wenn du es brauchst. Bitte an einem **zweiten** Proton-Konto ausprobieren, nicht am
+produktiven.
+
+1. Im Dashboard abschliessen (Schloss), dann auf dem Sperrbildschirm ein neues Konto anlegen.
+2. Wieder abschliessen und mit **Name und Passwort des ersten** aufschliessen.
+
+**Erwartet:**
+
+- Der Sperrbildschirm fragt ab jetzt nach dem **Namen** — und listet die Konten **nicht** auf.
+- Das Passwort von Konto A schliesst Konto B **nicht** auf, und umgekehrt.
+- Jedes Konto hat seinen eigenen Verlauf, seine eigenen Ordner und seine eigene Proton-Verbindung.
+  Konto B ist **nicht** bei Proton angemeldet, nur weil A es war.
+- Die Dateien von Konto A liegen weiterhin genau dort, wo sie vorher lagen — es wurde nichts
+  verschoben.
+
+**Melde sofort**, wenn du in einem Konto irgendetwas vom anderen siehst.
+
 ## Was noch nicht gebaut ist
 
-- **Mehrere Proton-Konten.** Geplant, nicht gebaut — siehe `TODO.md`.
 - **Ein arm64-Paket** für den Pi. Aus einem Checkout läuft es dort schon.
+- **Ein Umschalt-Knopf** zwischen Konten. Abschliessen und als jemand anderes aufschliessen ist
+  derselbe Vorgang, und den gibt es.

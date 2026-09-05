@@ -219,6 +219,42 @@ else, starts it with the Node that ships in it, and checks that the page is serv
 directory has no account, and that the mailbox answers `423` rather than empty. It never reaches
 Proton — a fresh directory has no session to reach it with.
 
+### More than one Proton account, and where the wall is
+
+An installation may hold several accounts. It does **not** hold them in one database with a column
+telling them apart, and the reason is that a column is a wall made of correctness: one wrong `WHERE`
+and two mailboxes are one. Each account is a directory with its own `account.json`, its own
+`mailbox.db`, its own Proton session and its own login-attempt record — and each of those is
+encrypted with a key that only that account's password unwraps. Account B is a directory of noise to
+anything that has not been given B's password, this server included.
+
+**The process holds exactly one key at a time**, and that is the whole guarantee. Getting from A to
+B means locking A — dropping the key, closing the database, and dropping the Proton session with it
+— and only then unlocking B. There is no moment at which both are open, so there is no route that
+could read across, and none had to be written to prevent it.
+
+Three details carry it:
+
+- **The session file and the login-attempt record moved under the account.** They were module
+  constants pointing at the data directory, which after a switch would have meant account B reaching
+  Proton with account A's tokens and sharing its lockout. `accountDir()` in `paths.ts` is what one
+  account means, and everything hangs off it.
+- **Nothing is ever moved on disk.** An installation that predates the index keeps its mailbox
+  exactly where it is and is written in as `.`; new accounts go under `accounts/`. A migration that
+  relocates an encrypted database is a migration that can lose one.
+- **The lock screen does not list them.** It asks for a name, because enumerating the accounts tells
+  whoever opened the page which mailboxes live on this machine before they have proven they can open
+  any. Nothing account-shaped is reported either — not the username, not whether it needs a code,
+  not whether it has a passkey — until the name has been given and the password accepted.
+
+A separate process per account would be *stronger*: a bug in this one could in principle open two.
+That was weighed and declined — it would mean a second server, a second port and a second Tailscale
+entry for a wall that the encryption already provides — and it is written down here rather than
+implied, because the difference is real.
+
+There is deliberately **no switch button**. Locking and unlocking as somebody else is the whole
+operation, and it already exists.
+
 ### The password is the key, not a door
 
 `@pms/account` is not a login that guards a screen. The mailbox database and the stored Proton

@@ -22,6 +22,13 @@ export interface AccountStatus {
     available: boolean;
     registered: boolean;
     unlocked: boolean;
+    /**
+     * Whether the unlock has to say which account.
+     *
+     * Only where this installation has more than one. Optional so an older server, which never
+     * sends it, reads as „one account" rather than as a broken response.
+     */
+    needsAccountName?: boolean;
     username?: string;
     requiresTotp: boolean;
     hasPasskeys: boolean;
@@ -62,6 +69,7 @@ const OPEN: AccountStatus = {
     available: false,
     registered: false,
     unlocked: true,
+    needsAccountName: false,
     requiresTotp: false,
     hasPasskeys: false,
     passkeys: [],

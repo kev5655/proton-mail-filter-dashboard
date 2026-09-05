@@ -15,13 +15,18 @@ import { describeChange, type PendingChange } from '@pms/changes';
 import { undoChange } from '@pms/changes/undo';
 import { moveIntoCategory } from '@pms/changes/category';
 import {
+    addAccount,
+    directoryOf,
+    findAccount,
     finishPasskeyRegistration,
+    loadAccounts,
     newTotpSecret,
     startPasskeyLogin,
     startPasskeyRegistration,
     totpCode,
     totpUri,
     Vault,
+    type AccountEntry,
 } from '@pms/account';
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
@@ -47,7 +52,7 @@ import {
     type StoredEntry,
 } from '@pms/sync';
 
-import { DATA_DIR, logFilePath } from './paths.js';
+import { accountDir, DATA_DIR, logFilePath, useAccountDir } from './paths.js';
 import { deleteLocalCopy } from './local-data.js';
 import { loginInBrowser, resolvePassphrase, resume, signOut } from './session.js';
 
@@ -80,8 +85,16 @@ import { loginInBrowser, resolvePassphrase, resume, signOut } from './session.js
 
 const log = getLogger('serve');
 
-const DATABASE = join(DATA_DIR, 'mailbox.db');
-const ACCOUNT_FILE = join(DATA_DIR, 'account.json');
+/*
+ * Everything that belongs to one account, resolved per call.
+ *
+ * They were constants, which was right while an installation could only ever have one account.
+ * `accountDir()` is now whichever account this process currently holds — see `paths.ts` — and a
+ * constant would have kept the second account reading the first one's mailbox.
+ */
+const databaseFile = (): string => join(accountDir(), 'mailbox.db');
+const accountFile = (): string => join(accountDir(), 'account.json');
+const backupsDir = (): string => join(accountDir(), 'backups');
 
 /** How often the copy refreshes itself, in minutes. `--auto-sync 0` turns it off. */
 const DEFAULT_AUTO_SYNC_MINUTES = 5;
@@ -100,8 +113,28 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     console.log('\nProton Mail Sorter — lokaler Server\n');
     console.log('Liest die lokale Kopie. Zu Proton wird keine Verbindung aufgebaut.');
 
-    const vault = new Vault(ACCOUNT_FILE);
+    /*
+     * Which accounts this installation has, and which one is open.
+     *
+     * One at a time, always. The list exists so a second account is possible at all; the process
+     * still holds exactly one key, one database and one Proton session, and getting to another
+     * account means locking this one first. `registry.ts` says why the separation is drawn there.
+     *
+     * With a single account — every installation until somebody adds a second — nothing about this
+     * is visible: the vault is loaded at start-up exactly as before and the lock screen asks for a
+     * password and nothing else.
+     */
+    let vault = new Vault(accountFile());
     await vault.load();
+
+    let accounts = await loadAccounts(DATA_DIR, vault.state.username);
+    /**
+     * The account currently open, or the only one there is.
+     *
+     * `undefined` with several accounts is the honest state: nothing is open and nothing about any
+     * of them may be reported, because nobody has said which one they came for.
+     */
+    let openAccount: AccountEntry | undefined = accounts.length === 1 ? accounts[0] : undefined;
 
     /*
      * The passphrase an installation already has, asked for once and only when it is needed.
@@ -115,7 +148,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
      * account is asked nothing either: from then on the app password is the only key there is.
      */
     let adoptPassphrase: string | undefined;
-    if (!vault.state.registered && existsSync(DATABASE)) {
+    if (accounts.length <= 1 && !vault.state.registered && existsSync(databaseFile())) {
         console.log(
             '\n  Es gibt eine lokale Kopie, aber noch kein Konto für dieses Werkzeug.\n' +
                 '  Die bisherige Passphrase wird einmal gebraucht, damit das neue Konto ihren\n' +
@@ -396,7 +429,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 }
                 const outcome = await applyChange(parsed, {
                     http: requireHttp(),
-                    backupDir: join(DATA_DIR, 'backups'),
+                    backupDir: backupsDir(),
                     confirm,
                     // Read fresh: the share of the mailbox a change touches decides whether it is
                     // asked about a second time, and the copy grows with every sync.
@@ -602,7 +635,9 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     closeDatabase(db);
                     db = undefined;
                 }
-                await deleteLocalCopy(DATABASE);
+                // This account's copy, not the whole data directory: another account's mailbox is
+                // not this one's to delete, and it could not be read here anyway.
+                await deleteLocalCopy(databaseFile());
                 databaseClosed = true;
 
                 // Long enough for the dashboard to read the final state off the stream. Ending the
@@ -650,7 +685,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             openProblem = undefined;
             const passphrase = vault.passphrase();
             try {
-                db = await openDatabase({ path: DATABASE, passphrase });
+                db = await openDatabase({ path: databaseFile(), passphrase });
                 const resumed = await resume(passphrase);
                 http = resumed.http;
                 login.signedIn = resumed.signedIn;
@@ -690,17 +725,30 @@ export async function runServe(argv: readonly string[]): Promise<void> {
 
         const view = (): AccountView => {
             const state = vault.state;
+            /*
+             * Several accounts and none of them open.
+             *
+             * Everything account-shaped is withheld here, and not only the name: whether one needs
+             * a code, and whether it has a passkey, are facts about a particular account. Reporting
+             * the first one's would both mislead the screen and tell whoever opened the page
+             * something about an account they have not proven they can open.
+             */
+            const unknown = accounts.length > 1 && openAccount === undefined;
             return {
                 available: true,
-                registered: state.registered,
+                needsAccountName: unknown,
+                // „Is there an account here" is still yes — it is only not yet known which.
+                // Answering no would put a registration form in front of somebody who already has
+                // two mailboxes.
+                registered: unknown ? true : state.registered,
                 unlocked: state.unlocked && !uiLocked,
-                ...(state.username === undefined ? {} : { username: state.username }),
-                requiresTotp: state.requiresTotp,
-                hasPasskeys: state.passkeys.length > 0,
-                passkeys: state.passkeys,
-                ...(state.graceUntil === undefined ? {} : { graceUntil: state.graceUntil }),
+                ...(unknown || state.username === undefined ? {} : { username: state.username }),
+                requiresTotp: unknown ? false : state.requiresTotp,
+                hasPasskeys: unknown ? false : state.passkeys.length > 0,
+                passkeys: unknown ? [] : state.passkeys,
+                ...(unknown || state.graceUntil === undefined ? {} : { graceUntil: state.graceUntil }),
                 graceMinutes: state.graceMinutes,
-                withinGrace: uiLocked && vault.withinGrace,
+                withinGrace: !unknown && uiLocked && vault.withinGrace,
                 ready: db !== undefined && !uiLocked,
                 ...(openProblem === undefined ? {} : { problem: openProblem }),
             };
@@ -716,18 +764,77 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         const account = new AccountChannel({
             view,
             register: async (input) => {
-                await vault.register({
-                    ...input,
-                    // The key an existing installation already uses, collected at the terminal
-                    // above. Without it, registering would orphan the mailbox.
-                    ...(adoptPassphrase === undefined ? {} : { adoptPassphrase }),
-                });
-                adoptPassphrase = undefined;
+                /*
+                 * A second account gets a directory of its own, and nothing of the first one.
+                 *
+                 * No adopted passphrase either: that exists for the one installation whose mailbox
+                 * predates the account layer, and handing it to a *new* account would encrypt two
+                 * mailboxes with one key — which is the separation gone, quietly.
+                 */
+                if (accounts.length > 0 && vault.state.registered) {
+                    const entry = await addAccount(DATA_DIR, input.username);
+                    accounts = [...accounts, entry];
+                    closeLocalData();
+                    vault.lock(true);
+                    openAccount = undefined;
+                    useAccountDir(directoryOf(DATA_DIR, entry));
+                    vault = new Vault(accountFile());
+                    await vault.load();
+                    await vault.register(input);
+                    openAccount = entry;
+                } else {
+                    await vault.register({
+                        ...input,
+                        // The key an existing installation already uses, collected at the terminal
+                        // above. Without it, registering would orphan the mailbox.
+                        ...(adoptPassphrase === undefined ? {} : { adoptPassphrase }),
+                    });
+                    adoptPassphrase = undefined;
+                    accounts = await loadAccounts(DATA_DIR, vault.state.username);
+                    openAccount = accounts[0];
+                }
                 uiLocked = false;
                 await openLocalData();
             },
             unlock: async (input) => {
-                await vault.unlock(input);
+                /*
+                 * Opening one account means closing the other first, in this order.
+                 *
+                 * The name is resolved and its vault loaded *before* anything is closed, so a
+                 * typo costs nothing. Then the current account is let go completely — key,
+                 * database, and the Proton session with it — and only then is the new password
+                 * tried. There is no moment at which two accounts are open, which is the entire
+                 * guarantee: from A you cannot reach B because B is not open, and B's files are
+                 * unreadable without B's password.
+                 */
+                const wanted = input.account?.trim() ?? '';
+                if (wanted === '' && accounts.length > 1 && openAccount === undefined) {
+                    // Without a name there is nothing to try the password against, and trying it
+                    // against whichever account happens to be first would be worse than refusing.
+                    throw new AppError('ACCOUNT_MISSING', {
+                        message: 'Auf diesem Rechner gibt es mehrere Konten.',
+                        hint: 'Gib den Namen des Kontos an, das du aufschliessen willst.',
+                    });
+                }
+                if (wanted !== '' && wanted.toLowerCase() !== openAccount?.name.toLowerCase()) {
+                    const entry = findAccount(accounts, wanted);
+                    if (entry === undefined) {
+                        throw new AppError('ACCOUNT_MISSING', {
+                            message: `Hier gibt es kein Konto namens „${wanted}".`,
+                            hint: 'Der Name ist der, mit dem das Konto angelegt wurde.',
+                        });
+                    }
+                    closeLocalData();
+                    vault.lock(true);
+                    openAccount = undefined;
+                    useAccountDir(directoryOf(DATA_DIR, entry));
+                    vault = new Vault(accountFile());
+                    await vault.load();
+                    await vault.unlock(input);
+                    openAccount = entry;
+                } else {
+                    await vault.unlock(input);
+                }
                 uiLocked = false;
                 await openLocalData();
             },

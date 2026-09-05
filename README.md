@@ -259,10 +259,27 @@ Four things worth knowing before you do it:
 - **The key stays in memory for as long as the grace period**, on a machine you are not watching.
   Shorten it in the settings, or set it to `0` and type the password each time.
 
+## More than one Proton account
+
+Each account gets its own directory under `data/`, with its own database, its own Proton session and
+its own password. They are separated by encryption rather than by a column: whichever one is open,
+the others are directories of noise, and the server holds exactly one key at a time.
+
+To add one: lock the dashboard, then register a new account on the lock screen. To move between
+them: lock, and unlock with the other account's name and password. There is no switch button,
+because locking and unlocking is what a switch would do.
+
+The lock screen asks for the name rather than listing them — a list would tell whoever opened the
+page which mailboxes live on this machine before they had proven they could open any of them. It
+only asks once there is more than one; a single account is unlocked with a password, as before.
+
+Nothing on disk moves when you add the second one. The first account keeps its files exactly where
+they are.
+
 ## Tests
 
 ```sh
-pnpm test        # 976 unit and component tests — no network, no account, seconds
+pnpm test        # 993 unit and component tests — no network, no account, seconds
 pnpm test:e2e    # 34 end-to-end tests in a real browser — about a minute
 ```
 

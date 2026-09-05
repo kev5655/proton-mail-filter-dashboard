@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { getLogger } from '@pms/core/logger';
 
-import { DATA_DIR } from './paths.js';
+import { accountDir } from './paths.js';
 
 const log = getLogger('local-data');
 
@@ -53,7 +53,9 @@ export async function deleteLocalCopy(databasePath: string): Promise<RemovedLoca
 
     // The backups directory itself stays; only what is in it goes. A missing directory would make
     // the next write fail in a way that has nothing to do with this.
-    const backups = join(DATA_DIR, 'backups');
+    // This account's backups, beside its database — not the data directory's, which may hold
+    // another account entirely.
+    const backups = join(accountDir(), 'backups');
     try {
         for (const entry of await readdir(backups)) {
             await rm(join(backups, entry), { recursive: true, force: true });

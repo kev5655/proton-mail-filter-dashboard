@@ -45,6 +45,14 @@ export interface AccountView {
     requiresTotp: boolean;
     /** Whether a passkey can be offered as the second factor at the next unlock. */
     hasPasskeys: boolean;
+    /**
+     * Whether the unlock has to say *which* account.
+     *
+     * True only where this installation has more than one. Everything else about an account —
+     * whether it needs a code, whether it has a passkey — is unknowable until the name is given,
+     * and is reported as absent rather than guessed at.
+     */
+    needsAccountName: boolean;
     passkeys: Array<{ id: string; label: string; addedAt: number }>;
     graceUntil?: number | undefined;
     graceMinutes: number;
@@ -86,6 +94,15 @@ export interface AccountRunner {
         password: string;
         totp?: string | undefined;
         passkey?: { response: unknown; challenge: string; origin: string } | undefined;
+        /**
+         * Which account, when this installation has more than one.
+         *
+         * Absent means „the only one there is", which is every installation until somebody adds a
+         * second. The names are not listed anywhere the server offers: a lock screen that
+         * enumerates the accounts tells whoever opened the page which ones exist, and it costs
+         * nothing to type the one you came for.
+         */
+        account?: string | undefined;
     }) => Promise<void>;
     lock: (immediate: boolean) => void;
     /** Come back in while the key is still held. Refused once it is gone. */
@@ -174,6 +191,11 @@ export class AccountChannel {
                     const passkey = input['passkey'];
                     await this.#runner.unlock({
                         password: text(input['password']),
+                        // Trimmed here, so „nothing was typed" and „spaces were typed" are the
+                        // same request rather than one of them naming an account that cannot exist.
+                        ...(text(input['account']).trim() === ''
+                            ? {}
+                            : { account: text(input['account']).trim() }),
                         ...(text(input['totp']) === '' ? {} : { totp: text(input['totp']) }),
                         ...(passkey === undefined || passkey === null
                             ? {}

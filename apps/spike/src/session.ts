@@ -21,7 +21,7 @@ import {
 import type { CredentialSource } from '@pms/credentials';
 
 import { credentialConfig, resolveSource } from './credentials.js';
-import { DATA_DIR, REPO_ROOT } from './paths.js';
+import { accountDir, REPO_ROOT } from './paths.js';
 import { terminal } from './prompt.js';
 
 const log = getLogger('session');
@@ -41,8 +41,15 @@ const log = getLogger('session');
  * credentials are. See `@pms/browser-auth` for why imitating that challenge is not the answer.
  */
 
-const SESSION_FILE = join(DATA_DIR, 'session.enc.json');
-const GUARD_FILE = join(DATA_DIR, 'login-attempts.json');
+/*
+ * Both of these belong to *one* account, so they are resolved per call rather than once at import.
+ *
+ * As module constants they pointed at whichever account the process started with, for its whole
+ * life. After a switch that would have meant the second account reaching Proton with the first
+ * account's tokens, and sharing its lockout — the two things the separation exists to prevent.
+ */
+const sessionFile = (): string => join(accountDir(), 'session.enc.json');
+const guardFile = (): string => join(accountDir(), 'login-attempts.json');
 
 /**
  * Mark an account lock as resolved, after the owner has signed in at mail.proton.me.
@@ -51,7 +58,7 @@ const GUARD_FILE = join(DATA_DIR, 'login-attempts.json');
  * says so rather than reporting a success that did nothing.
  */
 export async function clearLockout(): Promise<LoginAttemptState | undefined> {
-    return new LoginGuard({ path: GUARD_FILE }).clearLockout();
+    return new LoginGuard({ path: guardFile() }).clearLockout();
 }
 
 const VERSION = '0.1.0';
@@ -143,7 +150,7 @@ async function openCredentials(): Promise<{ source: CredentialSource; passphrase
  */
 export async function resume(passphrase: string): Promise<{ http: ProtonHttp; signedIn: boolean }> {
     const http = newHttp();
-    const stored = await loadSession(SESSION_FILE, passphrase);
+    const stored = await loadSession(sessionFile(), passphrase);
     if (stored === undefined) {
         return { http, signedIn: false };
     }
@@ -151,7 +158,7 @@ export async function resume(passphrase: string): Promise<{ http: ProtonHttp; si
 }
 
 export async function connect(): Promise<Connection> {
-    const guard = new LoginGuard({ path: GUARD_FILE });
+    const guard = new LoginGuard({ path: guardFile() });
     const http = newHttp();
 
     const { source, passphrase } = await openCredentials();
@@ -164,7 +171,7 @@ export async function connect(): Promise<Connection> {
     // exists to avoid. Silence when nothing is set keeps the ordinary run quiet.
     reportBrowserSettings();
 
-    const stored = await loadSession(SESSION_FILE, passphrase);
+    const stored = await loadSession(sessionFile(), passphrase);
     if (stored !== undefined) {
         const reused = await reuse(http, stored, passphrase);
         if (reused) {
@@ -357,7 +364,7 @@ function describeContext(context: unknown): string | undefined {
 
 async function persist(session: ProtonSession, userId: string, passphrase: string): Promise<void> {
     await saveSession(
-        SESSION_FILE,
+        sessionFile(),
         { session, userId, createdAt: Math.floor(Date.now() / 1000) },
         passphrase
     );
@@ -395,7 +402,7 @@ export async function loginInBrowser(options: {
      */
     http?: ProtonHttp | undefined;
 }): Promise<void> {
-    const guard = new LoginGuard({ path: GUARD_FILE });
+    const guard = new LoginGuard({ path: guardFile() });
     await guard.assertMayAttempt();
 
     const resolved = resolve(REPO_ROOT, options.profileDir.replace(/^~(?=\/|$)/, homedir()));
@@ -428,7 +435,7 @@ export async function loginGuardState(): Promise<{
     code?: string | undefined;
 }> {
     try {
-        await new LoginGuard({ path: GUARD_FILE }).assertMayAttempt();
+        await new LoginGuard({ path: guardFile() }).assertMayAttempt();
         return { mayAttempt: true };
     } catch (error) {
         return {
@@ -501,7 +508,7 @@ export async function signOut(options: {
     }
 
     options.http.setSession(undefined);
-    await deleteSession(SESSION_FILE);
+    await deleteSession(sessionFile());
 
     return { revoked, ...(revokeError === undefined ? {} : { revokeError }) };
 }

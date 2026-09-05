@@ -141,6 +141,14 @@ function Register(): React.JSX.Element {
 function Unlock(): React.JSX.Element {
     const { status, perform } = useAccount();
     const [password, setPassword] = useState('');
+    /*
+     * Which account, where there is more than one.
+     *
+     * Typed rather than picked from a list, and that is the deliberate half: a lock screen that
+     * enumerates the accounts tells whoever opened the page which mailboxes live on this machine,
+     * before they have proven they can open any of them.
+     */
+    const [account, setAccount] = useState('');
     const [totp, setTotp] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>();
@@ -152,6 +160,7 @@ function Unlock(): React.JSX.Element {
             action: 'unlock',
             password,
             totp,
+            account,
             origin: window.location.origin,
             ...(passkey === undefined ? {} : { passkey }),
         })
@@ -200,9 +209,11 @@ function Unlock(): React.JSX.Element {
         >
             <h1>Anmelden</h1>
             <p className="muted">
-                {status.username === undefined
-                    ? 'Die lokale Kopie ist verschlüsselt und wird erst nach der Anmeldung geöffnet.'
-                    : `Angemeldet wird als ${status.username}. Die lokale Kopie ist verschlüsselt und wird erst danach geöffnet.`}
+                {status.needsAccountName === true
+                    ? 'Auf diesem Rechner liegt mehr als ein Konto. Jedes hat seinen eigenen Schlüssel — solange dieses hier offen ist, bleiben die anderen verschlüsselt.'
+                    : status.username === undefined
+                      ? 'Die lokale Kopie ist verschlüsselt und wird erst nach der Anmeldung geöffnet.'
+                      : `Angemeldet wird als ${status.username}. Die lokale Kopie ist verschlüsselt und wird erst danach geöffnet.`}
             </p>
 
             {status.withinGrace && (
@@ -230,6 +241,38 @@ function Unlock(): React.JSX.Element {
                         Weiter ohne Passwort
                     </button>
                 </div>
+            )}
+
+            {status.needsAccountName === true && (
+                <label className="field">
+                    <span>Konto</span>
+                    <input
+                        type="text"
+                        className="text-input"
+                        autoComplete="username"
+                        autoCapitalize="none"
+                        value={account}
+                        onChange={(event) => {
+                            setAccount(event.target.value);
+                        }}
+                    />
+                </label>
+            )}
+
+            {status.needsAccountName === true && (
+                <label className="field">
+                    <span>Konto</span>
+                    <input
+                        type="text"
+                        className="text-input"
+                        autoComplete="username"
+                        autoCapitalize="none"
+                        value={account}
+                        onChange={(event) => {
+                            setAccount(event.target.value);
+                        }}
+                    />
+                </label>
             )}
 
             <label className="field">
@@ -265,7 +308,11 @@ function Unlock(): React.JSX.Element {
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
             <div className="row">
-                <button type="submit" className="button" disabled={password === '' || busy}>
+                <button
+                    type="submit"
+                    className="button"
+                    disabled={password === '' || busy || (status.needsAccountName === true && account.trim() === '')}
+                >
                     {busy ? 'Wird geprüft …' : 'Aufschliessen'}
                 </button>
                 {status.hasPasskeys && (

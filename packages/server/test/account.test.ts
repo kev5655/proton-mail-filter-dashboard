@@ -22,6 +22,7 @@ const VIEW: AccountView = {
     unlocked: false,
     username: 'kevin',
     requiresTotp: false,
+    needsAccountName: false,
     hasPasskeys: false,
     passkeys: [],
     graceMinutes: 30,
@@ -159,6 +160,49 @@ describe('the account surface', () => {
         const reply = await post(new AccountChannel(runner()), { action: 'lock' });
 
         expect(reply.body).toMatchObject({ registered: true, unlocked: false });
+    });
+});
+
+describe('unlocking one of several accounts', () => {
+    /*
+     * The name travels with the password, and only with it.
+     *
+     * The runner uses it to decide *which* vault the password is tried against — so an installation
+     * with two mailboxes has two keys, and holding one says nothing about the other. Getting there
+     * means closing the current account first; there is never a moment with both open.
+     */
+    function channelSeeingUnlock(seen: Array<Record<string, unknown>>): AccountChannel {
+        return new AccountChannel(
+            runner({
+                unlock: async (input) => {
+                    seen.push({ ...input });
+                },
+            })
+        );
+    }
+
+    it('passes the name through when one was given', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+
+        await post(channelSeeingUnlock(seen), { action: 'unlock', password: 'geheim', account: 'Arbeit' });
+
+        expect(seen[0]).toMatchObject({ password: 'geheim', account: 'Arbeit' });
+    });
+
+    it('leaves it out when there is nothing to say, which is every single-account installation', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+
+        await post(channelSeeingUnlock(seen), { action: 'unlock', password: 'geheim' });
+
+        expect(seen[0]).not.toHaveProperty('account');
+    });
+
+    it('treats an empty name as none rather than as an account called nothing', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+
+        await post(channelSeeingUnlock(seen), { action: 'unlock', password: 'geheim', account: '   ' });
+
+        expect(seen[0]).not.toHaveProperty('account');
     });
 });
 
