@@ -186,6 +186,32 @@
     min-width: 0;
 }
 
+/*
+ * The heading side takes whatever room is left.
+ *
+ * Without it both sides shrink together, so a long title wrapped to two lines while the buttons
+ * beside it wrapped one under the other — and the buttons then sat at a different left edge on
+ * every card, which is what made the column look accidental.
+ */
+.card-head > .stack {
+    flex: 1 1 auto;
+}
+
+/*
+ * What a card offers, against its right edge.
+ *
+ * One group rather than loose buttons: they wrap together onto the next line and stay aligned with
+ * each other, instead of each finding its own place.
+ */
+.card-actions {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
 .stack {
     display: flex;
     flex-direction: column;
@@ -1012,6 +1038,40 @@
     min-width: 0;
 }
 
+/*
+ * Options where the explanation starts at the same place on every row.
+ *
+ * As plain flex rows, each explanation began wherever its own label happened to end, so „Aus" and
+ * „Anbieter mit API-Schlüssel" pushed their text to two very different columns and the list read
+ * as three unrelated sentences. One grid for the whole group, with the rows dissolved into it,
+ * gives all of them the same three columns.
+ *
+ * A class of its own rather than a change to `.radio-row`, which the rule editor uses for single
+ * rows where a shared column width would mean nothing.
+ */
+.choice-grid {
+    display: grid;
+    grid-template-columns: auto max-content minmax(0, 1fr);
+    align-items: baseline;
+    gap: 6px 8px;
+    font-size: 13px;
+}
+
+.choice-grid > .radio-row {
+    display: contents;
+}
+
+/* The label column may wrap on a narrow screen; the grid keeps the explanations lined up anyway. */
+@media (max-width: 620px) {
+    .choice-grid {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .choice-grid > .radio-row > .faint {
+        grid-column: 2;
+    }
+}
+
 .condition-editor {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -1723,6 +1783,9 @@
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
+    /* The same gap a card leaves below itself. Without it the first card sits against the heading
+       and reads as part of it. */
+    margin-bottom: 12px;
 }
 
 .head-row > h2 {

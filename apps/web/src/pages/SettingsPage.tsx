@@ -107,7 +107,7 @@ export function SettingsPage(): React.JSX.Element {
                     trifft. Das kommt aus dem Compiler und dem Matcher und ist überprüfbar.
                 </p>
 
-                <div className="statement-choice" style={{ marginTop: 12 }}>
+                <div className="statement-choice choice-grid" style={{ marginTop: 12 }}>
                     {MODES.map((mode) => (
                         <label key={mode.value} className="radio-row">
                             <input

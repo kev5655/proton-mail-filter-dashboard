@@ -177,7 +177,7 @@ export function HistoryPage(): React.JSX.Element {
                         </div>
 
                         {entry.undoable && (
-                            <div className="row">
+                            <div className="card-actions">
                                 <button type="button" className="button button-secondary" onClick={entry.take}>
                                     Rückgängig
                                 </button>
