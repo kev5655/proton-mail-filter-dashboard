@@ -2,7 +2,15 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type ChangeRequest } from '@pms/apply';
+import {
+    applyChange,
+    confirmAtTerminal,
+    digestOf,
+    shortDigest,
+    weigh,
+    type ChangeRequest,
+    type ConfirmationPlace,
+} from '@pms/apply';
 import { describeChange, type PendingChange } from '@pms/changes';
 import { undoChange } from '@pms/changes/undo';
 import { moveIntoCategory } from '@pms/changes/category';
@@ -324,16 +332,21 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         const atTerminal = confirmAtTerminal();
 
         /*
-         * Where the second question is asked, decided by `weigh` and routed here.
+         * Where the second question is really asked.
          *
-         * The terminal is kept for everything that moves mail, and it is also the fallback when
-         * there is no account: an installation with no password to ask for has nothing to check a
-         * dashboard answer against, and then the keystroke is all there is.
+         * `weigh` says `password` for every change that needs a second answer. This is the one
+         * exception it cannot know about: an installation with no account has no password to check
+         * an answer against, so the terminal keeps the question and the keystroke is all there is.
+         *
+         * One function, used by the routing *and* by what the dashboard is told, because those two
+         * disagreeing is a screen showing a password field for an answer nothing will ever read —
+         * while a terminal nobody is watching waits out its two minutes.
          */
+        const placeFor = (place: ConfirmationPlace): ConfirmationPlace =>
+            place === 'password' && !vault.state.registered ? 'terminal' : place;
+
         const confirm: typeof atTerminal = async (offer) =>
-            offer.place === 'password' && vault.state.registered
-                ? confirmInDashboard(offer)
-                : atTerminal(offer);
+            placeFor(offer.place) === 'password' ? confirmInDashboard(offer) : atTerminal(offer);
 
         const apply = new ApplyChannel(
             (request) => {
@@ -358,8 +371,9 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     id: parsed.requestId,
                     summary: describeChange(parsed.change),
                     shortDigest: shortDigest(digestOf(parsed)),
-                    needsTerminal: weight.needsTerminal,
-                    place: weight.place,
+                    needsSecond: weight.needsSecond,
+                    // The resolved place, not the weighed one — see `placeFor`.
+                    place: placeFor(weight.place),
                     reason: weight.reason,
                 };
             },
@@ -722,6 +736,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 // wrong password had already released the change.
                 vault.verifyPassword(password);
                 waiting('granted');
+            },
+            declineChange: async (requestId) => {
+                // A refusal that finds nothing waiting is not an error: the change may have just
+                // expired, and the answer either way is that nothing was written.
+                pendingGrants.get(requestId)?.('declined');
             },
             resume: async () => {
                 if (!vault.withinGrace) {

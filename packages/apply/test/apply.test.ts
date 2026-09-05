@@ -261,21 +261,21 @@ describe('a copy that predates the check', () => {
 describe('which changes are asked about twice', () => {
     it('lets a small rule through on the dialog’s confirmation alone', async () => {
         // Two mails out of a thousand. Asking again in a terminal would train the reflex.
-        expect(weigh(request(), 1_000).needsTerminal).toBe(false);
+        expect(weigh(request(), 1_000).needsSecond).toBe(false);
     });
 
     it('asks about anything that deletes', async () => {
         const removal = request();
         removal.change = { id: 'c', kind: 'delete-rule', summary: 'Regel löschen' };
 
-        expect(weigh(removal, 1_000)).toMatchObject({ needsTerminal: true });
+        expect(weigh(removal, 1_000)).toMatchObject({ needsSecond: true, place: 'password' });
         expect(weigh(removal, 1_000).reason).toContain('löscht');
     });
 
     it('asks about a change touching a large share of the mailbox', () => {
         const verdict = weigh(request(), 8);
 
-        expect(verdict.needsTerminal).toBe(true);
+        expect(verdict.needsSecond).toBe(true);
         expect(verdict.reason).toContain('%');
     });
 
@@ -283,11 +283,11 @@ describe('which changes are asked about twice', () => {
         const many = request();
         many.plan = { ...plan(), moves: Array.from({ length: 600 }, () => plan().moves[0] as never) };
 
-        expect(weigh(many, 0).needsTerminal).toBe(true);
+        expect(weigh(many, 0).needsSecond).toBe(true);
     });
 
     it('does not ask when nothing is known and the change is small', () => {
-        expect(weigh(request(), 0).needsTerminal).toBe(false);
+        expect(weigh(request(), 0).needsSecond).toBe(false);
     });
 
     it('writes a small change without ever calling the terminal', async () => {
@@ -625,14 +625,14 @@ function categoryRequest(over: Partial<ChangeRequest> = {}, messageIds = ['m-1',
 }
 
 describe('moving mail into one of Protons categories', () => {
-    it('asks the terminal even for a single mail', () => {
+    it('asks again even for a single mail', () => {
         // Deliberately not subject to the size thresholds. This is the exception to the first
-        // sentence of CLAUDE.md, and it should cost a keystroke every time it is used.
+        // sentence of CLAUDE.md, and it should cost a deliberate act every time it is used.
         const one = categoryRequest({}, ['m-1']);
 
         expect(weigh(one, 10_000)).toEqual({
-            needsTerminal: true,
-            place: 'terminal',
+            needsSecond: true,
+            place: 'password',
             reason: 'Diese Änderung verschiebt Mail.',
         });
     });
@@ -824,7 +824,7 @@ describe('undoing a recorded change', () => {
     it('always asks the terminal, whatever its size', () => {
         // It moves mail and removes a rule, and it is the change most likely to be reached for in
         // a hurry — which is the argument for the question, not against it.
-        expect(weigh(undoRequest(), 10_000)).toMatchObject({ needsTerminal: true });
+        expect(weigh(undoRequest(), 10_000)).toMatchObject({ needsSecond: true, place: 'password' });
     });
 
     it.each<[string, ConfirmationVerdict, string]>([
@@ -920,7 +920,7 @@ describe('rewinding to an earlier point', () => {
     }
 
     it('always asks the terminal', () => {
-        expect(weigh(rewindRequest(), 10_000)).toMatchObject({ needsTerminal: true });
+        expect(weigh(rewindRequest(), 10_000)).toMatchObject({ needsSecond: true, place: 'password' });
     });
 
     it('takes nothing back when the terminal declines', async () => {

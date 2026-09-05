@@ -100,13 +100,24 @@ export function route(
                       requestId: outcome.id,
                       shortDigest: outcome.shortDigest,
                       // So the dashboard can say what will actually happen. Most changes are
-                      // confirmed once, in the diff; only the expensive ones are asked about again
-                      // in the terminal, and promising that question for every change taught the
-                      // reader to disbelieve it.
-                      needsTerminal: outcome.needsTerminal,
+                      // confirmed once, in the diff; only the expensive ones are asked about again,
+                      // and promising that question for every change taught the reader to
+                      // disbelieve it.
+                      needsSecond: outcome.needsSecond,
                       place: outcome.place,
                       reason: outcome.reason,
-                      ...(outcome.needsTerminal ? { waiting: 'Bestätigung im Terminal' } : {}),
+                      // Where, not whether. It said „im Terminal" for every second question, which
+                      // stopped being true once the dashboard started asking them — and a screen
+                      // that sends somebody to the wrong window is worse than one that says
+                      // nothing.
+                      ...(outcome.needsSecond
+                          ? {
+                                waiting:
+                                    outcome.place === 'terminal'
+                                        ? 'Bestätigung im Terminal'
+                                        : 'Bestätigung mit dem App-Passwort',
+                            }
+                          : {}),
                   },
               };
     }

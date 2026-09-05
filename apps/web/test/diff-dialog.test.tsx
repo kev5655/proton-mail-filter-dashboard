@@ -94,7 +94,7 @@ describe('the sentence about the terminal', () => {
          */
         expect(source).toContain("phase.phase === 'waiting' && phase.place === 'terminal'");
         expect(source).toContain("phase.phase === 'waiting' && phase.place === 'password'");
-        expect(source).toContain("phase.phase === 'waiting' && !phase.needsTerminal");
+        expect(source).toContain("phase.phase === 'waiting' && !phase.needsSecond");
     });
 
     it('sends the password to the account surface, never to the apply route', () => {

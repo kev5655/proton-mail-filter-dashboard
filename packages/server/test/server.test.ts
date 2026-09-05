@@ -438,14 +438,19 @@ describe('the sync channel', () => {
  * Proton client into the browser bundle, and `write-isolation.test.ts` exists to keep it out. So the
  * answer travels in the response instead of being worked out twice.
  */
-describe('the offer answers whether a terminal question is coming', () => {
-    function channel(needsTerminal: boolean, reason = ''): ApplyChannel {
+describe('the offer answers whether a second question is coming, and where', () => {
+    function channel(
+        needsSecond: boolean,
+        reason = '',
+        place: 'none' | 'password' | 'terminal' = 'password'
+    ): ApplyChannel {
         return new ApplyChannel(
             (request) => ({
                 id: (request as { requestId: string }).requestId,
                 summary: 'Eine Änderung',
                 shortDigest: 'ABC-DEF',
-                needsTerminal,
+                needsSecond,
+                place,
                 reason,
             }),
             async () => ({ backupPath: '/tmp/backup.json' })
@@ -463,17 +468,31 @@ describe('the offer answers whether a terminal question is coming', () => {
 
         expect(reply.status).toBe(202);
         expect(reply.body).toMatchObject({
-            needsTerminal: true,
+            needsSecond: true,
             reason: 'Diese Änderung löscht etwas.',
-            waiting: 'Bestätigung im Terminal',
+            waiting: 'Bestätigung mit dem App-Passwort',
         });
+    });
+
+    it('still sends somebody to the terminal when that is where the question is', () => {
+        // An installation with no account has no password to check an answer against, so the
+        // gesture is all there is — and the dashboard has to say so rather than show a field.
+        const reply = route(
+            'POST',
+            '/api/apply',
+            db,
+            { apply: channel(true, 'Diese Änderung löscht etwas.', 'terminal') },
+            { requestId: 'req-3' }
+        );
+
+        expect(reply.body).toMatchObject({ place: 'terminal', waiting: 'Bestätigung im Terminal' });
     });
 
     it('says so when one is not, and does not promise a wait', () => {
         const reply = route('POST', '/api/apply', db, { apply: channel(false) }, { requestId: 'req-2' });
 
         expect(reply.status).toBe(202);
-        expect(reply.body).toMatchObject({ needsTerminal: false });
+        expect(reply.body).toMatchObject({ needsSecond: false });
         expect(reply.body).not.toHaveProperty('waiting');
     });
 });

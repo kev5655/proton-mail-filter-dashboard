@@ -31,7 +31,7 @@ export type ApplyPhase =
           requestId: string;
           shortDigest: string;
           /** Whether a second question is genuinely coming, as decided by `weigh` on the server. */
-          needsTerminal: boolean;
+          needsSecond: boolean;
           /** Where it is asked. `'password'` means this dialog asks it, not a terminal. */
           place: 'none' | 'password' | 'terminal';
           /** Why it is, when it is. */
@@ -92,7 +92,7 @@ export function ApplyProvider({
                     const body = (await response.json()) as {
                         requestId?: string;
                         shortDigest?: string;
-                        needsTerminal?: boolean;
+                        needsSecond?: boolean;
                         place?: 'none' | 'password' | 'terminal';
                         reason?: string;
                         error?: string;
@@ -115,11 +115,11 @@ export function ApplyProvider({
                         shortDigest: body.shortDigest ?? '???-???',
                         // Absent means an older server, and „it will ask" is the safer of the two
                         // wrong answers: it tells the user to go and look.
-                        needsTerminal: body.needsTerminal ?? true,
+                        needsSecond: body.needsSecond ?? true,
                         // An older server says nothing about where, and „go and look at the
                         // terminal" is the safer of the two wrong answers: waiting for a password
                         // field that never arrives would strand the change.
-                        place: body.place ?? (body.needsTerminal === false ? 'none' : 'terminal'),
+                        place: body.place ?? (body.needsSecond === false ? 'none' : 'terminal'),
                         reason: body.reason ?? '',
                     });
 

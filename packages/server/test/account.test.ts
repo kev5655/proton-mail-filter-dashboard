@@ -36,6 +36,7 @@ function runner(overrides: Partial<AccountRunner> = {}): AccountRunner {
         unlock: async () => undefined,
         resume: async () => undefined,
         confirmChange: async () => undefined,
+        declineChange: async () => undefined,
         lock: () => undefined,
         changePassword: async () => undefined,
         beginTotp: async () => ({ secret: 'AAAA', uri: 'otpauth://x' }),
@@ -110,6 +111,66 @@ describe('the account surface', () => {
         const reply = await post(new AccountChannel(runner()), { action: 'lock' });
 
         expect(reply.body).toMatchObject({ registered: true, unlocked: false });
+    });
+});
+
+describe('answering a pending change', () => {
+    it('passes the password on to be checked, and nothing else', async () => {
+        const seen: Array<{ requestId: string; password: string }> = [];
+        const channel = new AccountChannel(
+            runner({
+                confirmChange: async (requestId, password) => {
+                    seen.push({ requestId, password });
+                },
+            })
+        );
+
+        await post(channel, { action: 'confirm-change', requestId: 'req-1', password: 'geheim' });
+
+        expect(seen).toEqual([{ requestId: 'req-1', password: 'geheim' }]);
+    });
+
+    it('refuses without asking for a password, because saying no proves nothing', async () => {
+        // The only way to refuse used to be to let the five minutes run out, which left the change
+        // armed for exactly as long as somebody might step away from the screen.
+        const declined: string[] = [];
+        const granted: string[] = [];
+        const channel = new AccountChannel(
+            runner({
+                confirmChange: async (requestId) => {
+                    granted.push(requestId);
+                },
+                declineChange: async (requestId) => {
+                    declined.push(requestId);
+                },
+            })
+        );
+
+        await post(channel, { action: 'confirm-change', requestId: 'req-1', decline: true });
+
+        expect(declined).toEqual(['req-1']);
+        expect(granted).toEqual([]);
+    });
+
+    it('does not take a stray `decline` string for a refusal', async () => {
+        // Anything but `true` is a malformed request, and the safe reading of one is the branch
+        // that grants nothing — which here means falling through to the password check.
+        const declined: string[] = [];
+        const channel = new AccountChannel(
+            runner({
+                declineChange: async (requestId) => {
+                    declined.push(requestId);
+                },
+                confirmChange: async () => {
+                    throw new AppError('APPLY_NOT_CONFIRMED', { message: 'falsches Passwort' });
+                },
+            })
+        );
+
+        const reply = await post(channel, { action: 'confirm-change', requestId: 'req-1', decline: 'ja' });
+
+        expect(declined).toEqual([]);
+        expect(reply.status).not.toBe(200);
     });
 });
 

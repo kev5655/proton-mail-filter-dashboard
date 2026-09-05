@@ -71,26 +71,40 @@ export interface ConfirmationOffer {
  * reflex, and a confirmation people answer without reading protects nothing — which is the same
  * argument CLAUDE.md makes for never skipping the diff.
  *
- * So the second question is kept for the changes where being wrong is expensive. What changed is
- * *where* it is asked, and only for deletions:
+ * So the second question is kept for the changes where being wrong is expensive: anything that
+ * moves mail — a category move, an undo, a rewind — anything that resorts a large share of the
+ * mailbox, and anything that deletes.
  *
- *  - **`terminal`** — a keystroke where `pnpm serve` runs, in a place no HTTP request can reach.
- *    Kept for everything that moves mail: a category move, an undo, a rewind, and any change that
- *    resorts a large share of the mailbox.
- *  - **`password`** — the app password, re-entered in the dashboard, next to a preview of what is
- *    about to disappear. Deletions only.
+ * **All of them are now asked in the dashboard, against the app password.** The terminal is gone
+ * from this function, and giving it up is a real loss that should be stated as one rather than
+ * discovered later:
  *
- * The exchange is deliberate and worth stating plainly, because it is a real one. A terminal
- * keystroke cannot be produced by anything speaking HTTP; a password can, by anything that knows
- * it. What it gains is that the person deleting a folder sees, at that moment, which mail is inside
- * it and where that mail will end up — and a confirmation somebody has to walk to another window
+ *  - A keystroke at the machine running `pnpm serve` **cannot be produced by anything speaking
+ *    HTTP**. That was the strongest property this file had.
+ *  - A password **can** be produced by anything that knows it.
+ *
+ * What is bought with it is twofold. The first half was already the better argument for deletions
+ * and is no less true for a category move: the person confirming sees, at that moment, which mail
+ * is affected and where it will end up — and a confirmation somebody has to walk to another window
  * for is one they learn to perform without reading, which is the failure this whole file is built
  * against.
  *
- * It is also a secret rather than a gesture: a stray local process can `POST /api/apply`, but it
- * cannot produce the password, and a wrong one is refused by the same `Vault` that holds the key to
- * the mailbox. Where there is no account — an installation with no password to ask for — the
- * terminal keeps the deletion, because then the gesture is all there is.
+ * The second half is that the terminal had quietly stopped existing. This tool is meant to be
+ * reachable from a phone and from a machine that is not the one it runs on; on a server there is
+ * nobody at that keyboard, and `confirmAtTerminal` did not refuse in that case — it waited two
+ * minutes and reported „expired". A guarantee that turns into a timeout is not a guarantee, and
+ * keeping it would have meant that every category move and every undo simply failed away from the
+ * desk.
+ *
+ * It stays a secret rather than a gesture: a stray local process can `POST /api/apply`, but it
+ * cannot produce the password, a wrong one is refused by the same `Vault` that holds the key to the
+ * mailbox, and guessing is slow by construction because the check is a full Argon2id derivation.
+ * The grant is keyed to one request id and expires, so „they typed it recently" cannot confirm
+ * whatever arrives next.
+ *
+ * **Where there is no account, the terminal keeps everything.** An installation with no password
+ * has nothing to check an answer against, and then the gesture is all there is — see the routing in
+ * `serve-command.ts`, which is also where a missing terminal is now refused outright.
  */
 export const IMPACT_SHARE = 0.2;
 export const IMPACT_COUNT = 500;
@@ -99,47 +113,49 @@ export const IMPACT_COUNT = 500;
 export type ConfirmationPlace = 'none' | 'password' | 'terminal';
 
 export interface Weight {
-    /** True for anything that needs a second confirmation, wherever it is asked. */
-    needsTerminal: boolean;
+    /**
+     * True for anything that needs a second confirmation, wherever it is asked.
+     *
+     * Named for the question and not for the place, because it was `needsTerminal` while already
+     * meaning „needs a second answer somewhere" — and a field whose name is one of its own possible
+     * values is a field that will be read wrong.
+     */
+    needsSecond: boolean;
     place: ConfirmationPlace;
     reason: string;
 }
 
 export function weigh(request: ChangeRequest, mailboxSize: number): Weight {
     const moves = request.plan.moves.length;
-    const terminal = (reason: string): Weight => ({ needsTerminal: true, place: 'terminal', reason });
+    const ask = (reason: string): Weight => ({ needsSecond: true, place: 'password', reason });
 
     // Before the size rules, and unconditional. This is the change kind that moves mail, the second
-    // exception to the first sentence of CLAUDE.md, and it should cost a keystroke every single
-    // time — including for one message. The thresholds below exist to keep the terminal question
-    // worth reading; exempting the one kind that touches somebody's mail would defeat that.
+    // exception to the first sentence of CLAUDE.md, and it should cost a deliberate act every
+    // single time — including for one message. The thresholds below exist to keep the second
+    // question worth reading; exempting the one kind that touches somebody's mail would defeat that.
     if (request.change.kind === 'move-to-category') {
-        return terminal('Diese Änderung verschiebt Mail.');
+        return ask('Diese Änderung verschiebt Mail.');
     }
     // Likewise unconditional, and for the same reason: an undo moves mail back and removes a rule.
     // It is also the change most likely to be reached for in a hurry.
     if (request.change.kind === 'undo-entry') {
-        return terminal('Diese Änderung nimmt eine frühere zurück und verschiebt Mail.');
+        return ask('Diese Änderung nimmt eine frühere zurück und verschiebt Mail.');
     }
     if (request.change.kind === 'rewind-to') {
-        return terminal('Diese Änderung nimmt mehrere frühere zurück und verschiebt Mail.');
+        return ask('Diese Änderung nimmt mehrere frühere zurück und verschiebt Mail.');
     }
     if (request.change.kind === 'delete-rule' || request.change.kind === 'delete-folder') {
-        return {
-            needsTerminal: true,
-            place: 'password',
-            reason: 'Diese Änderung löscht etwas.',
-        };
+        return ask('Diese Änderung löscht etwas.');
     }
     if (moves >= IMPACT_COUNT) {
-        return terminal(`Diese Änderung sortiert ${String(moves)} Mails um.`);
+        return ask(`Diese Änderung sortiert ${String(moves)} Mails um.`);
     }
     if (mailboxSize > 0 && moves / mailboxSize >= IMPACT_SHARE) {
         const percent = Math.round((moves / mailboxSize) * 100);
-        return terminal(`Diese Änderung betrifft ${String(percent)} % der erfassten Mails.`);
+        return ask(`Diese Änderung betrifft ${String(percent)} % der erfassten Mails.`);
     }
 
-    return { needsTerminal: false, place: 'none', reason: '' };
+    return { needsSecond: false, place: 'none', reason: '' };
 }
 
 export interface ApplyContext {
@@ -252,7 +268,7 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
 
     // 3 — the grant, when the change is big enough to deserve a second one
     const weight = weigh(request, context.mailboxSize ?? 0);
-    if (weight.needsTerminal) {
+    if (weight.needsSecond) {
         const where = weight.place === 'password' ? 'password' : 'terminal';
         const verdict = await context.confirm({
             request,
@@ -416,7 +432,7 @@ export async function applyChange(request: ChangeRequest, context: ApplyContext)
             change: request.change.kind,
             confirmed: verification.confirmed,
             partial: partial !== undefined,
-            askedTwice: weight.needsTerminal,
+            askedTwice: weight.needsSecond,
         },
         'change applied'
     );

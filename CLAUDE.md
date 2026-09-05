@@ -11,13 +11,13 @@ it moves only message IDs somebody named, never a folder, a sender or a query:
 1. **Undo**, which moves back exactly the message IDs a rule moved, from the undo journal's
    per-message snapshot — never a message the journal does not name. Reachable from the dashboard as
    `undo-entry` (one change) and `rewind-to` (a chain, newest first, stopping at the first failure);
-   both go the ordinary route and both demand the terminal unconditionally.
+   both go the ordinary route and both demand a second answer unconditionally.
 2. **Moving into one of Proton's categories** (`move-to-category`), which moves exactly the IDs the
    user selected and then saw listed in the diff. It exists because a category cannot be a filter's
    destination: Proton files mail into „Werbung" or „Transaktionen" itself and offers no endpoint
    that reads or sets what it has learned, so moving the mail *is* the interface. `weigh()` demands
-   the terminal for it unconditionally — including for one message — because this is the exception,
-   and it should cost a keystroke every time.
+   a second answer for it unconditionally — including for one message — because this is the
+   exception, and it should cost a deliberate act every time.
 
 The rule is enforced structurally, not by discipline: only `packages/proton-api/src/write/` may
 issue non-GET requests, and `write/messages.ts` has exactly two importers, asserted as an exact set
@@ -105,42 +105,57 @@ the module that performs it.
 
 `packages/server/` is the same idea one layer out, and the guarantee there has a precise shape:
 
-> **HTTP is an offer, not a trigger. No change reaches Proton without a second answer from a
-> person — a `ja` typed at the terminal where `pnpm serve` runs, or, for a deletion, the app
-> password re-entered in the dashboard beside the diff.**
+> **HTTP is an offer, not a trigger. No change worth asking about reaches Proton without a second
+> answer from a person: the app password, re-entered in the dashboard beside the diff that says
+> what will happen — or, on an installation that has no account, a `ja` typed at the terminal where
+> `pnpm serve` runs.**
 
 The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
 parses a request cannot reach the code that performs one. They meet through a channel object handed
 in from outside, and `write-isolation.test.ts` checks that the routing files import neither
-`@pms/apply` nor the write surface. Six non-GET routes exist and each is named in an `if` rather
+`@pms/apply` nor the write surface. Seven non-GET routes exist and each is named in an `if` rather
 than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
 records an offer and answers `202` while nothing has happened yet.
 
 `packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
 One file to read when someone asks what this tool can change.
 
-### Where the second question is asked, and why deleting moved
+### Where the second question is asked, and what giving up the terminal cost
 
-`weigh()` decides both, and it now returns a *place* rather than a boolean:
+`weigh()` decides which changes are asked about twice — anything that moves mail (a category move,
+an undo, a rewind), anything that resorts a large share of the mailbox, and anything that deletes —
+and **all of them are now asked in the dashboard, against the app password.**
 
-- **`terminal`** for everything that moves mail — a category move, an undo, a rewind — and for any
-  change that resorts a large share of the mailbox. A keystroke in the window where `pnpm serve`
-  runs cannot be produced by anything speaking HTTP, and that is worth the walk.
-- **`password`** for a deletion. The app password, re-entered in the dashboard next to the diff that
-  says what disappears.
+The terminal is gone from `weigh()`, and that is a real loss which belongs in writing rather than in
+a commit nobody reads. A keystroke in the window where `pnpm serve` runs **cannot be produced by
+anything speaking HTTP**; that was the strongest property this project had. A password **can** be
+produced by anything that knows it.
 
-The exchange is real and is stated here rather than implied. A password can be produced by anything
-that knows it; a terminal keystroke cannot be produced over HTTP at all. What it buys is that the
-person deleting a folder sees, at that moment, what is inside it and where that mail goes — and a
+Two things are bought with it, and the second is why it was not optional.
+
+The first was already the better argument for deletions and is no less true for a category move:
+the person confirming sees, at that moment, exactly what is affected and where it goes. A
 confirmation performed in another window, away from the thing being confirmed, is one people learn
-to perform without reading. That is the failure `apply.ts` is built against, and the terminal was
-starting to cause it.
+to perform without reading — the failure `apply.ts` is built against, and the terminal was starting
+to cause it.
 
-It kept its teeth by being a secret rather than a gesture: the password is checked by the same
+The second is that **the terminal had quietly stopped existing.** This tool is meant to be reachable
+from a phone and from a machine that is not the one it runs on. On a server there is nobody at that
+keyboard — and `confirmAtTerminal` did not refuse in that case, it waited out its two-minute timeout
+and reported `expired`, which reads as „you were too slow" to somebody who never had a keyboard to
+be slow at. A guarantee that turns into a timeout is not a guarantee. It refuses immediately now,
+which is the honest behaviour and also the one that makes the loss visible instead of silent.
+
+It keeps its teeth by being a secret rather than a gesture: the password is checked by the same
 `Vault` that holds the key to the mailbox, through the same Argon2id derivation an unlock uses, so a
-wrong one is refused and guessing is slow by construction. **Where there is no account, the terminal
-keeps the deletion** — an installation with no password to ask for has nothing to check an answer
-against, and then the gesture is all there is.
+wrong one is refused and guessing is slow by construction. The grant is keyed to one request id and
+expires, and a refusal is now its own button — waiting five minutes used to be the only way to say
+no, which left a change armed for exactly as long as somebody might step away from the screen.
+
+**Where there is no account, the terminal keeps everything.** An installation with no password has
+nothing to check an answer against, and then the gesture is all there is. `serve-command.ts` decides
+that in one place, `placeFor`, which both the routing and the dashboard read — those two disagreeing
+would put a password field on screen for an answer nothing will ever read.
 
 Two placement rules follow, and both are checked:
 
@@ -368,7 +383,7 @@ pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
 pnpm sync               # mirror the account into the local encrypted database
 pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
-                        # and for confirming changes that move mail — it asks in *this* terminal
+                        # and for holding the session; changes are confirmed in the dashboard
 pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
 pnpm package            # build a downloadable copy into release/
 pnpm smoke              # start that copy somewhere else and check it works
@@ -463,7 +478,7 @@ record built from intentions would move back mail that never moved.
 
 A change is named by `describeChange` and by nothing else. There is no `summary` field: there was,
 written by hand at ten call sites, which produced two wordings for one act depending on which screen
-staged it. The diff, the terminal question and the history have to agree, so the name is derived.
+staged it. The diff, the confirmation and the history have to agree, so the name is derived.
 
 **Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
 `ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the

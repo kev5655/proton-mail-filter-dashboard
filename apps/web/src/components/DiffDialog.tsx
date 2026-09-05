@@ -225,11 +225,11 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                     />
                 )}
 
-                {phase.phase === 'waiting' && !phase.needsTerminal && (
+                {phase.phase === 'waiting' && !phase.needsSecond && (
                     <div className="notice notice-info">
                         <strong>Wird geschrieben.</strong> Diese Änderung ist klein genug, dass die
-                        Bestätigung von eben reicht — im Terminal steht keine zweite Frage.
-                        Prüfziffer: <code>{phase.shortDigest}</code>.
+                        Bestätigung von eben reicht — es kommt keine zweite Frage. Prüfziffer:{' '}
+                        <code>{phase.shortDigest}</code>.
                     </div>
                 )}
 
@@ -384,11 +384,11 @@ function ConfirmWithPassword({
 
     return (
         <div className="notice notice-warning form-stack">
-            <strong>Zum Löschen bitte dein Passwort.</strong>
+            <strong>Bitte dein Passwort.</strong>
             <p>
-                {reason === '' ? 'Diese Änderung löscht etwas.' : reason} Was oben steht, ist genau
-                das, was passiert — es steht hier, damit du es beim Bestätigen noch siehst.
-                Prüfziffer: <code>{shortDigest}</code>.
+                {reason === '' ? 'Diese Änderung wiegt schwerer als die meisten.' : reason} Was oben
+                steht, ist genau das, was passiert — es steht hier, damit du es beim Bestätigen noch
+                siehst. Prüfziffer: <code>{shortDigest}</code>.
             </p>
 
             <label className="field field-narrow">
@@ -412,14 +412,26 @@ function ConfirmWithPassword({
 
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
-            <button
-                type="button"
-                className="button button-danger"
-                disabled={password === '' || busy}
-                onClick={send}
-            >
-                {busy ? 'Wird geprüft …' : 'Löschen bestätigen'}
-            </button>
+            <div className="row">
+                <button
+                    type="button"
+                    className="button button-danger"
+                    disabled={password === '' || busy}
+                    onClick={send}
+                >
+                    {busy ? 'Wird geprüft …' : 'Bestätigen'}
+                </button>
+                {/*
+                 * Saying no, without a password and without waiting.
+                 *
+                 * There was no way to refuse: the only exit was to let the five minutes run out,
+                 * which left the change armed for exactly as long as somebody might step away from
+                 * the screen. A refusal proves nothing, so it costs nothing.
+                 */}
+                <button type="button" className="button button-quiet" disabled={busy} onClick={decline}>
+                    Abbrechen
+                </button>
+            </div>
         </div>
     );
 
@@ -430,6 +442,19 @@ function ConfirmWithPassword({
             .then(() => {
                 setPassword('');
             })
+            .catch((cause: Error) => {
+                setError(cause.message);
+            })
+            .finally(() => {
+                setBusy(false);
+            });
+    }
+
+    function decline(): void {
+        setError(undefined);
+        setBusy(true);
+        setPassword('');
+        void perform({ action: 'confirm-change', requestId, decline: true })
             .catch((cause: Error) => {
                 setError(cause.message);
             })

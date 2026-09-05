@@ -98,6 +98,14 @@ export interface AccountRunner {
      * that carries a password may end up in a record somebody can read back.
      */
     confirmChange: (requestId: string, password: string) => Promise<void>;
+    /**
+     * Refuse one pending change.
+     *
+     * No password: saying no proves nothing, and requiring a secret to decline would make waiting
+     * the easier way out — which is how a change stays armed while somebody goes to look
+     * something up.
+     */
+    declineChange: (requestId: string) => Promise<void>;
     changePassword: (current: string, next: string) => Promise<void>;
     /** Mint a secret and its otpauth URI. Nothing is stored until a code proves it arrived. */
     beginTotp: () => Promise<{ secret: string; uri: string }>;
@@ -177,16 +185,25 @@ export class AccountChannel {
                     return this.#ok();
 
                 /*
-                 * The second confirmation for a deletion, which used to be a keystroke at a
-                 * terminal.
+                 * The second confirmation, which used to be a keystroke at a terminal.
                  *
                  * The exchange is written down in `weigh()`: a password can be produced by
                  * anything that knows it, where a terminal keystroke cannot be produced over HTTP
-                 * at all — but the person deleting a folder now sees, at that moment, what is
-                 * inside it and where that mail goes. A confirmation somebody has to walk to
-                 * another window for is one they learn to perform without reading.
+                 * at all — but the person confirming now sees, at that moment, exactly what is
+                 * affected. A confirmation somebody has to walk to another window for is one they
+                 * learn to perform without reading, and on a machine with no keyboard at all it
+                 * was not a confirmation but a two-minute wait.
+                 *
+                 * Declining travels the same way and carries no password, because saying no proves
+                 * nothing and should cost nothing. Without it the only way to refuse was to let
+                 * five minutes pass, which left the change armed for exactly as long as somebody
+                 * might walk away from the screen.
                  */
                 case 'confirm-change':
+                    if (input['decline'] === true) {
+                        await this.#runner.declineChange(text(input['requestId']));
+                        return this.#ok();
+                    }
                     await this.#runner.confirmChange(text(input['requestId']), text(input['password']));
                     return this.#ok();
 

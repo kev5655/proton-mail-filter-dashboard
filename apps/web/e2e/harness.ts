@@ -109,7 +109,7 @@ export async function start(options: SeedOptions = {}): Promise<Harness> {
 
             // And the real decision about whether a second question is even asked.
             const weight = weigh(parsed, mailboxSize);
-            if (!weight.needsTerminal) {
+            if (!weight.needsSecond) {
                 protonCalls.push(writeFor(parsed));
                 return { backupPath: join(directory, 'backups', 'proton-e2e.json') };
             }
