@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { MessageMetadata, ProtonFilter, ProtonLabel } from '@pms/proton-api/schemas';
 import { closeDatabase, openDatabase, type Db } from '@pms/store';
 import { mirrorFilters, mirrorLabels, mirrorMessages, setMeta } from '@pms/sync';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApplyChannel } from '../src/apply-channel.js';
 import { SessionChannel } from '../src/session-channel.js';
@@ -201,6 +201,52 @@ describe('the server refuses to write', () => {
 
         expect(route('POST', '/api/login', db, { login }).status).toBe(202);
         expect(route('POST', '/api/logout', db, { login }).status).toBe(409);
+    });
+
+    it('syncs after a login succeeds, and only after it has succeeded', async () => {
+        // A fresh sign-in is the one moment the copy is certainly behind: either the session had
+        // expired, or this is the first connection on this machine and there is nothing here yet.
+        const order: string[] = [];
+        let finish: (() => void) | undefined;
+        const login = new SessionChannel(
+            async () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+            undefined,
+            false,
+            () => {
+                order.push('sync');
+            }
+        );
+        login.subscribe((state) => {
+            order.push(state.state);
+        });
+
+        expect(login.start()).toBeUndefined();
+        // The window is open and nothing has been fetched: a sync here would run against a session
+        // that does not exist yet.
+        expect(order).not.toContain('sync');
+
+        finish?.();
+        await vi.waitFor(() => {
+            expect(order).toContain('sync');
+        });
+        expect(order.indexOf('done')).toBeLessThan(order.indexOf('sync'));
+    });
+
+    it('keeps a failing after-login step out of the login result', async () => {
+        // A sync that will not start must not turn a login that worked into one that says it
+        // failed — the browser window closed, the session is on disk, and that is the fact.
+        const login = new SessionChannel(async () => undefined, undefined, false, () => {
+            throw new Error('kein Sync möglich');
+        });
+
+        expect(login.start()).toBeUndefined();
+        await vi.waitFor(() => {
+            expect(login.state.state).toBe('done');
+        });
+        expect(login.signedIn).toBe(true);
     });
 
     it('refuses a second login while a window is already open', () => {

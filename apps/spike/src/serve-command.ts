@@ -597,7 +597,17 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             },
             // Not known yet. Whether a stored session exists is only readable once the key that
             // decrypts it has been handed over, so `openLocalData` sets it.
-            false
+            false,
+            // Straight into a sync once a login has succeeded. Incremental, like every other run:
+            // it asks for what has arrived since the last one, which is seconds unless this is the
+            // first connection on this machine. A refusal is logged and nothing more — the usual
+            // one is „es läuft bereits eine Synchronisation", which needs no reaction.
+            () => {
+                const refused = sync.start();
+                if (refused !== undefined) {
+                    log.debug({ refused }, 'sync after login skipped');
+                }
+            }
         );
 
         /*

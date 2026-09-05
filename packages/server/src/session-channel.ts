@@ -60,11 +60,13 @@ export class SessionChannel {
     readonly #listeners = new Set<Listener>();
     readonly #run: LoginRunner | undefined;
     readonly #disconnect: DisconnectRunner | undefined;
+    readonly #onSignedIn: (() => void) | undefined;
 
-    constructor(run?: LoginRunner, disconnect?: DisconnectRunner, signedIn = false) {
+    constructor(run?: LoginRunner, disconnect?: DisconnectRunner, signedIn = false, onSignedIn?: () => void) {
         this.#run = run;
         this.#disconnect = disconnect;
         this.#signedIn = signedIn;
+        this.#onSignedIn = onSignedIn;
     }
 
     /** So the interface knows which of the two buttons to offer. */
@@ -119,6 +121,24 @@ export class SessionChannel {
             .then(() => {
                 this.#signedIn = true;
                 this.#emit({ state: 'done', finishedAt: Date.now() });
+                /*
+                 * After the state is settled, not inside the runner.
+                 *
+                 * A fresh sign-in is the one moment the local copy is certainly behind — either the
+                 * session had expired, so nothing has been fetched for as long as that took, or
+                 * this is the first connection on this machine and the copy is empty. What follows
+                 * is a sync, and it hangs off this transition rather than off the browser flow
+                 * because that is what it is a consequence of.
+                 *
+                 * Its failure cannot reach the login: this promise is already resolved, and a sync
+                 * that will not start must not turn a login that worked into one that says it
+                 * failed.
+                 */
+                try {
+                    this.#onSignedIn?.();
+                } catch (cause: unknown) {
+                    log.warn({ error: cause instanceof Error ? cause.message : 'unknown' }, 'after-login step failed');
+                }
             })
             .catch((cause: unknown) => {
                 const error = cause instanceof Error ? cause.message : 'Unbekannter Fehler.';
