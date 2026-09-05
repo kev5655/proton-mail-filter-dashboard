@@ -30,6 +30,8 @@ const TYPES: Record<string, string> = {
     '.ico': 'image/x-icon',
     '.woff2': 'font/woff2',
     '.map': 'application/json; charset=utf-8',
+    // Served with its own type or the browser ignores it, and the page is not installable.
+    '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 /**

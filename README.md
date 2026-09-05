@@ -223,11 +223,47 @@ pnpm serve --auto-sync 0           # serve without the five-minute background re
 pnpm serve --port 5175             # serve somewhere else
 ```
 
+## From your phone and your other machines
+
+The dashboard is a web page, so the way to use it away from this machine is to reach this machine —
+not to install a second copy that logs in on its own. Two copies mean two Proton sessions, two
+`LoginGuard`s that know nothing about each other, and two local journals that disagree about what
+has already been undone. One instance, reached from everywhere, is the shape that keeps those
+honest.
+
+[Tailscale](https://tailscale.com) is what makes that reasonable: your devices get a private
+network of their own, and `tailscale serve` puts a real certificate in front of the server without
+opening anything to the internet.
+
+```sh
+# on the machine that runs it — a Raspberry Pi is plenty
+tailscale serve --bg 5174
+
+# it prints the name; put that into .env so the server knows what to expect
+echo 'PMS_PUBLIC_ORIGIN=https://pi.tailnet-name.ts.net' >> .env
+pnpm serve
+```
+
+Open that address on the phone and use *Add to Home Screen*. It gets its own icon and opens without
+the browser's chrome — the same page, the same single database, nothing installed.
+
+Four things worth knowing before you do it:
+
+- **Confirmations happen in the dashboard now**, against the app password. That is why: on a machine
+  nobody is sitting at, a question at the terminal is not a question. See „Where the second question
+  is asked" in `CLAUDE.md` for what that trades away.
+- **A passkey has to be registered again** under the new name. WebAuthn scopes credentials to the
+  host, strictly and on purpose. The password is required either way.
+- **Signing in at Proton needs a visible browser**, which a headless box does not have. Do that part
+  where there is a screen, or set `PMS_OP_VAULT` and let the 1Password path run without one.
+- **The key stays in memory for as long as the grace period**, on a machine you are not watching.
+  Shorten it in the settings, or set it to `0` and type the password each time.
+
 ## Tests
 
 ```sh
-pnpm test        # 583 unit and component tests — no network, no account, seconds
-pnpm test:e2e    # 26 end-to-end tests in a real browser — about a minute
+pnpm test        # 976 unit and component tests — no network, no account, seconds
+pnpm test:e2e    # 34 end-to-end tests in a real browser — about a minute
 ```
 
 `pnpm test:e2e` needs Chromium, which `pnpm install:browser` puts in place. Without it the suite
