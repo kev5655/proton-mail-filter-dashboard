@@ -364,7 +364,12 @@
     padding: 10px 12px;
     border-radius: var(--radius-sm);
     font-size: 13px;
-    margin: 10px 0 0;
+    /*
+     * Spaced on both sides. It used to carry a top margin only, which reads fine when a notice is
+     * the last thing in a block and wrong the moment something follows it: on „Vorschläge" the
+     * search field sat flush against the coloured box with no gap at all.
+     */
+    margin: 12px 0;
     line-height: 1.45;
 }
 
@@ -1331,13 +1336,14 @@
 }
 
 /*
- * Headings keep their own bottom margin, which would add to the gap above whatever follows.
+ * Headings and notices keep their own bottom margin, which would add to the gap above whatever
+ * follows.
  *
- * Zeroed here rather than in the heading rules, because outside these containers the margin is
- * still what spaces them.
+ * Zeroed here rather than in their own rules, because outside these containers the margin is still
+ * what spaces them — a notice standing on a page has nothing else to hold the next thing off it.
  */
-.card > :where(h2, h3, h4),
-.editor-section > :where(h2, h3, h4) {
+.card > :where(h2, h3, h4, .notice),
+.editor-section > :where(h2, h3, h4, .notice) {
     margin-bottom: 0;
 }
 
@@ -1608,8 +1614,8 @@
  * A real element rather than a `title` attribute: `title` does not exist on a phone, cannot be
  * opened from a keyboard, and vanishes while it is being read.
  */
-.info {
-    position: relative;
+.info,
+.hint {
     display: inline-flex;
     vertical-align: middle;
 }
@@ -1638,17 +1644,16 @@
 }
 
 /*
- * Hidden until hovered, focused or tapped.
+ * Not in the page: the bubble is rendered into `document.body` and placed from the trigger's
+ * rectangle, so it belongs to no scroll container and cannot grow one. It was absolute inside its
+ * trigger once, and hovering the sign-out button made the sidebar scroll in both directions.
  *
- * `display: none` rather than opacity: a bubble that is merely transparent still takes clicks and
- * is still read out, which is worse than not being there.
+ * It is mounted only while open rather than hidden. A bubble that is merely transparent still takes
+ * clicks and is still read out, which is worse than not being there.
  */
 .info-bubble {
-    display: none;
-    position: absolute;
-    z-index: 30;
-    top: calc(100% + 6px);
-    left: 0;
+    position: fixed;
+    z-index: 60;
     /* Wide enough to read, and never wider than the screen it opens on. */
     width: max-content;
     max-width: min(46ch, calc(100vw - 32px));
@@ -1663,18 +1668,6 @@
     line-height: 1.5;
     white-space: normal;
     text-align: left;
-}
-
-.info:hover > .info-bubble,
-.info:focus-within > .info-bubble,
-.info-bubble.is-open {
-    display: block;
-}
-
-/* Near the right-hand edge it opens leftwards, or it would push the page sideways. */
-.info-right .info-bubble {
-    left: auto;
-    right: 0;
 }
 
 /* A heading with something at the far end of its line — a count, a button, a mark. */
@@ -1739,12 +1732,6 @@
 
 .status-pill.is-bad .status-dot {
     background: var(--danger);
-}
-
-/* Near the right edge, so the bubbles open leftwards rather than pushing the page sideways. */
-.status-strip .info-bubble {
-    left: auto;
-    right: 0;
 }
 
 @media (max-width: 620px) {
