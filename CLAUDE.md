@@ -139,6 +139,43 @@ Two placement rules follow, and both are checked:
   confirm whatever arrived next; five minutes of silence answers `expired`, and the change is
   refused rather than left armed for as long as the server runs.
 
+### Shipping it: one server, one browser, no Electron
+
+`scripts/package-app.mjs` turns the workspace into `release/` — the launcher, the bundled server, the
+built dashboard, and the two dependencies that cannot be bundled. `.github/workflows/release.yml`
+runs it once per platform when a release is published.
+
+**No Electron, and the reason is the login.** It has to happen in the user's own browser, with their
+password manager's extension and their passkeys; a bundled Chromium would add 150 MB and still not
+be the browser that matters. So the packaged shape is the shape the app already has — a local server
+plus the browser you have — and the archive ships no browser at all.
+
+Four things about it are load-bearing:
+
+- **Bundling is what removes vite-node.** `@protontech/crypto` and the vendored Proton packages ship
+  raw TypeScript, which is why `pnpm serve` needs vite in a checkout. esbuild transpiles them once,
+  at packaging time, and the result is plain JavaScript Node runs by itself. The `openpgp/lightweight`
+  redirect from `vite.config.ts` has to be repeated there, or there is no SRP login.
+- **Two dependencies stay external, for different reasons.** `better-sqlite3-multiple-ciphers` is a
+  native module whose `.node` binary is per platform and per Node version — which is why the workflow
+  is a matrix and not a cross-compile. `playwright` resolves its driver through paths relative to its
+  own package directory, and bundling breaks that.
+- **The server serves the dashboard.** `ServeOptions.webRoot` turns on `static.ts`, so the packaged
+  app is same-origin and the browser is never asked which origins may read one account's mailbox.
+  `static.ts` is where a request path meets the filesystem, and `data/` sits a short way above the
+  web root — `static.test.ts` is the guard, and it asserts one thing: nothing resolves outside the
+  root, ever. The `/ollama` proxy moves across for the same reason vite has one.
+- **`paths.ts` has a third answer now.** It used to walk up for `pnpm-workspace.yaml` and *throw*
+  when there was none, so the first packaged build died on its first line while every test stayed
+  green. A downloaded copy keeps its files beside the launcher, where somebody can see and delete
+  them — not in a hidden directory under the home, which would bury the one thing this tool promises
+  you can remove.
+
+`scripts/smoke-release.mjs` is what catches that class of failure: it copies `release/` somewhere
+else, starts it with the Node that ships in it, and checks that the page is served, that a fresh
+directory has no account, and that the mailbox answers `423` rather than empty. It never reaches
+Proton — a fresh directory has no session to reach it with.
+
 ### The password is the key, not a door
 
 `@pms/account` is not a login that guards a screen. The mailbox database and the stored Proton
@@ -301,7 +338,7 @@ packages/sync/          Mirroring Proton into it, and reading it back
 packages/account/       The app's own account: the password that is the key to the local data
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
 packages/apply/         The one path that writes to Proton, behind a second confirmation
-apps/spike/             M0 read-only probe, plus `--sync` and `--serve`
+apps/spike/             M0 read-only probe, plus `--sync` and `--serve`; the packaged entry point
 apps/web/               The dashboard. Reads the real mirror when the server runs, else the demo.
 ```
 
@@ -321,6 +358,8 @@ pnpm sync               # mirror the account into the local encrypted database
 pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
                         # and for confirming changes that move mail — it asks in *this* terminal
 pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
+pnpm package            # build a downloadable copy into release/
+pnpm smoke              # start that copy somewhere else and check it works
 ```
 
 The dashboard renders whichever mailbox it is given — the demo, or the real mirror when

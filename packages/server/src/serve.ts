@@ -5,6 +5,8 @@ import { getLogger } from '@pms/core/logger';
 import type { Db } from '@pms/store';
 
 import type { AccountChannel } from './account-channel.js';
+import { proxyToOllama } from './ollama-proxy.js';
+import { serveStatic } from './static.js';
 import type { ApplyChannel } from './apply-channel.js';
 import { route, STREAM_PATHS } from './handler.js';
 import type { SessionChannel } from './session-channel.js';
@@ -42,6 +44,23 @@ export interface ServeOptions {
     login?: SessionChannel | undefined;
     /** Absent when nothing guards this installation — then the dashboard shows no lock screen. */
     account?: AccountChannel | undefined;
+    /**
+     * Where the built dashboard lives, for a packaged copy.
+     *
+     * Absent in development, where vite serves the page and proxies `/api` here. Present in a
+     * downloaded copy, where this process does both — which is not a compromise: same origin means
+     * the browser never has to be told which origins may read one account's mailbox.
+     */
+    webRoot?: string | undefined;
+    /**
+     * Where Ollama is, for the same reason.
+     *
+     * Vite proxies `/ollama` in development because Ollama answers only requests whose `Origin` it
+     * was configured to allow, and a page served from somewhere else is not one of them. The
+     * packaged app has no vite, so it carries the same proxy — the alternative is telling every
+     * user to widen a service's access rules to accommodate this page.
+     */
+    ollamaUrl?: string | undefined;
 }
 
 export interface RunningServer {
@@ -59,6 +78,23 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
 
     const server = createServer((request, response) => {
         const path = new URL(request.url ?? '/', `http://${host}`).pathname;
+
+        if (path === '/ollama' || path.startsWith('/ollama/')) {
+            void proxyToOllama(options.ollamaUrl, request, response, path);
+            return;
+        }
+
+        /*
+         * Anything that is not the API is the page itself.
+         *
+         * Checked before the routes rather than after, so a dashboard file called `api-something`
+         * cannot shadow one — and so an unknown `/api/...` path still gets the router's own 404
+         * with a code rather than the application shell with a 200.
+         */
+        if (options.webRoot !== undefined && !path.startsWith('/api/')) {
+            void serveStatic(options.webRoot, request, response, path);
+            return;
+        }
 
         if (STREAM_PATHS.has(path)) {
             // Two streams, one shape. A login is mostly waiting — for a window to open, then for a

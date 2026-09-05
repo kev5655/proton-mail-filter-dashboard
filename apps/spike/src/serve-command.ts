@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { applyChange, confirmAtTerminal, digestOf, shortDigest, weigh, type ChangeRequest } from '@pms/apply';
 import { describeChange, type PendingChange } from '@pms/changes';
@@ -781,6 +782,15 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             },
         });
 
+        /*
+         * The dashboard's own files, when this is a packaged copy.
+         *
+         * In development vite serves them and proxies `/api` here; a downloaded copy has no vite,
+         * so this process does both. Same origin either way, which is what keeps the browser from
+         * ever having to be told which origins may read one account's mailbox.
+         */
+        const webRoot = packagedWebRoot();
+
         const server = await serveMailbox({
             // A function, because the mailbox appears when somebody unlocks and disappears when
             // they lock — the server outlives both.
@@ -790,6 +800,10 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             apply,
             login,
             account,
+            ...(webRoot === undefined ? {} : { webRoot }),
+            ...(process.env['PMS_OLLAMA_URL'] === undefined
+                ? {}
+                : { ollamaUrl: process.env['PMS_OLLAMA_URL'] }),
         });
 
         /*
@@ -813,7 +827,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 ? '\n  Gesperrt. Die lokale Kopie wird erst nach der Anmeldung im Dashboard geöffnet.'
                 : '\n  Noch kein Konto. Im Dashboard eines anlegen — damit entsteht der Schlüssel für die lokalen Daten.'
         );
-        console.log(`  Server: ${server.url} (nur von diesem Rechner erreichbar)`);
+        console.log(
+            webRoot === undefined
+                ? `  Server: ${server.url} (nur von diesem Rechner erreichbar)`
+                : `  Dashboard: ${server.url} (nur von diesem Rechner erreichbar)`
+        );
         console.log('  Synchronisieren lässt sich aus dem Dashboard heraus — gelesen wird, geschrieben nur lokal.');
         console.log(
             '  Grosse Änderungen fragen hier im Terminal nach — alles, was löscht oder einen\n' +
@@ -828,7 +846,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         if (logFile !== undefined) {
             console.log(`  Protokoll: ${logFile}`);
         }
-        console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
+        if (webRoot === undefined) {
+            console.log('\n  Dashboard in einem zweiten Terminal starten: pnpm dev');
+        } else {
+            console.log(`\n  Im Browser öffnen: ${server.url}`);
+        }
         console.log('  Beenden mit Ctrl+C.\n');
 
         await new Promise<void>((resolve) => {
@@ -849,6 +871,22 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             closeDatabase(db);
         }
     }
+}
+
+/**
+ * The built dashboard beside this file, or nothing.
+ *
+ * A packaged copy lays the pages out next to the bundle; a checkout has no such directory and gets
+ * `undefined`, which leaves vite serving them exactly as before. `PMS_WEB_ROOT` overrides both, so
+ * the packaged layout can be tried from a checkout without building one.
+ */
+function packagedWebRoot(): string | undefined {
+    const configured = process.env['PMS_WEB_ROOT'];
+    if (configured !== undefined && configured !== '') {
+        return existsSync(configured) ? configured : undefined;
+    }
+    const beside = fileURLToPath(new URL('./web/', import.meta.url));
+    return existsSync(join(beside, 'index.html')) ? beside : undefined;
 }
 
 /** How much mail the copy holds — the denominator `weigh` judges a change's reach against. */

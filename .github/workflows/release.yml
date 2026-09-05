@@ -1,0 +1,133 @@
+name: Release
+
+# Builds a downloadable copy for each platform when a release is published.
+#
+# One job per operating system, and that is not a convenience: the archive contains a *native*
+# module — the encrypted database driver — whose binary is compiled per platform and per Node
+# version. It has to be installed on the same kind of machine it will run on, so cross-building is
+# not an option and a matrix is the honest way to say so.
+#
+# The Node runtime travels with the archive. Without it the first step of "download and run" is
+# "install Node 24 first", which is the friction this exists to remove.
+
+on:
+  release:
+    types: [published]
+  # So a build can be tried without cutting a release. It uploads artifacts and attaches nothing.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # The version the archives carry, and the one they are tested against.
+  NODE_VERSION: '24.13.0'
+  # A browser is deliberately not shipped: the login runs in the user's own browser, so a bundled
+  # Chromium would add 150 MB and still not be the browser that matters.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One platform failing must not throw away the archives the others already produced.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            label: Linux (x64)
+            target: linux-x64
+            archive: tar.gz
+          - runner: windows-latest
+            label: Windows (x64)
+            target: win-x64
+            archive: zip
+          - runner: macos-latest
+            label: macOS (Apple Silicon)
+            target: darwin-arm64
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Cheap, and it is what makes an archive worth downloading. A release built from code that
+      # does not compile is worse than no release.
+      - name: Types
+        run: pnpm check-types
+
+      - name: Package
+        run: node scripts/package-app.mjs
+
+      # The runtime, taken from nodejs.org rather than from the runner: the runner's Node is not
+      # ours to redistribute from an arbitrary path, and pinning the URL means the archive says
+      # exactly which build is inside it.
+      - name: Bundle the Node runtime (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -eu
+          url="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${{ matrix.target }}.tar.gz"
+          curl -fsSL "$url" -o node.tar.gz
+          mkdir -p release/node
+          tar -xzf node.tar.gz --strip-components=1 -C release/node
+          # Only what is needed to run: the headers and npm are megabytes nobody will use here.
+          rm -rf release/node/include release/node/share release/node/lib/node_modules
+          release/node/bin/node --version
+
+      - name: Bundle the Node runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://nodejs.org/dist/v$env:NODE_VERSION/node-v$env:NODE_VERSION-win-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile node.zip
+          Expand-Archive node.zip -DestinationPath nodetmp
+          New-Item -ItemType Directory -Force -Path release/node | Out-Null
+          Copy-Item "nodetmp/node-v$env:NODE_VERSION-win-x64/node.exe" release/node/node.exe
+          & release/node/node.exe --version
+
+      # A downloaded copy has to start on a machine that has never seen this repository. The check
+      # is deliberately here rather than in the test suite: what it exercises is the archive.
+      - name: Smoke test the archive
+        shell: bash
+        run: node scripts/smoke-release.mjs
+
+      - name: Name the archive
+        id: name
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          [ "${{ github.event_name }}" = "workflow_dispatch" ] && version="dev-${GITHUB_SHA::7}"
+          echo "name=proton-mail-sorter-${version}-${{ matrix.target }}" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf "${{ steps.name.outputs.name }}.tar.gz" -C release .
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path release/* -DestinationPath "${{ steps.name.outputs.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: ${{ steps.name.outputs.name }}.${{ matrix.archive }}
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" "${{ steps.name.outputs.name }}.${{ matrix.archive }}" --clobber
+        shell: bash

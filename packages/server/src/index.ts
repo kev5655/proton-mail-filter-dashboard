@@ -32,6 +32,7 @@ export {
     type SyncSummary,
 } from './sync-channel.js';
 export { serveMailbox, type RunningServer, type ServeOptions } from './serve.js';
+export { fileFor, serveStatic } from './static.js';
 export type {
     MailboxFolder,
     MailboxMessage,

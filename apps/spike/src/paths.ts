@@ -10,10 +10,17 @@ import { fileURLToPath } from 'node:url';
  * split the state in two — the login guard wrote its cooldown to one path and looked for it at
  * another, which meant the guard did not guard anything.
  *
- * Anchoring to the workspace marker instead makes the location independent of how the program was
- * started.
+ * Three answers, in this order, and the middle one is the reason this is not two lines:
+ *
+ *  1. **`PMS_DATA_DIR`**, when somebody has said where.
+ *  2. **The repository root**, found by walking up to `pnpm-workspace.yaml`. This is a checkout,
+ *     and `data/` belongs beside the code it goes with.
+ *  3. **Beside the program**, when there is no workspace above it — which is every downloaded copy.
+ *     It used to *throw* there, so a packaged build failed on its first line; and the alternative,
+ *     a hidden directory somewhere under the home directory, would hide the one thing this tool
+ *     promises you can delete: the mailbox it keeps on your machine.
  */
-function findRepoRoot(): string {
+function findBase(): string {
     let directory = dirname(fileURLToPath(import.meta.url));
     for (let depth = 0; depth < 10; depth++) {
         if (existsSync(join(directory, 'pnpm-workspace.yaml'))) {
@@ -25,15 +32,22 @@ function findRepoRoot(): string {
         }
         directory = parent;
     }
-    throw new Error('Repository root not found: no pnpm-workspace.yaml above this file.');
+    // A packaged copy: `app/server.mjs`, so its files go one level up, beside the launcher where
+    // somebody can see them.
+    return resolve(dirname(fileURLToPath(import.meta.url)), '..');
 }
 
-export const REPO_ROOT = findRepoRoot();
+/**
+ * The directory everything else is relative to.
+ *
+ * Named `REPO_ROOT` because in a checkout that is what it is, and because a rename would touch
+ * every caller for no gain. In a downloaded copy it is the directory the launcher sits in.
+ */
+export const REPO_ROOT = findBase();
 
 /** Runtime state: the encrypted session and the login cooldown. Git-ignored. */
-export const DATA_DIR = join(REPO_ROOT, 'data');
+export const DATA_DIR = process.env['PMS_DATA_DIR'] ?? join(REPO_ROOT, 'data');
 
-/** Scrubbed API responses, recorded for offline development. Committed. */
 export const FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'recorded');
 
 /**

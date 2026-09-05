@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+# The packaged app, built by `pnpm package` and by the release workflow.
+release/
 .turbo/
 *.tsbuildinfo
 
