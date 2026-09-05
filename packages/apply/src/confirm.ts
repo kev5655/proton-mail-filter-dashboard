@@ -28,6 +28,13 @@ export interface TerminalConfirmOptions {
     timeoutMs?: number;
     input?: NodeJS.ReadableStream;
     output?: NodeJS.WritableStream;
+    /**
+     * Whether there is somebody at a keyboard.
+     *
+     * Defaults to what the input stream says. Set it in tests, where an injected stream is a real
+     * answer channel and has no `isTTY` to report.
+     */
+    interactive?: boolean;
 }
 
 export function confirmAtTerminal(
@@ -71,7 +78,31 @@ export function confirmAtTerminal(
         ];
         out.write(`${lines.join('\n')}\n`);
 
-        const rl = createInterface({ input: options.input ?? process.stdin, output: out });
+        const input = options.input ?? process.stdin;
+        const interactive = options.interactive ?? (input as NodeJS.ReadStream).isTTY === true;
+
+        /*
+         * No terminal means no, and it means it now.
+         *
+         * `rl.question` on a stream nobody is typing into simply never calls back. The offer then
+         * sat here for the full two minutes and came back „expired", which reads as „you were too
+         * slow" — for a server that never had a keyboard to be slow at. Under systemd, in a
+         * container, over a pipe, that made every category move, every undo and every large change
+         * fail after a silent two-minute stall, with nothing on screen saying why.
+         *
+         * The refusal is written to the output as well as returned, because in exactly the
+         * situation this catches, the output is a log file and it is the only place anybody will
+         * look.
+         */
+        if (!interactive) {
+            out.write(
+                '  Kein Terminal — hier kann niemand antworten, also gilt die Änderung als abgelehnt.\n' +
+                    '  Geschrieben wurde nichts. Diese Bestätigung braucht die Konsole, in der „pnpm serve" läuft.\n\n'
+            );
+            return 'declined';
+        }
+
+        const rl = createInterface({ input, output: out });
 
         try {
             const answer = await Promise.race([
