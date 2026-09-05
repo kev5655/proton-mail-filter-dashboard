@@ -464,7 +464,7 @@ Label kein Ziel ist, sonst behauptet die Vorschau das Falsche.
   protonmail-bridge --cli     # anmelden, dann `info` für die IMAP-Zugangsdaten
   ```
 
-  Danach kann ich das Paket bauen, das die Inhalte holt. Am Binary habe ich schon geprüft, dass
+  Danach kann ich den Teil bauen, der die Inhalte holt. Am Binary habe ich schon geprüft, dass
   Bridge den Header `X-Pm-Internal-Id` setzt — damit lassen sich unsere Nachrichten-IDs ohne Raten
   zuordnen. Erst dann werden Inhaltssuche und eine echte Gruppierung „nach Inhalt" möglich, und
   erst dann ist S-01 ein Test, der etwas beweist.
@@ -479,8 +479,8 @@ Label kein Ziel ist, sonst behauptet die Vorschau das Falsche.
 ## Die Testsuiten
 
 ```sh
-pnpm test        # 583 Tests, kein Netz, Sekunden
-pnpm test:e2e    # 26 Tests im echten Browser, gut eine Minute
+pnpm test        # 895 Tests, kein Netz, gut eine halbe Minute
+pnpm test:e2e    # 31 Tests im echten Browser, gut eine Minute
 ```
 
 Beide sind jetzt in `README.md` beschrieben — inklusive einzelner Datei, einzelnem Test und
@@ -915,3 +915,131 @@ hübsch gemacht hat, ist ein Bericht, in dem niemand mehr suchen kann.
 
 - Sagt jede Zeile etwas, das du ohne Vorwissen verstehst?
 - Fehlt irgendwo ein Satz — also steht dort noch ein Schlüssel wie `foo.bar`? Dann sag mir welcher.
+
+---
+
+## V-13 · Der Verlauf: Obergrenze und Löschen
+
+Unter „Verlauf". Neu ist ein Knopf **„Verlauf löschen"** oben rechts neben der Überschrift — nicht
+in einer eigenen Karte, weil eine Karte ihn wichtiger aussehen lässt, als er ist.
+
+Zwei Dinge daran sind keine Kosmetik:
+
+- **Der Verlauf hält höchstens 20 Einträge**, und zwar beim *Schreiben*, nicht beim Anzeigen. Ein
+  Verlauf, der auf der Platte ewig wächst und nur kurz dargestellt wird, wäre trotzdem ein
+  wachsender Haufen Mail-Metadaten.
+- **Löschen nimmt das Rückgängig mit.** Rückgängig arbeitet aus genau dieser Tabelle; eine Änderung
+  ohne Eintrag lässt sich nicht mehr zurücknehmen. Das steht dort, wo der Knopf steht, und nicht
+  irgendwo in einer Hilfe.
+- **Die Sicherungen bleiben.** `data/backups/` sind Dateien, der Verlauf ist eine Tabelle. Ein
+  „Verlauf löschen" darf nicht still die Kopie jedes Filters vor jeder Änderung wegwerfen.
+
+### Zu prüfen
+
+- Kommt eine Rückfrage im Dashboard, bevor gelöscht wird — und sagt sie, dass Rückgängig damit weg
+  ist?
+- Ist die Liste danach leer, und **liegt `data/backups/` noch da**?
+- Mehr als 20 Änderungen gemacht? Dann sollten die ältesten verschwunden sein, ohne dass du etwas
+  gedrückt hast. (Wahrscheinlich hast du noch keine 20 — dann ist das nichts, was du heute prüfen
+  kannst.)
+
+Status: `offen`
+
+---
+
+## V-14 · Handy, Tablet, zwei Spalten, Tooltips
+
+Das ist reine Oberfläche — es kann nichts an deinem Konto kaputtmachen, und deshalb steht es hier
+unten. Geprüft habe ich es an acht Breiten von 390 bis 1440 Pixeln im echten Browser, auf jedem
+Bildschirm, gegen seitliches Scrollen. Was ich **nicht** prüfen kann, ist, ob es sich auf deinem
+Telefon gut anfühlt.
+
+- **Unter 861 px** klappt die Seitenleiste über den Inhalt und wird zu einer Zeile mit Einträgen.
+  Darüber steht sie fest, und nur der Inhalt daneben scrollt.
+- **Vorschläge und Kategorien** stehen in zwei Spalten, sobald das Fenster breit genug ist, sonst in
+  einer.
+- **In den Kategorien lässt sich aufklappen**, welche Mails sowohl von der Kategorie als auch von
+  einer Regel betroffen sind.
+- **Die langen Erklärtexte stecken jetzt hinter einem `i`**, das auf Hover, auf Tastatur-Fokus und
+  auf Tippen aufgeht. Die *Behauptung* bleibt immer sichtbar; nur die Begründung wandert dahinter.
+  Nichts, was deine Entscheidung ändert — was eine Regel trifft, was ein Löschen mitnimmt, welches
+  Postfach auf dem Schirm ist — ist hinter einem Klick.
+- **Oben rechts steht eine Leiste**: verbunden oder nicht, wie alt die Kopie ist, wann der nächste
+  Sync läuft. Nur Zustand, kein Satz.
+
+### Zu prüfen
+
+- Auf dem Telefon: ist irgendwo etwas seitlich abgeschnitten oder unerreichbar? Kommt man an alle
+  acht Navigationseinträge?
+- Gehen die `i`-Tooltips auf dem Telefon per Tippen auf und mit einem Tippen daneben wieder zu?
+- Steht irgendwo noch ein Textblock, der besser hinter das `i` gehörte — oder umgekehrt: ist etwas
+  hinter dem `i`, das du beim Entscheiden gebraucht hättest? Das zweite ist der ernstere Befund.
+- Ollama in den Einstellungen: „Verbindung prüfen" zeigt jetzt einen Ladekreis und danach entweder
+  die gefundenen Modelle oder einen Fehler. Vorher passierte sichtbar nichts.
+
+Status: `offen`
+
+---
+
+## V-15 · Das heruntergeladene Paket
+
+Das Neueste und das, was am ehesten woanders kaputt ist als hier. `pnpm package` baut `release/`,
+`pnpm smoke` startet diese Kopie an einem anderen Ort und prüft sie. **Beides läuft bei mir auf
+Linux durch** — Windows und macOS hat noch nie jemand gestartet, auch ich nicht.
+
+Die CI baut drei Archive: **Linux x64**, **Windows x64** und **macOS Apple Silicon**. Für Intel-Macs
+ist keins dabei; das wäre ein vierter Eintrag in der Matrix, wenn du einen brauchst.
+
+### Zuerst ohne Release
+
+Auf GitHub unter *Actions → Release → Run workflow*. Das baut die drei Archive und hängt sie an
+**keinen** Release — sie liegen als Artefakte am Lauf. So siehst du, ob die Pipeline funktioniert,
+bevor du einen Tag setzt.
+
+### Zu prüfen
+
+1. Werden alle drei grün? Wenn eine Plattform scheitert, brechen die anderen **nicht** mit ab —
+   `fail-fast` ist aus, damit ein Fehlschlag nicht die fertigen Archive wegwirft.
+2. Archiv herunterladen, entpacken, `start.sh` (bzw. `start.cmd`) starten. **Ohne Node auf dem
+   Rechner** — die Laufzeit liegt im Archiv und der Starter nimmt sie.
+3. Kommt der Browser auf die Seite, und steht dort der Registrierungs-Bildschirm? Ein frisches
+   Verzeichnis hat kein Konto und **keine** Verbindung zu Proton.
+4. Konto anlegen, bei Proton anmelden, einmal synchronisieren. Das ist der eigentliche Test: der
+   Login im Browser und das native SQLite-Modul sind genau die zwei Dinge, die ein Bundle bricht.
+5. **Wo liegen die Daten?** Erwartet: `data/` **neben dem Starter**, im entpackten Ordner — nicht
+   versteckt unter deinem Home-Verzeichnis. Das ist Absicht: das Einzige, was dieses Werkzeug dir
+   verspricht, ist, dass du es löschen kannst.
+6. Ordner löschen, wieder entpacken: fängt es sauber von vorn an?
+
+### Was ich weiss und du erwarten sollst
+
+- **Kein Electron und kein mitgelieferter Browser.** Die Anmeldung muss in *deinem* Browser
+  passieren, mit deiner Passwort-Erweiterung und deinen Passkeys. Ein eingepacktes Chromium wären
+  150 MB und wäre trotzdem der falsche Browser.
+- **Das Archiv ist nicht signiert.** macOS und Windows werden davor warnen. Das zu ändern kostet ein
+  Entwicklerzertifikat pro Plattform — sag Bescheid, wenn es das wert ist.
+- **`playwright` liegt unentpackt daneben**, weil es seinen Treiber über Pfade relativ zum eigenen
+  Paketverzeichnis sucht. Das Archiv bringt **keine** Browser mit; die Anmeldung nimmt den, den du
+  hast.
+
+Status: `offen`
+
+---
+
+## Was ich seit V-08 selbst geprüft habe
+
+**895 Tests plus 31 im echten Browser**, alles grün, nichts übersprungen. `pnpm check-types`, der
+Web-Build, `pnpm package` und `pnpm smoke` unter Linux. Jede neue Zusicherung gegengeprüft, indem
+ich den Fehler wieder eingebaut habe — darunter:
+
+- Ein Import von `@pms/core/logger` im Browser-Bundle zieht pino und `process.stderr` mit und macht
+  die Seite weiss. Der Test läuft dafür den echten Import-Graphen ab `main.tsx` ab, statt eine Liste
+  zu pflegen; genau dieser Fehler war passiert.
+- Nichts unter dem Web-Root lässt sich über einen Pfad von aussen erreichen — `data/` liegt ein
+  Stück darüber. Zusätzlich gegen den laufenden Server mit `curl --path-as-is` geprüft.
+- Der Sperrbildschirm erscheint nur, wenn wirklich ein Server mit Konto-Oberfläche antwortet, nie
+  über der Demo.
+- Das Passwort beim Löschen geht **nicht** über `/api/apply`, und die Freigabe hängt an der
+  Anfrage-ID und läuft nach fünf Minuten ab.
+- Jeder protokollierte Schlüssel hat einen deutschen Satz; fehlt einer, fällt der Test auf den
+  Schlüssel zurück und meldet ihn.
