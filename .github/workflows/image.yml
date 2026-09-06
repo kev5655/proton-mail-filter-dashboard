@@ -1,0 +1,111 @@
+name: Image
+
+# The container image the Raspberry Pi runs, pushed to a private Docker Hub repository where
+# Watchtower picks it up.
+#
+# **It pushes on a tag and on nothing else, and that is a security decision rather than a taste in
+# release process.** Watchtower pulls and restarts unattended, so whatever lands in that repository
+# runs on the machine that holds the mailbox. Building on every commit to `main` would mean an
+# accidental push rolls out there without anybody deciding it should. Building is free; publishing
+# is the part that needs a person.
+#
+# `workflow_dispatch` therefore builds and verifies without publishing — the way to try a change
+# without shipping it.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'kev5655/proton-mail-sorter' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # A protected environment on the publishing job, so the token that can write to that repository
+    # is not simply available to any workflow run.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'dockerhub' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 is emulated here, and it is cheap because almost nothing runs under it: the Dockerfile
+      # does its compiling and bundling natively via $BUILDPLATFORM, leaving the emulated stage with
+      # a dependency install that downloads a prebuilt binary rather than building one.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Built first and loaded locally, so the smoke test below runs against the exact image that
+      # is about to be published rather than against a second build of the same source.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/image.tar
+
+      # The same three questions `scripts/smoke-release.mjs` asks a downloaded archive, asked of the
+      # image: does it start, does it serve the page, and does it refuse the mailbox when there is no
+      # account. It never reaches Proton — a fresh volume has no session to reach it with.
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker load -i /tmp/image.tar
+          tag="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -1)"
+          docker run -d --name pms-smoke -p 127.0.0.1:5174:5174 "$tag"
+
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:5174/api/health; then break; fi
+            sleep 2
+          done
+
+          echo "· die Seite"
+          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5174/ | grep -qx 200
+
+          echo "· ohne Konto ist das Postfach gesperrt"
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5174/api/mailbox)"
+          [ "$code" = "423" ] || { echo "erwartet 423, bekam $code"; docker logs pms-smoke; exit 1; }
+
+          docker rm -f pms-smoke
+
+      - name: Push
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

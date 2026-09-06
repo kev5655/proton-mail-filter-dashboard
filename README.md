@@ -259,15 +259,21 @@ Four things worth knowing before you do it:
 - **The key stays in memory for as long as the grace period**, on a machine you are not watching.
   Shorten it in the settings, or set it to `0` and type the password each time.
 
-## Auf dem Raspberry Pi
+## Als Container ausliefern
 
-Eine Instanz auf einem Pi hinter Tailscale, erreichbar von Telefon und beiden Rechnern. Die
-Einrichtung steht in `deploy/pi/` als vier Skripte, damit ein Defekt ein erneuter Lauf ist und
-keine Rekonstruktion aus dem Gedächtnis: `provision.sh` (System), `deploy.sh` (Code),
-`backup.sh` (`data/`, das Einzige was sich nicht neu bauen lässt) und `stress.sh` (prüft, ob
-das Netzteil unter Last trägt — Unterspannung ist der leiseste Weg zu einer kaputten Datenbank).
+`Dockerfile` baut ein arm64-Image für den Raspberry Pi, `.github/workflows/image.yml` schiebt es in
+eine private Registry, und Watchtower holt es dort ab. Der Build ist zweistufig: alles Teure —
+Installieren, Kompilieren, Bündeln, Dashboard bauen — läuft **nativ auf dem Build-Rechner** und
+erzeugt plattformneutrales JavaScript; nur der letzte Schritt ist arm64, und der ist ein Download,
+weil `better-sqlite3-multiple-ciphers` ein fertiges Binary für diese Node-ABI veröffentlicht.
 
-Siehe `deploy/pi/README.md`.
+**Das Image trägt einen Chromium, die herunterladbaren Archive nicht** — und der Unterschied ist die
+Maschine. Ein Archiv lässt ihn bewusst weg, weil die Anmeldung im eigenen Browser des Nutzers
+passieren soll, wo der Passwortmanager und der Passkey zu Hause sind. Auf einem Server gibt es
+diesen Browser nicht; dort steht die Wahl zwischen einem Browser im Image und gar keiner Anmeldung.
+
+Die Maschine selbst — Docker, Tailscale, das Routing, der Starter, Sicherungen — lebt in einem
+eigenen Repository, `homelab`. Dieses Projekt liefert ein Image und sonst nichts.
 
 ## More than one Proton account
 

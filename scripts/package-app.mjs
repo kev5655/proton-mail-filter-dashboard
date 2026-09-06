@@ -73,6 +73,19 @@ Absender diesen Rechner; das steht dort auch so.
 Lizenz: GPL-3.0. Enthaelt Code von ProtonMail/WebClients (GPL-3.0).
 `;
 
+/**
+ * Stop after the bundle, before the two external dependencies are installed.
+ *
+ * For the container image, whose build is split across two architectures. Everything up to the
+ * bundle is plain JavaScript and is produced natively on the build machine; the install has to
+ * happen on the architecture that will run it, because one of the two is a native module whose
+ * binary is per platform and per Node version. Running it here would put an x64 `.node` beside an
+ * arm64 Node, which fails at the first database open rather than at build time.
+ *
+ * An archive still does both in one go — there the two architectures are the same machine.
+ */
+const BUNDLE_ONLY = process.argv.includes('--bundle-only');
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const OUT = join(ROOT, 'release');
@@ -158,6 +171,12 @@ await writeFile(
         2
     )}\n`
 );
+
+if (BUNDLE_ONLY) {
+    console.log(`\nNur gebündelt (--bundle-only): ${APP}`);
+    console.log('  Die zwei externen Pakete fehlen noch — sie werden dort installiert, wo sie laufen.');
+    process.exit(0);
+}
 
 // npm rather than pnpm: the archive needs a real directory tree, not a store full of symlinks that
 // break the moment it is copied to another machine.
