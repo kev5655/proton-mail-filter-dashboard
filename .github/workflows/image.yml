@@ -85,6 +85,9 @@ jobs:
           PMS_IMAGE="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -1)" \
           PMS_IMAGE_PLATFORM=linux/arm64 \
             node scripts/smoke/image.mjs --no-build
+        # It asks from inside the container, not through a published port: the server binds
+        # loopback, and `docker run -p` forwards to the container's interface rather than to that.
+        # Verified natively on the Pi before this workflow ever ran.
 
       - name: Push
         if: startsWith(github.ref, 'refs/tags/v')

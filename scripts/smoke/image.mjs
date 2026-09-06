@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { askTheQuestions, somePort, waitForHealth } from './checks.mjs';
-
 /**
  * Build the container image and ask it the same four questions the archive gets.
  *
@@ -23,6 +21,14 @@ import { askTheQuestions, somePort, waitForHealth } from './checks.mjs';
  *   node scripts/smoke/image.mjs                    # build and check
  *   PMS_IMAGE=kev5655/proton-mail-sorter:latest \
  *     node scripts/smoke/image.mjs --no-build       # check an image that already exists
+ *
+ * **Nothing is published, and that is the finding this script was rewritten for.** The server binds
+ * `127.0.0.1`, which inside a container is the container's own loopback — and `docker run -p`
+ * forwards to the container's network interface, not to that. The first version published a port,
+ * watched the server come up in its logs, and then timed out waiting for an answer that could never
+ * arrive. The binding is correct: in the deployment the Tailscale sidecar shares this namespace, so
+ * it reaches the process without anything being exposed to the container network. So the questions
+ * are asked from inside, through `docker exec` — which is where the sidecar asks them from.
  */
 
 const execFile = promisify(execFileCallback);
@@ -31,7 +37,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLATFORM = process.env['PMS_IMAGE_PLATFORM'] ?? `linux/${process.arch === 'arm64' ? 'arm64' : 'amd64'}`;
 const TAG = process.env['PMS_IMAGE'] ?? 'proton-mail-sorter:smoke';
 const NAME = `pms-smoke-${String(process.pid)}`;
-const PORT = somePort();
+const SMOKE = dirname(fileURLToPath(import.meta.url));
 const build = !process.argv.includes('--no-build');
 
 // A directory of its own for the volume, so a failed run cannot leave anything in the workspace and
@@ -50,20 +56,20 @@ try {
         'run', '--detach',
         '--name', NAME,
         '--platform', PLATFORM,
-        // Loopback only. The image publishes nothing by itself and neither does this.
-        '--publish', `127.0.0.1:${String(PORT)}:5174`,
+        // No `--publish`. See the header: a published port cannot reach a loopback bind, and the
+        // loopback bind is what the deployment relies on.
         '--volume', `${data}:/app/data`,
+        // The questions themselves, mounted rather than copied — one definition, shared with the
+        // archive smoke test.
+        '--volume', `${SMOKE}:/smoke:ro`,
         // The timer has nothing to sync and nobody to tell.
         '--env', 'PMS_AUTO_SYNC=0',
         TAG,
     ]);
     started = true;
 
-    const base = `http://127.0.0.1:${String(PORT)}`;
-    await waitForHealth(base, async () => (await run('docker', ['logs', NAME])).stdout);
-    await askTheQuestions(base);
+    await run('docker', ['exec', NAME, 'node', '/smoke/inside.mjs'], { inherit: true });
 
-    console.log('\n✓ Das Image startet, bedient das Dashboard und ist ohne Konto gesperrt.');
 } finally {
     if (started) {
         // `--time 20` for the same reason the compose file uses it: the server closes its event

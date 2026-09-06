@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // The four questions, shared with `scripts/smoke/archive.mjs` so an image and an archive cannot
 // quietly come to mean different things.
 // @ts-expect-error — plain JavaScript with no declarations; it is a build script, not a package.
-import { questions, somePort, waitForHealth } from '../../../scripts/smoke/checks.mjs';
+import { questions } from '../../../scripts/smoke/checks.mjs';
 
 /**
  * The container image, started for real.
@@ -29,6 +29,12 @@ import { questions, somePort, waitForHealth } from '../../../scripts/smoke/check
  * showing an empty mailbox to whoever opened it.
  *
  * It never reaches Proton. A fresh volume has no session to reach it with.
+ *
+ * **The questions are asked from inside the container.** The server binds `127.0.0.1`, and inside a
+ * container that is the container's own loopback — which a published port does not reach, because
+ * `docker run -p` forwards to the container's network interface instead. The binding is correct: the
+ * Tailscale sidecar shares this namespace in the deployment. So `scripts/smoke/inside.mjs` is run
+ * through `docker exec` once, and each test reads its own line out of that run.
  */
 
 const run = promisify(execFile);
@@ -50,15 +56,13 @@ interface Question {
 /** The shared list, typed at the one place it crosses out of plain JavaScript. */
 const ask = (at: string): Question[] => questions(at) as Question[];
 
-let base: string;
+let answers: string;
 let data: string;
 let started = false;
 
 describe.runIf(asked)('the container image', () => {
     beforeAll(async () => {
         data = await mkdtemp(join(tmpdir(), 'pms-e2e-image-'));
-        const port = somePort() as number;
-        base = `http://127.0.0.1:${String(port)}`;
 
         if (shouldBuild) {
             await run('docker', ['build', '--platform', PLATFORM, '-t', TAG, ROOT], {
@@ -70,15 +74,20 @@ describe.runIf(asked)('the container image', () => {
             'run', '--detach',
             '--name', NAME,
             '--platform', PLATFORM,
-            '--publish', `127.0.0.1:${String(port)}:5174`,
             '--volume', `${data}:/app/data`,
+            '--volume', `${join(ROOT, 'scripts', 'smoke')}:/smoke:ro`,
             '--env', 'PMS_AUTO_SYNC=0',
             TAG,
         ]);
         started = true;
 
-        await waitForHealth(base, async () => (await run('docker', ['logs', NAME])).stdout);
-        // 15 minutes: an emulated build is slow, and a timeout here would read as a broken image.
+        // One run, inside the namespace, whose output every test below reads. Running it per test
+        // would restart the wait each time for no more confidence.
+        answers = (await run('docker', ['exec', NAME, 'node', '/smoke/inside.mjs'], {
+            maxBuffer: 16 * 1024 * 1024,
+        })).stdout;
+        // 15 minutes on the hook: an emulated build is slow, and a timeout here would read as a
+        // broken image rather than as a slow machine.
     }, 900_000);
 
     afterAll(async () => {
@@ -90,16 +99,12 @@ describe.runIf(asked)('the container image', () => {
         }
     }, 60_000);
 
-    /*
-     * Driven from the shared list rather than rewritten, so adding a question adds it everywhere at
-     * once — which is the whole reason `checks.mjs` exists.
-     */
-    // The names are known before the server exists; the checks need a base URL that only exists
-    // once it does. So the list is built twice on purpose: once for the titles, once per test.
-    for (const { what } of ask('http://not-yet')) {
-        it(what, async () => {
-            const live = ask(base).find((entry) => entry.what === what);
-            expect(await live?.check()).toBe(true);
+    // Driven from the shared list, so adding a question adds it here too — which is the whole
+    // reason `checks.mjs` exists. The base URL is a placeholder: only the names are used, and the
+    // answers come from the run inside the container.
+    for (const { what } of ask('http://names-only')) {
+        it(what, () => {
+            expect(answers).toContain(`✓ ${what}`);
         });
     }
 
