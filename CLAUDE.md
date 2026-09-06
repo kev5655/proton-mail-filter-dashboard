@@ -328,8 +328,10 @@ Four consequences worth knowing before touching any of it:
   change that; `vault-key.ts` is shaped to take a second wrapping when browser support settles.) The
   interface says this, because „Passkey" that then asks for a password reads as a bug otherwise.
 - **The KDF is slow on purpose.** Argon2id at 64 MiB costs about 1.5 s per derivation, which is what
-  makes a stolen file useless. Tests are given room rather than the KDF being made cheap — see the
-  timeout on `encryption.test.ts`'s describe.
+  makes a stolen file useless. The KDF is never made cheap for tests; `store/test/encryption.test.ts`
+  pays two real derivations and fits inside vitest's default five seconds, which also makes it the
+  first test to go flaky on a loaded machine. Give it room if it needs room — never the other way
+  round. `docs/security.md` is the full account of the key hierarchy and its parameters.
 - **`register()` adopts an existing passphrase.** An installation that already has a database was
   encrypted with whatever came from 1Password or a prompt; minting a fresh key at registration would
   orphan it. `serve-command.ts` asks for the old one once, at the terminal, and only in that case.

@@ -259,6 +259,12 @@ Four things worth knowing before you do it:
 - **The key stays in memory for as long as the grace period**, on a machine you are not watching.
   Shorten it in the settings, or set it to `0` and type the password each time.
 
+## Wie die Verschlüsselung arbeitet
+
+`docs/security.md` — für jemanden, der das prüft, nicht für jemanden, der es benutzt: die
+Schlüsselhierarchie, jeder KDF-Parameter mit Fundstelle, was auf der Platte im Klartext liegt und
+warum, und eine geordnete Liste der bekannten Schwachstellen.
+
 ## Als Container ausliefern
 
 `Dockerfile` baut ein arm64-Image für den Raspberry Pi, `.github/workflows/image.yml` schiebt es in
