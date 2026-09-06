@@ -172,7 +172,7 @@ export function RuleEditor({
         }
         return {
             text: `→ ${owner.destination}`,
-            tone: owner.destination === draft.folder ? 'neutral' : 'warning',
+            tone: draft.targets.includes(owner.destination ?? '') ? 'neutral' : 'warning',
             title: `Heute entscheidet „${owner.ruleName}" über diese Mail: nach „${owner.destination}".`,
         };
     };
@@ -331,7 +331,7 @@ export function RuleEditor({
                         // different lists, and a name typed for one is almost never the name
                         // wanted for the other — carrying it over produced a rule pointing at a
                         // label that did not exist, ready to create it.
-                        onClick={() => onChange({ ...draft, targetKind: 'folder', folder: '' })}
+                        onClick={() => onChange({ ...draft, targetKind: 'folder', targets: [] })}
                     >
                         In einen Ordner verschieben
                     </button>
@@ -339,40 +339,55 @@ export function RuleEditor({
                         type="button"
                         className={draft.targetKind === 'label' ? 'button' : 'button button-quiet'}
                         aria-pressed={draft.targetKind === 'label'}
-                        onClick={() => onChange({ ...draft, targetKind: 'label', folder: '' })}
+                        onClick={() => onChange({ ...draft, targetKind: 'label', targets: [] })}
                     >
-                        Mit einem Label markieren
+                        Mit Labels markieren
                     </button>
                 </div>
 
                 <p className="faint" style={{ marginBottom: 8 }}>
                     {draft.targetKind === 'folder'
                         ? 'Die Mail verlässt den Posteingang und liegt danach im Ordner.'
-                        : 'Die Mail bleibt im Posteingang und trägt zusätzlich das Label.'}
+                        : 'Die Mail bleibt im Posteingang und trägt danach die gewählten Labels. Mehrere sind erlaubt.'}
                 </p>
 
-                <span className="faint">{draft.targetKind === 'folder' ? 'Verschieben nach' : 'Markieren mit'}</span>
-                        <input
-                            type="text"
-                            className="text-input"
-                            list="folder-names"
-                            value={draft.folder}
-                            disabled={locked}
-                            placeholder="Ordnername"
-                            onChange={(event) => onChange({ ...draft, folder: event.target.value })}
-                            aria-label="Zielordner"
-                        />
-                        {draft.targetKind === 'label' && (
-                    <div style={{ marginTop: 12 }}>
-                        <LabelPicker
-                            labels={labels}
-                            value={draft.folder}
-                            subjects={matched.map((message) => message.Subject)}
-                            senders={matched.map((message) => message.Sender.Address)}
-                            onPick={(name) => onChange({ ...draft, folder: name })}
-                        />
-                    </div>
-                )}
+                <span className="faint">
+                    {draft.targetKind === 'folder' ? 'Verschieben nach' : 'Markieren mit'}
+                </span>
+                        {/*
+                          * One field for a folder, a set for labels — because a message lives in
+                          * one folder and can carry several labels. Offering the same control for
+                          * both would either promise a choice that Proton cannot honour or hide one
+                          * it can.
+                          */}
+                        {draft.targetKind === 'folder' ? (
+                            <input
+                                type="text"
+                                className="text-input"
+                                list="folder-names"
+                                value={draft.targets[0] ?? ''}
+                                disabled={locked}
+                                placeholder="Ordnername"
+                                onChange={(event) =>
+                                    onChange({
+                                        ...draft,
+                                        targets: event.target.value === '' ? [] : [event.target.value],
+                                    })
+                                }
+                                aria-label="Zielordner"
+                            />
+                        ) : (
+                            <div style={{ marginTop: 12 }}>
+                                <LabelPicker
+                                    labels={labels}
+                                    values={draft.targets}
+                                    subjects={matched.map((message) => message.Subject)}
+                                    senders={matched.map((message) => message.Sender.Address)}
+                                    disabled={locked}
+                                    onChange={(names) => onChange({ ...draft, targets: names })}
+                                />
+                            </div>
+                        )}
 
                 <datalist id="folder-names">
                             {folders.map((folder) => (

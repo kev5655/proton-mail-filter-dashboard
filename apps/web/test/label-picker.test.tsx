@@ -20,9 +20,10 @@ import { Providers } from './harness.js';
 
 let container: HTMLDivElement;
 let root: Root;
+/** The last set the picker reported. It hands back the whole set, never one name. */
 let picked: string[];
 
-async function mount(): Promise<void> {
+async function mount(chosen: string[] = []): Promise<void> {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -32,10 +33,12 @@ async function mount(): Promise<void> {
             <Providers>
                 <LabelPicker
                     labels={DEMO_LABELS}
-                    value=""
+                    values={chosen}
                     subjects={['Rechnung März']}
                     senders={['buchhaltung@firma.example']}
-                    onPick={(name) => picked.push(name)}
+                    onChange={(names) => {
+                        picked = names;
+                    }}
                 />
             </Providers>
         );
@@ -122,5 +125,57 @@ describe('with a model', () => {
         const text = container.textContent ?? '';
         expect(text).toContain('keine Mailinhalte');
         expect(text).toContain('es entscheidet nicht, was die Regel trifft');
+    });
+});
+
+describe('choosing several labels', () => {
+    /*
+     * A mail can carry „Rechnung" and „Steuer" at once. While this control took a single name, the
+     * only way to say that was two rules with identical conditions — kept in step by hand, and
+     * silently diverging the first time one of them was edited. `FileInto` is a list at Proton, so
+     * nothing had to be invented to allow it.
+     */
+    it('adds to the set rather than replacing it', async () => {
+        const first = DEMO_LABELS[0]!.Name;
+        const second = DEMO_LABELS[1]!.Name;
+        await mount([first]);
+
+        await act(async () => {
+            button(second)?.click();
+        });
+
+        expect(picked).toEqual([first, second]);
+    });
+
+    it('takes one back out without touching the others', async () => {
+        const [first, second, third] = DEMO_LABELS.map((label) => label.Name);
+        await mount([first!, second!, third!]);
+
+        await act(async () => {
+            button(second!)?.click();
+        });
+
+        expect(picked).toEqual([first, third]);
+    });
+
+    it('keeps the order it was given, so an unchanged rule shows no diff', async () => {
+        const [first, second] = DEMO_LABELS.map((label) => label.Name);
+        await mount([second!, first!]);
+
+        await act(async () => {
+            button(DEMO_LABELS[2]!.Name)?.click();
+        });
+
+        // Appended, never re-sorted. A control that tidied the list would produce a change to
+        // confirm on a rule nobody edited.
+        expect(picked).toEqual([second, first, DEMO_LABELS[2]!.Name]);
+    });
+
+    it('shows which ones are chosen', async () => {
+        const first = DEMO_LABELS[0]!.Name;
+        await mount([first]);
+
+        expect(button(first)?.getAttribute('aria-pressed')).toBe('true');
+        expect(button(DEMO_LABELS[1]!.Name)?.getAttribute('aria-pressed')).toBe('false');
     });
 });

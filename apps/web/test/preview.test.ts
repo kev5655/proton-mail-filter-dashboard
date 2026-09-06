@@ -27,7 +27,7 @@ function draft(over: Partial<RuleDraft> = {}): RuleDraft {
         name: 'Test',
         operator: FilterStatement.ALL,
         conditions: [],
-        folder: 'Ziel',
+        targets: ['Ziel'],
         markRead: false,
         markStarred: false,
         enabled: true,

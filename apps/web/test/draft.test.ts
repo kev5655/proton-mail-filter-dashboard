@@ -76,7 +76,7 @@ describe('what counts as a change', () => {
     });
 
     it('a different folder does', () => {
-        expect(isDirty(base, { ...base, folder: 'Woanders' })).toBe(true);
+        expect(isDirty(base, { ...base, targets: ['Woanders'] })).toBe(true);
     });
 
     it('half-typed text does not — it is not part of the rule yet', () => {

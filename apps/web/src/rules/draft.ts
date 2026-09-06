@@ -39,15 +39,27 @@ export interface RuleDraft {
     name: string;
     operator: FilterStatement;
     conditions: DraftCondition[];
-    /** Empty means the rule only marks; Proton allows that and so do we. */
-    folder: string;
     /**
-     * Whether the target above is a folder or a label.
+     * Where the rule files the mail, and what it marks it with.
      *
-     * It compiles to the same thing — Proton's filter model has no label action, the name goes into
-     * `FileInto` either way and Proton resolves it against whichever object carries it. What this
+     * A list, because `FileInto` is one at Proton and because labels are genuinely plural: a mail
+     * can carry „Rechnung" and „Steuer" at once, and forcing one rule per label produced two rules
+     * with identical conditions that had to be kept in step by hand.
+     *
+     * **Folders are not plural**, and that is not a rule this file invents — a message lives in one
+     * folder. With `targetKind: 'folder'` this holds at most one entry, and `validateDraft` says so
+     * when a rule read back from Proton holds more.
+     *
+     * Empty means the rule only marks; Proton allows that and so do we.
+     */
+    targets: string[];
+    /**
+     * Whether the targets above are folders or labels.
+     *
+     * It compiles to the same thing — Proton's filter model has no label action, the names go into
+     * `FileInto` either way and Proton resolves each against whichever object carries it. What this
      * decides is two other things: what the preview predicts (a folder moves the mail out of the
-     * inbox, a label marks it and leaves it), and what gets *created* when the name is new. Without
+     * inbox, a label marks it and leaves it), and what gets *created* when a name is new. Without
      * it, somebody typing a new label name silently got a folder.
      */
     targetKind: 'folder' | 'label';
@@ -66,13 +78,13 @@ export function emptyCondition(type: ConditionType = ConditionType.SENDER): Draf
     return { uid: nextUid(), type, comparator: ConditionComparator.CONTAINS, values: [], pending: '' };
 }
 
-export function newDraft(folder = ''): RuleDraft {
+export function newDraft(target = ''): RuleDraft {
     return {
         ruleId: undefined,
         name: '',
         operator: FilterStatement.ALL,
         conditions: [emptyCondition()],
-        folder,
+        targets: target === '' ? [] : [target],
         // Moving is the ordinary case and the one somebody arriving at an empty rule means.
         targetKind: 'folder',
         markRead: false,
@@ -93,7 +105,9 @@ export function fromRule(rule: MailboxRule): RuleDraft {
             values: [...condition.Values],
             pending: '',
         })),
-        folder: rule.rule.Actions.FileInto.at(-1) ?? '',
+        // All of them, not just the last. Reading only the last was right while a rule could have
+        // one target; it now silently dropped every label but one the moment a rule had several.
+        targets: rule.rule.Actions.FileInto.filter((name) => name !== ''),
         // Read back from the account rather than stored on the rule, because Proton does not store
         // it on the rule either.
         targetKind: 'folder',
@@ -131,7 +145,7 @@ export function toSimpleObject(draft: RuleDraft): SimpleObject {
                 Values: condition.type === ConditionType.ATTACHMENTS ? [] : [...condition.values],
             })),
         Actions: {
-            FileInto: draft.folder === '' ? [] : [draft.folder],
+            FileInto: draft.targets.filter((name) => name !== ''),
             Mark: { Read: draft.markRead, Starred: draft.markStarred },
         },
     };
@@ -145,7 +159,7 @@ export function isDirty(original: RuleDraft, draft: RuleDraft): boolean {
 function signature(draft: RuleDraft): string {
     return JSON.stringify({
         name: draft.name,
-        folder: draft.folder,
+        targets: draft.targets,
         // Part of the signature because it changes what a save *creates* when the name is new —
         // a folder or a label — even though it compiles to the same rule either way.
         targetKind: draft.targetKind,
@@ -203,21 +217,38 @@ export function validateDraft(
         });
     }
 
-    if (draft.folder === '') {
+    if (draft.targets.length === 0) {
         problems.push({
             level: 'warning',
             message: 'Ohne Ziel verschiebt und markiert die Regel nichts.',
         });
-    } else {
+    }
+
+    /*
+     * A folder rule with several targets.
+     *
+     * The editor cannot produce this — it offers one field for a folder — but a rule read back from
+     * Proton can hold several names in `FileInto`, and calling that a folder rule would mean
+     * predicting a move to whichever one happens to be last. Proton decides, and it does not tell
+     * us which; saying so is better than guessing quietly.
+     */
+    if (draft.targetKind === 'folder' && draft.targets.length > 1) {
+        problems.push({
+            level: 'warning',
+            message: `Diese Regel nennt ${String(draft.targets.length)} Ziele. Eine Mail liegt aber in genau einem Ordner — welcher davon gewinnt, entscheidet Proton. Als Labels wäre das eindeutig.`,
+        });
+    }
+
+    for (const target of draft.targets) {
         const known = draft.targetKind === 'label' ? labels : folders;
         const exists = known.some(
-            (entry) => entry.Name === draft.folder || entry.Name.endsWith(`/${draft.folder}`)
+            (entry) => entry.Name === target || entry.Name.endsWith(`/${target}`)
         );
         // The opposite kind having the name is worth its own sentence: Proton allows a folder and a
         // label to be called the same thing, and then the rule's behaviour depends on which one it
         // resolves against — which is not something to discover after the mail has moved.
         const other = (draft.targetKind === 'label' ? folders : labels).some(
-            (entry) => entry.Name === draft.folder
+            (entry) => entry.Name === target
         );
 
         if (!exists) {
@@ -225,8 +256,8 @@ export function validateDraft(
                 level: 'warning',
                 message:
                     draft.targetKind === 'label'
-                        ? `Das Label „${draft.folder}" gibt es noch nicht. Es wird zusammen mit der Regel angelegt.`
-                        : `Den Ordner „${draft.folder}" gibt es noch nicht. Er wird zusammen mit der Regel angelegt.`,
+                        ? `Das Label „${target}" gibt es noch nicht. Es wird zusammen mit der Regel angelegt.`
+                        : `Den Ordner „${target}" gibt es noch nicht. Er wird zusammen mit der Regel angelegt.`,
             });
         }
         if (other) {
@@ -234,8 +265,8 @@ export function validateDraft(
                 level: 'warning',
                 message:
                     draft.targetKind === 'label'
-                        ? `Es gibt auch einen Ordner „${draft.folder}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`
-                        : `Es gibt auch ein Label „${draft.folder}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`,
+                        ? `Es gibt auch einen Ordner „${target}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`
+                        : `Es gibt auch ein Label „${target}". Proton erlaubt beides, und welches die Regel trifft, entscheidet Proton — nicht wir.`,
             });
         }
     }

@@ -23,17 +23,26 @@ import { ModelStatus } from './ModelStatus.js';
  */
 export function LabelPicker({
     labels,
-    value,
+    values,
     subjects,
     senders,
-    onPick,
+    disabled = false,
+    onChange,
 }: {
     labels: readonly MailboxFolder[];
-    value: string;
+    /**
+     * The labels this rule marks with — several, deliberately.
+     *
+     * A mail can carry „Rechnung" and „Steuer" at once, and while this took a single name the only
+     * way to say that was two rules with identical conditions, kept in step by hand. `FileInto` is a
+     * list at Proton, so nothing had to be invented for it.
+     */
+    values: readonly string[];
     /** What the rule currently catches, so the model has something to go on. */
     subjects: readonly string[];
     senders: readonly string[];
-    onPick: (name: string) => void;
+    disabled?: boolean;
+    onChange: (names: string[]) => void;
 }): React.JSX.Element {
     const { provider, state } = useModel();
     const [allowNew, setAllowNew] = useState(false);
@@ -42,6 +51,22 @@ export function LabelPicker({
     const [suggestion, setSuggestion] = useState<
         { chosen: string[]; proposedNew: string[]; rationale: string } | undefined
     >(undefined);
+
+    /*
+     * Toggling rather than replacing, which is what makes the row read as a set.
+     *
+     * Order is preserved by appending: `FileInto` is a list, and a rule that reshuffled its labels
+     * on every click would show a diff on a change nobody made.
+     */
+    const toggle = (name: string): void => {
+        onChange(values.includes(name) ? values.filter((entry) => entry !== name) : [...values, name]);
+    };
+
+    const add = (name: string): void => {
+        if (!values.includes(name)) {
+            onChange([...values, name]);
+        }
+    };
 
     async function ask(): Promise<void> {
         setBusy(true);
@@ -70,9 +95,14 @@ export function LabelPicker({
                         <button
                             key={label.ID}
                             type="button"
-                            className={value === label.Name ? 'button' : 'button button-quiet'}
-                            aria-pressed={value === label.Name}
-                            onClick={() => onPick(label.Name)}
+                            className={
+                                values.includes(label.Name) ? 'button' : 'button button-quiet'
+                            }
+                            aria-pressed={values.includes(label.Name)}
+                            disabled={disabled}
+                            onClick={() => {
+                                toggle(label.Name);
+                            }}
                         >
                             {label.Name}
                         </button>
@@ -147,9 +177,12 @@ export function LabelPicker({
                                     key={name}
                                     type="button"
                                     className="button button-secondary"
-                                    onClick={() => onPick(name)}
+                                    disabled={disabled || values.includes(name)}
+                                    onClick={() => {
+                                        add(name);
+                                    }}
                                 >
-                                    {name} übernehmen
+                                    {values.includes(name) ? `${name} ist gewählt` : `${name} übernehmen`}
                                 </button>
                             ))}
                         </div>
@@ -167,7 +200,10 @@ export function LabelPicker({
                                 <button
                                     type="button"
                                     className="button button-secondary"
-                                    onClick={() => onPick(name)}
+                                    disabled={disabled || values.includes(name)}
+                                    onClick={() => {
+                                        add(name);
+                                    }}
                                 >
                                     Neues Label „{name}" verwenden
                                 </button>
