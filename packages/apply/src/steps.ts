@@ -11,7 +11,6 @@ import {
     createFolder,
     deleteFilter,
     deleteFolder,
-    reorderFilters,
     setFilterEnabled,
     updateFilter,
     updateFolder,
@@ -271,33 +270,6 @@ export async function setEnabled(http: ProtonHttp, filter: ProtonFilter, enabled
     }
 }
 
-/**
- * Put the filters in a given order.
- *
- * The full id list, always. Proton takes the order as the complete sequence, so omitting an id we
- * do not know about would silently reprioritise it — and with filters, priority *is* the outcome.
- * A list that is not a permutation of what Proton just returned is refused rather than sent.
- */
-export async function reorder(http: ProtonHttp, account: Account, ids: readonly string[]): Promise<void> {
-    const known = new Set(account.filters.map((filter) => filter.ID));
-    const given = new Set(ids);
-
-    const missing = [...known].filter((id) => !given.has(id));
-    const unknown = ids.filter((id) => !known.has(id));
-
-    if (missing.length > 0 || unknown.length > 0) {
-        throw new AppError('APPLY_ORDER_INCOMPLETE', {
-            message: 'Die Reihenfolge deckt nicht genau die Filter ab, die bei Proton liegen.',
-            hint:
-                'Bei Filtern ist die Reihenfolge das Ergebnis — ein fehlender Eintrag würde diesen ' +
-                'Filter still verschieben. Erst neu synchronisieren, dann noch einmal.',
-            context: { missing: missing.length, unknown: unknown.length },
-        });
-    }
-
-    await reorderFilters(http, [...ids]);
-    log.info({ count: ids.length }, 'filters reordered');
-}
 
 /**
  * Ask Proton to run its own filters over mail that already arrived.

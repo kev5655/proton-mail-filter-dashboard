@@ -33,8 +33,8 @@ const log = getLogger('account');
  * precisely so that a locally served page can use WebAuthn without a certificate.
  */
 
-export const RELYING_PARTY_ID = 'localhost';
-export const RELYING_PARTY_NAME = 'Proton Mail Sorter';
+const RELYING_PARTY_ID = 'localhost';
+const RELYING_PARTY_NAME = 'Proton Mail Sorter';
 
 export interface PasskeyChallenge {
     challenge: string;

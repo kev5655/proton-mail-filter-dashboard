@@ -36,7 +36,7 @@ export async function writePrivateFile(path: string, contents: string): Promise<
 }
 
 /** Take away other accounts' access. Best effort on Windows, enforced elsewhere. */
-export async function restrictToOwner(path: string): Promise<void> {
+async function restrictToOwner(path: string): Promise<void> {
     if (process.platform !== 'win32') {
         await chmod(path, OWNER_ONLY);
         return;

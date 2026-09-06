@@ -142,10 +142,6 @@ export function getLogger(module: string): Logger {
     return child;
 }
 
-/** Correlation id for one request or one sync run, so its lines can be pulled out of the noise. */
-export function withCorrelation(logger: Logger, correlationId: string): Logger {
-    return logger.child({ correlationId });
-}
 
 /** Exposed for the redaction test — the guarantee is only worth what it is tested against. */
 export const __testing = { SECRET_KEYS, REDACT_PATHS };

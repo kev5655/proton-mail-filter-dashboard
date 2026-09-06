@@ -31,7 +31,7 @@ export function credentialConfig(): CredentialConfig {
 
 const PROMPT_SOURCE_NAME = 'Terminal-Eingabe';
 
-export function promptSource(): CredentialSource {
+function promptSource(): CredentialSource {
     const origin = (label: string): { source: string; label: string } => ({
         source: PROMPT_SOURCE_NAME,
         label,

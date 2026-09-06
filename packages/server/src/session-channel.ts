@@ -43,6 +43,22 @@ export type SessionState =
     | { state: 'disconnected'; revoked: boolean; revokeError?: string | undefined; finishedAt: number }
     | { state: 'failed'; error: string; code?: string | undefined; finishedAt: number };
 
+/**
+ * Why a login cannot be attempted right now, when that is already known.
+ *
+ * Carried on the channel rather than discovered from a refusal, because the difference is the whole
+ * point: a refusal arrives *after* somebody pressed the button, and pressing it is the act the
+ * guard exists to ration.
+ */
+export interface LoginBlock {
+    reason: string;
+    code?: string | undefined;
+    /** Unix seconds. A cooldown ends by itself; the interface can say when. */
+    retryAfter?: number | undefined;
+    /** An account lock. No waiting clears it, so no button should suggest otherwise. */
+    lockedOut: boolean;
+}
+
 export type LoginRunner = (report: (state: 'opening' | 'waiting') => void) => Promise<void>;
 
 /** Ends the connection. `everywhere` also asks Proton to revoke the token. */
@@ -68,6 +84,15 @@ export class SessionChannel {
         this.#signedIn = signedIn;
         this.#onSignedIn = onSignedIn;
     }
+
+    /**
+     * Why the guard would refuse, read before anything is offered.
+     *
+     * Mutable and read at send time for the same reason `signedIn` is: it changes while the process
+     * runs — a failed attempt starts a cooldown, and `pnpm spike --lockout-cleared` ends a lock —
+     * and a value fixed at construction would be wrong from the first failure onwards.
+     */
+    blocked: LoginBlock | undefined = undefined;
 
     /** So the interface knows which of the two buttons to offer. */
     get signedIn(): boolean {

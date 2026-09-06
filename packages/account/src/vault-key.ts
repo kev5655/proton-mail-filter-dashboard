@@ -146,9 +146,3 @@ function keyFromSecret(secret: string): Uint8Array {
     return createHash('sha256').update(secret, 'utf8').digest();
 }
 
-/** Constant-time comparison, for anything that is compared rather than decrypted. */
-export function sameSecret(a: string, b: string): boolean {
-    const left = Buffer.from(a, 'utf8');
-    const right = Buffer.from(b, 'utf8');
-    return left.length === right.length && timingSafeEqual(left, right);
-}

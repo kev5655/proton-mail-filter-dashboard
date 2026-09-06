@@ -291,17 +291,39 @@ describe('signing in from the dashboard', () => {
         // browser-driven login must not: a password manager's extension fills Proton's own form,
         // and what this process never receives it cannot leak, log or mistype.
         const source = await readFile(join(REPO, 'packages', 'browser-auth', 'src', 'login.ts'), 'utf8');
-        const byHand = source.slice(source.indexOf('export async function loginByHandInBrowser'));
+        const byHand = functionSource(source, 'export async function loginByHandInBrowser');
 
         expect(byHand).not.toMatch(/options\.password|fill\(page, 'password'/);
         expect(byHand).toContain('PROTON_LOGIN_URL');
     });
 
+
+/**
+ * One function's source, bounded.
+ *
+ * `slice(indexOf(...))` takes everything to the end of the file, so an assertion about one function
+ * silently became an assertion about every function after it. That held until a *different*
+ * function gained a field called `retryAfter` and failed a test about retry loops in a function
+ * that has none.
+ *
+ * Bounded at the next top-level declaration: everything here is either `export …` or a doc comment
+ * at column zero, so that is where the next thing starts.
+ */
+function functionSource(source: string, signature: string): string {
+    const from = source.indexOf(signature);
+    if (from === -1) {
+        throw new Error(`not found: ${signature}`);
+    }
+    const rest = source.slice(from + signature.length);
+    const next = rest.search(/\n(?:export |\/\*\*)/);
+    return signature + (next === -1 ? rest : rest.slice(0, next));
+}
+
     it('asks the guard before it opens anything', async () => {
         // A button in a web interface makes a login easy to hammer, which is how this account
         // earned a lockout. The guard is consulted first, and a refusal is a refusal.
         const session = await readFile(join(REPO, 'apps', 'spike', 'src', 'session.ts'), 'utf8');
-        const fn = session.slice(session.indexOf('export async function loginInBrowser'));
+        const fn = functionSource(session, 'export async function loginInBrowser');
 
         const guardAt = fn.indexOf('assertMayAttempt');
         const openAt = fn.indexOf('loginByHandInBrowser');
@@ -311,7 +333,7 @@ describe('signing in from the dashboard', () => {
 
     it('records the failure so the guard can count it', async () => {
         const session = await readFile(join(REPO, 'apps', 'spike', 'src', 'session.ts'), 'utf8');
-        const fn = session.slice(session.indexOf('export async function loginInBrowser'));
+        const fn = functionSource(session, 'export async function loginInBrowser');
 
         expect(fn).toContain('recordFailure');
         // And no retry loop around it. One attempt, then stop — the rule that got this account back.

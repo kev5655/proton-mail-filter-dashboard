@@ -54,7 +54,7 @@ import {
 
 import { accountDir, DATA_DIR, logFilePath, useAccountDir } from './paths.js';
 import { deleteLocalCopy } from './local-data.js';
-import { loginInBrowser, resolvePassphrase, resume, signOut } from './session.js';
+import { loginGuardState, loginInBrowser, resolvePassphrase, resume, signOut } from './session.js';
 
 /**
  * Hand the dashboard the mirrored mailbox, and let it ask for a fresh one.
@@ -644,19 +644,35 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                         'Passwort-Manager darin.',
                 });
             }
-            await loginInBrowser({
-                passphrase: vault.passphrase(),
-                profileDir,
-                // So the session lands in the client this process is already using. Storing it and
-                // not handing it over would make a sign-in take effect at the *next* start.
-                ...(http === undefined ? {} : { http }),
-                ...(process.env['PMS_BROWSER_CHANNEL'] === undefined
-                    ? {}
-                    : { channel: process.env['PMS_BROWSER_CHANNEL'] as 'chrome' | 'msedge' | 'chromium' }),
-                onOpen: () => {
-                    report('waiting');
-                },
-            });
+            /*
+             * Whatever this attempt does to the guard, the dashboard learns it.
+             *
+             * Refreshed in a `finally` rather than after success: a *failed* attempt is exactly the
+             * one that starts a cooldown, and leaving the old verdict on the channel would offer
+             * the button again a second later — which is the hammering this guard exists to stop.
+             */
+            try {
+                await loginInBrowser({
+                    passphrase: vault.passphrase(),
+                    profileDir,
+                    // So the session lands in the client this process is already using. Storing it
+                    // and not handing it over would make a sign-in take effect at the *next* start.
+                    ...(http === undefined ? {} : { http }),
+                    ...(process.env['PMS_BROWSER_CHANNEL'] === undefined
+                        ? {}
+                        : {
+                              channel: process.env['PMS_BROWSER_CHANNEL'] as
+                                  | 'chrome'
+                                  | 'msedge'
+                                  | 'chromium',
+                          }),
+                    onOpen: () => {
+                        report('waiting');
+                    },
+                });
+            } finally {
+                login.blocked = await loginGuardState();
+            }
             },
             /*
              * Cutting the connection, in the order that makes it real.
@@ -741,6 +757,14 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 const resumed = await resume(passphrase);
                 http = resumed.http;
                 login.signedIn = resumed.signedIn;
+                /*
+                 * The guard's verdict, read once the account is known.
+                 *
+                 * Here rather than at start-up because the record is per account — `accountDir()`
+                 * decides which file is read, and before an unlock there is no answer to that
+                 * question. Reading the wrong account's cooldown would be worse than reading none.
+                 */
+                login.blocked = await loginGuardState();
                 restartAutoSync();
                 const lastSync = getMeta(db, 'lastSyncAt');
                 console.log(

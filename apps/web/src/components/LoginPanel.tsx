@@ -14,7 +14,7 @@ import { useLogin } from '../login.js';
  * it is, with no button beside it to press again.
  */
 export function LoginPanel(): React.JSX.Element | null {
-    const { status, connected, start, refusal } = useLogin();
+    const { status, connected, start, refusal, blocked } = useLogin();
 
     if (!connected || !status.available) {
         return null;
@@ -28,13 +28,41 @@ export function LoginPanel(): React.JSX.Element | null {
         return null;
     }
 
+    /*
+     * The guard's verdict, before anything is offered.
+     *
+     * Two refusals that look alike and are not. A **cooldown** ends by itself, so the button stays
+     * and says when — hiding it would leave somebody guessing whether the tool still works. A
+     * **lock** does not end: no waiting clears it, only the owner signing in at mail.proton.me and
+     * running `pnpm spike --lockout-cleared`. A button there would be a button that is refused every
+     * single time, which is exactly what earned this account its lockout.
+     */
+    if (blocked?.lockedOut === true) {
+        return (
+            <div className="sync-panel">
+                <p className="notice notice-danger">
+                    <strong>Anmeldung gesperrt.</strong> {blocked.reason}
+                    <br />
+                    <br />
+                    Kein Warten hebt das auf. Melde dich bei mail.proton.me an und sieh nach, dass
+                    das Konto erreichbar ist — danach gibt <code>pnpm spike --lockout-cleared</code>{' '}
+                    es wieder frei. Absichtlich kein Knopf hier: dieses Konto war schon einmal
+                    gesperrt, weil ein Programm es weiter versucht hat.
+                </p>
+            </div>
+        );
+    }
+
+    const waitingUntil = blocked?.retryAfter;
+    const cooling = waitingUntil !== undefined && waitingUntil * 1000 > Date.now();
+
     return (
         <div className="sync-panel">
             <div className="row">
                 <button
                     type="button"
                     className="button button-secondary"
-                    disabled={running}
+                    disabled={running || cooling}
                     aria-busy={running}
                     onClick={start}
                 >
@@ -42,6 +70,14 @@ export function LoginPanel(): React.JSX.Element | null {
                     {running ? 'Fenster ist offen …' : 'Bei Proton anmelden'}
                 </button>
             </div>
+
+            {cooling && (
+                <p className="notice notice-warning">
+                    <strong>Noch gesperrt.</strong> {blocked?.reason} Der Knopf wird von selbst
+                    wieder aktiv — ein Versuch währenddessen würde ohnehin abgelehnt und die
+                    Wartezeit verlängern.
+                </p>
+            )}
 
             {status.state === 'opening' && (
                 <p className="faint">Der Browser startet. Das kann ein paar Sekunden dauern.</p>

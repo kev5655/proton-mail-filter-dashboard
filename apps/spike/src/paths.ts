@@ -91,7 +91,7 @@ export function loadEnvFile(): { path: string; found: boolean } {
 }
 
 /** Where the JSON log lines go. Git-ignored, one file per day, never rotated away by us. */
-export const LOG_DIR = join(DATA_DIR, 'logs');
+const LOG_DIR = join(DATA_DIR, 'logs');
 
 /**
  * The log file for today's runs.

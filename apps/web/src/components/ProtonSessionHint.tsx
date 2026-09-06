@@ -28,7 +28,7 @@ const SESSION_CODES = new Set([
  * `PROTON_API_ERROR` is one code covering every refusal Proton makes, and a 401 inside it is the
  * exact case this exists for — the message is the only place that distinguishes it.
  */
-export function isSessionProblem(code: string | undefined, message: string | undefined): boolean {
+function isSessionProblem(code: string | undefined, message: string | undefined): boolean {
     if (code !== undefined && SESSION_CODES.has(code)) {
         return true;
     }

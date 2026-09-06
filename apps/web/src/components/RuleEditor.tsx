@@ -544,5 +544,3 @@ export function RuleEditor({
     );
 }
 
-/** Proton's own default when nothing else is known. Exported so the page and the editor agree. */
-export const DEFAULT_STATEMENT = FilterStatement.ALL;

@@ -120,12 +120,6 @@ export async function loadSession(path: string, passphrase: string): Promise<Sto
     }
 }
 
-/** Constant-time comparison, for callers that need to check a passphrase without leaking timing. */
-export function passphraseMatches(a: string, b: string): boolean {
-    const left = Buffer.from(a.normalize('NFKC'), 'utf8');
-    const right = Buffer.from(b.normalize('NFKC'), 'utf8');
-    return left.length === right.length && timingSafeEqual(left, right);
-}
 
 /**
  * Forget the stored session.

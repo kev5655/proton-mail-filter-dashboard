@@ -58,7 +58,7 @@ export interface ProtonHttpOptions {
 
 /** Roughly the pace of someone working through their own mailbox. */
 export const DEFAULT_MIN_INTERVAL_MS = 900;
-export const DEFAULT_JITTER_MS = 600;
+const DEFAULT_JITTER_MS = 600;
 
 interface RequestOptions {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE';

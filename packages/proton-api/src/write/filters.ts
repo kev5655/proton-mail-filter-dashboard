@@ -83,21 +83,7 @@ export async function setFilterEnabled(
  * message wins. Sending a partial list would silently reprioritise everything omitted, so the
  * caller must pass every filter id.
  */
-export async function reorderFilters(http: ProtonHttp, filterIds: string[]): Promise<void> {
-    await http.request(
-        { method: 'PUT', path: 'mail/v4/filters/order', body: { FilterIDs: filterIds } },
-        envelopeSchema
-    );
-    log.info({ count: filterIds.length }, 'filters reordered');
-}
 
-/**
- * Apply filters to mail that already arrived.
- *
- * The reason a new rule can tidy up the backlog instead of only affecting future mail. Proton does
- * the moving, which keeps the project's core rule intact — the tool still never moves a message
- * itself, it asks Proton to run its own filters.
- */
 export async function applyFiltersToExisting(http: ProtonHttp, messageIds: string[]): Promise<void> {
     await http.request(
         { method: 'POST', path: 'mail/v4/messages/apply-filters', body: { IDs: messageIds } },

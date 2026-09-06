@@ -428,22 +428,40 @@ export async function loginInBrowser(options: {
     await persist(session, userId, options.passphrase);
 }
 
-/** What the guard currently allows, so a dashboard can say why rather than offer a refused button. */
-export async function loginGuardState(): Promise<{
-    mayAttempt: boolean;
-    reason?: string | undefined;
+/**
+ * What the guard currently forbids, or `undefined` when nothing does.
+ *
+ * Read *before* anybody presses anything. `LoginGuard` refuses during a cooldown and refuses
+ * indefinitely after an account lock, and a dashboard that only learns this from the refusal has
+ * already offered the button — which is how the lockout this guard exists for was earned in the
+ * first place.
+ *
+ * `retryAfter` and `lockedOut` come out with it because the two refusals are not the same thing to
+ * a person. A cooldown ends; a lock does not, and no amount of waiting clears it.
+ */
+export interface LoginBlock {
+    reason: string;
     code?: string | undefined;
-}> {
+    /** Unix seconds before which no attempt may be made. */
+    retryAfter?: number | undefined;
+    /** No cooldown will clear this — only `pnpm spike --lockout-cleared`, by the account owner. */
+    lockedOut: boolean;
+}
+
+export async function loginGuardState(): Promise<LoginBlock | undefined> {
+    const guard = new LoginGuard({ path: guardFile() });
     try {
-        await new LoginGuard({ path: guardFile() }).assertMayAttempt();
-        return { mayAttempt: true };
+        await guard.assertMayAttempt();
+        return undefined;
     } catch (error) {
+        const state = await guard.read();
         return {
-            mayAttempt: false,
-            reason: error instanceof Error ? error.message : 'Unbekannt.',
+            reason: error instanceof Error ? error.message : 'Anmeldung derzeit nicht möglich.',
             ...(error !== null && typeof error === 'object' && 'code' in error
                 ? { code: String((error as { code: unknown }).code) }
                 : {}),
+            ...(state?.retryAfter === undefined ? {} : { retryAfter: state.retryAfter }),
+            lockedOut: state?.lockedOut === true,
         };
     }
 }

@@ -40,6 +40,22 @@ interface LoginContext {
     disconnect: (everywhere: boolean) => void;
     /** Set when starting was refused: a login already running, or a server that cannot open one. */
     refusal: string | undefined;
+    /**
+     * Why a login cannot be attempted at all, known *before* anybody presses anything.
+     *
+     * The difference from `refusal` is the whole point. A refusal arrives after the button was
+     * pressed, and pressing it is the act `LoginGuard` exists to ration — this account has already
+     * been locked once by a program that kept trying.
+     */
+    blocked: LoginBlock | undefined;
+}
+
+export interface LoginBlock {
+    reason: string;
+    code?: string | undefined;
+    /** Unix seconds. A cooldown ends by itself; a lock does not. */
+    retryAfter?: number | undefined;
+    lockedOut: boolean;
 }
 
 const Context = createContext<LoginContext | undefined>(undefined);
@@ -59,6 +75,7 @@ export function LoginProvider({
         available: false,
         signedIn: false,
     });
+    const [blocked, setBlocked] = useState<LoginBlock | undefined>(undefined);
     const [connected, setConnected] = useState(false);
     const [refusal, setRefusal] = useState<string | undefined>(undefined);
 
@@ -75,8 +92,11 @@ export function LoginProvider({
             const next = JSON.parse(event.data as string) as LoginState & {
                 available: boolean;
                 signedIn: boolean;
+                blocked?: LoginBlock;
             };
             setStatus(next);
+            // Absent means „nothing is blocking", which is what the server omits it for.
+            setBlocked(next.blocked);
             if (next.state === 'done') {
                 log('info', 'login.done', {});
                 onSignedIn?.();
@@ -132,8 +152,8 @@ export function LoginProvider({
     }, []);
 
     const value = useMemo<LoginContext>(
-        () => ({ status, connected, start, disconnect, refusal }),
-        [status, connected, start, disconnect, refusal]
+        () => ({ status, connected, start, disconnect, refusal, blocked }),
+        [status, connected, start, disconnect, refusal, blocked]
     );
 
     return <Context.Provider value={value}>{children}</Context.Provider>;
