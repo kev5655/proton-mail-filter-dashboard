@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
 
+import { assertWithPrf } from '../passkey.js';
+
 import { useAccount } from '../account.js';
 
 /**
@@ -239,6 +241,44 @@ function Unlock(): React.JSX.Element {
      * and never chooses which credential counts. What it contributes is the part only a browser can
      * do — talking to the authenticator.
      */
+    /**
+     * Opening with the passkey alone.
+     *
+     * No password field is involved and none is sent. What stands in for it is the authenticator
+     * plus the user verification it was told to require — and the key really is unwrapped by what
+     * the PRF extension produced, rather than a password being waived after a signature.
+     *
+     * The account name still travels, because on an installation with several accounts the server
+     * has to know which one to try before it can try anything.
+     */
+    const withPasskeyOnly = (): void => {
+        setError(undefined);
+        setBusy(true);
+        void (async () => {
+            try {
+                const begun = (await perform({
+                    action: 'passkey-login-begin',
+                    origin: window.location.origin,
+                    forUnlock: true,
+                })) as { options: unknown };
+                const { response, prfOutput } = await assertWithPrf(begun.options);
+                await perform({
+                    action: 'passkey-unlock',
+                    response,
+                    prfOutput,
+                    origin: window.location.origin,
+                    account,
+                });
+            } catch (cause) {
+                setError(
+                    cause instanceof Error ? cause.message : 'Der Passkey wurde nicht akzeptiert.'
+                );
+            } finally {
+                setBusy(false);
+            }
+        })();
+    };
+
     const withPasskey = (): void => {
         setError(undefined);
         setBusy(true);
@@ -275,6 +315,24 @@ function Unlock(): React.JSX.Element {
                       ? 'Die lokale Kopie ist verschlüsselt und wird erst nach der Anmeldung geöffnet.'
                       : `Angemeldet wird als ${status.username}. Die lokale Kopie ist verschlüsselt und wird erst danach geöffnet.`}
             </p>
+
+            {status.passkeyUnlock === true && (
+                <div className="notice notice-info form-stack">
+                    <p>
+                        Ein Passkey auf diesem Konto schliesst <strong>ohne Passwort</strong> auf.
+                        Der Schlüssel wird dabei wirklich aus dem Passkey entpackt — es wird kein
+                        Passwort übergangen.
+                    </p>
+                    <button
+                        type="button"
+                        className="button"
+                        disabled={busy}
+                        onClick={withPasskeyOnly}
+                    >
+                        Mit Passkey aufschliessen
+                    </button>
+                </div>
+            )}
 
             {status.withinGrace && (
                 <div className="notice notice-info form-stack">

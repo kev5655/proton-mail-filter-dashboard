@@ -323,10 +323,15 @@ Four consequences worth knowing before touching any of it:
 - **There is no password recovery, and there cannot be one.** A way back would have to keep the key
   somewhere a password does not protect. The registration screen says so before the password is
   chosen, which is the only honest place to say it.
-- **A passkey is a second factor, not the key.** WebAuthn returns a signature, not a secret, so
-  nothing in it can unwrap a key — the password is always required as well. (The PRF extension could
-  change that; `vault-key.ts` is shaped to take a second wrapping when browser support settles.) The
-  interface says this, because „Passkey" that then asks for a password reads as a bug otherwise.
+- **A passkey is a second factor by default, and can become the key.** WebAuthn returns a signature,
+  not a secret, so a passkey on its own could never unwrap anything — which is why the password was
+  always required as well. The **PRF extension** is the exception and is now implemented: it returns
+  32 bytes that only that authenticator can produce, and `vault-key.ts` was always shaped to take a
+  second wrapping. A passkey enabled for it opens the account with no password; one that is not is
+  exactly what it was. Two rules are enforced rather than described: **enabling it requires the vault
+  to already be open**, so a passkey cannot enrol itself, and **unlocking with one requires user
+  verification** rather than merely preferring it, because possession alone must not open a mailbox.
+  See `docs/security.md` §6.
 - **The KDF is slow on purpose.** Argon2id at 64 MiB costs about 1.5 s per derivation, which is what
   makes a stolen file useless. The KDF is never made cheap for tests; `store/test/encryption.test.ts`
   pays two real derivations and fits inside vitest's default five seconds, which also makes it the

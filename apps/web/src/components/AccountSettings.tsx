@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { startRegistration } from '@simplewebauthn/browser';
 
 import { useAccount } from '../account.js';
+import { assertWithPrf } from '../passkey.js';
 
 /**
  * Changing what guards the local data, from inside the thing it guards.
@@ -316,10 +317,17 @@ function Passkeys(): React.JSX.Element {
         <section className="settings-block form-stack">
             <h3>Passkeys</h3>
             <p className="faint">
-                Ein Passkey kommt <strong>zum Passwort dazu</strong>, er ersetzt es nicht: WebAuthn
-                liefert eine Signatur, kein Geheimnis — und aus einer Signatur lässt sich der
-                Schlüssel für die lokalen Daten nicht gewinnen. Ein Knopf, der das verspräche, könnte
-                es nicht halten.
+                Ein Passkey kommt normalerweise <strong>zum Passwort dazu</strong>: WebAuthn liefert
+                eine Signatur, kein Geheimnis — und aus einer Signatur lässt sich kein Schlüssel
+                gewinnen.
+            </p>
+            <p className="faint">
+                <strong>Ausnahme: die PRF-Erweiterung.</strong> Kann dein Authenticator sie, liefert
+                er 32 Bytes, die nur er erzeugen kann — damit lässt sich der Schlüssel wirklich
+                entpacken, und der Passkey schliesst allein auf. Freigeben lässt sich das nur hier,
+                wo dein Passwort ohnehin schon gilt: ein Passkey kann sich nicht selbst dazu
+                ermächtigen. Das Passwort bleibt daneben gültig; du verlierst nichts, und ohne beides
+                gibt es weiterhin keinen Weg zurück.
             </p>
 
             {status.passkeys.length === 0 ? (
@@ -332,21 +340,68 @@ function Passkeys(): React.JSX.Element {
                                 <strong>{passkey.label}</strong>{' '}
                                 <span className="faint">
                                     seit {new Date(passkey.addedAt * 1000).toLocaleDateString('de-CH')}
+                                    {passkey.unlocks === true ? ' · schliesst allein auf' : ' · zweiter Faktor'}
                                 </span>
                             </span>
-                            <button
-                                type="button"
-                                className="button button-danger-quiet"
-                                disabled={busy}
-                                onClick={() => {
-                                    run(
-                                        () => perform({ action: 'passkey-remove', id: passkey.id }),
-                                        'Der Passkey ist entfernt.'
-                                    );
-                                }}
-                            >
-                                Entfernen
-                            </button>
+                            <span className="row">
+                                {passkey.unlocks === true ? (
+                                    <button
+                                        type="button"
+                                        className="button button-quiet"
+                                        disabled={busy}
+                                        onClick={() => {
+                                            run(
+                                                () =>
+                                                    perform({
+                                                        action: 'passkey-unlock-disable',
+                                                        id: passkey.id,
+                                                    }),
+                                                'Er ist wieder nur zweiter Faktor. Das Passwort bleibt unverändert.'
+                                            );
+                                        }}
+                                    >
+                                        Aufschliessen abschalten
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="button button-secondary"
+                                        disabled={busy}
+                                        onClick={() => {
+                                            run(async () => {
+                                                const begun = (await perform({
+                                                    action: 'passkey-login-begin',
+                                                    origin: window.location.origin,
+                                                    forUnlock: true,
+                                                })) as { options: unknown };
+                                                const { response, prfOutput } =
+                                                    await assertWithPrf(begun.options);
+                                                await perform({
+                                                    action: 'passkey-unlock-enable',
+                                                    response,
+                                                    prfOutput,
+                                                    origin: window.location.origin,
+                                                });
+                                            }, 'Dieser Passkey schliesst jetzt ohne Passwort auf.');
+                                        }}
+                                    >
+                                        Ohne Passwort aufschliessen
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    className="button button-danger-quiet"
+                                    disabled={busy}
+                                    onClick={() => {
+                                        run(
+                                            () => perform({ action: 'passkey-remove', id: passkey.id }),
+                                            'Der Passkey ist entfernt.'
+                                        );
+                                    }}
+                                >
+                                    Entfernen
+                                </button>
+                            </span>
                         </li>
                     ))}
                 </ul>

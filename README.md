@@ -102,8 +102,9 @@ is from this machine.
 
 Two consequences worth knowing before you set it. A passkey is scoped to the name it was registered
 under, so one registered on `localhost` will not be offered on a `ts.net` address and has to be
-registered again. And the password is still required either way — a passkey has always been the
-second factor here, never the key.
+registered again. And a passkey only replaces the password where its authenticator supports the
+WebAuthn **PRF extension** and you have enabled that in the settings; otherwise it stays what it
+always was, a second factor beside the password.
 
 ### Signing in
 

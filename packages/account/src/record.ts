@@ -47,6 +47,17 @@ const passkeySchema = z.object({
     transports: z.array(z.string()).default([]),
     label: z.string(),
     addedAt: z.number().int(),
+    /**
+     * A second wrapping of the master key, under a key only this authenticator can produce.
+     *
+     * Present only for a passkey that has been made an unlock method. Absent means the passkey is
+     * what it always was — a second factor beside the password — and the two states are kept apart
+     * because they are genuinely different promises to the user.
+     *
+     * It does not weaken the password wrapping; it sits beside it. Losing both is still
+     * unrecoverable, and that has not changed.
+     */
+    wrapped: wrappedSchema.optional(),
 });
 
 export const accountSchema = z.object({
@@ -64,6 +75,16 @@ export const accountSchema = z.object({
     /** Sealed with the master key, so it needs the password before it can be read. */
     totp: wrappedSchema.optional(),
     passkeys: z.array(passkeySchema).default([]),
+    /**
+     * The salt handed to the PRF extension, one per account.
+     *
+     * Not per credential, deliberately: `prf.eval.first` is supported far more widely than
+     * `evalByCredential`, and one salt is enough because the PRF output already differs per
+     * credential — `PRF(A, salt)` and `PRF(B, salt)` are unrelated. What the salt does is make this
+     * installation's outputs specific to it, so the same authenticator used elsewhere yields
+     * different bytes. It is not a secret and is stored in the clear.
+     */
+    prfSalt: z.string().optional(),
     /**
      * How long the unlocked key may stay in memory after the dashboard is locked.
      *

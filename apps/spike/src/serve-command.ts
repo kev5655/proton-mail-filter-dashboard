@@ -822,6 +822,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 requiresTotp: unknown ? false : state.requiresTotp,
                 hasPasskeys: unknown ? false : state.passkeys.length > 0,
                 passkeys: unknown ? [] : state.passkeys,
+                passkeyUnlock: unknown ? false : state.passkeyUnlock,
                 ...(unknown || state.graceUntil === undefined ? {} : { graceUntil: state.graceUntil }),
                 graceMinutes: state.graceMinutes,
                 withinGrace: !unknown && uiLocked && vault.withinGrace,
@@ -837,6 +838,55 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          * no database and no way to obtain either. That is the same shape as every other capability
          * in this file: HTTP can ask, and only this process can act.
          */
+        /**
+         * Open an account, closing whichever one is open first.
+         *
+         * The order is the entire multi-account guarantee and is worth stating once rather than
+         * twice: the name is resolved and its vault loaded **before** anything is closed, so a typo
+         * costs nothing. Then the current account is let go completely — key, database, and the
+         * Proton session with it — and only then is the new credential tried. There is no moment at
+         * which two accounts are open, so no route could read across and none had to be written to
+         * prevent it.
+         *
+         * `attempt` is whatever proves the caller may open it: a password, or a passkey.
+         */
+        const openWith = async (
+            account: string | undefined,
+            attempt: () => Promise<void>
+        ): Promise<void> => {
+            const wanted = account?.trim() ?? '';
+            if (wanted === '' && accounts.length > 1 && openAccount === undefined) {
+                // Without a name there is nothing to try the credential against, and trying it
+                // against whichever account happens to be first would be worse than refusing.
+                throw new AppError('ACCOUNT_MISSING', {
+                    message: 'Auf diesem Rechner gibt es mehrere Konten.',
+                    hint: 'Gib den Namen des Kontos an, das du aufschliessen willst.',
+                });
+            }
+            if (wanted !== '' && wanted.toLowerCase() !== openAccount?.name.toLowerCase()) {
+                const entry = findAccount(accounts, wanted);
+                if (entry === undefined) {
+                    throw new AppError('ACCOUNT_MISSING', {
+                        message: `Hier gibt es kein Konto namens „${wanted}".`,
+                        hint: 'Der Name ist der, mit dem das Konto angelegt wurde.',
+                    });
+                }
+                closeLocalData();
+                vault.lock(true);
+                openAccount = undefined;
+                useAccountDir(directoryOf(DATA_DIR, entry));
+                vault = new Vault(accountFile());
+                await vault.load();
+                await attempt();
+                openAccount = entry;
+            } else {
+                await attempt();
+            }
+            uiLocked = false;
+            everUnlocked = true;
+            await openLocalData();
+        };
+
         const account = new AccountChannel({
             view,
             register: async (input) => {
@@ -874,47 +924,26 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 await openLocalData();
             },
             unlock: async (input) => {
-                /*
-                 * Opening one account means closing the other first, in this order.
-                 *
-                 * The name is resolved and its vault loaded *before* anything is closed, so a
-                 * typo costs nothing. Then the current account is let go completely — key,
-                 * database, and the Proton session with it — and only then is the new password
-                 * tried. There is no moment at which two accounts are open, which is the entire
-                 * guarantee: from A you cannot reach B because B is not open, and B's files are
-                 * unreadable without B's password.
-                 */
-                const wanted = input.account?.trim() ?? '';
-                if (wanted === '' && accounts.length > 1 && openAccount === undefined) {
-                    // Without a name there is nothing to try the password against, and trying it
-                    // against whichever account happens to be first would be worse than refusing.
-                    throw new AppError('ACCOUNT_MISSING', {
-                        message: 'Auf diesem Rechner gibt es mehrere Konten.',
-                        hint: 'Gib den Namen des Kontos an, das du aufschliessen willst.',
-                    });
-                }
-                if (wanted !== '' && wanted.toLowerCase() !== openAccount?.name.toLowerCase()) {
-                    const entry = findAccount(accounts, wanted);
-                    if (entry === undefined) {
-                        throw new AppError('ACCOUNT_MISSING', {
-                            message: `Hier gibt es kein Konto namens „${wanted}".`,
-                            hint: 'Der Name ist der, mit dem das Konto angelegt wurde.',
-                        });
-                    }
-                    closeLocalData();
-                    vault.lock(true);
-                    openAccount = undefined;
-                    useAccountDir(directoryOf(DATA_DIR, entry));
-                    vault = new Vault(accountFile());
-                    await vault.load();
+                await openWith(input.account, async () => {
                     await vault.unlock(input);
-                    openAccount = entry;
-                } else {
-                    await vault.unlock(input);
-                }
-                uiLocked = false;
-                everUnlocked = true;
-                await openLocalData();
+                });
+            },
+            /*
+             * The same account dance, with a passkey instead of a password.
+             *
+             * It goes through `openWith` rather than repeating it, because the ordering *is* the
+             * multi-account guarantee and two copies of it would be two chances to get it wrong.
+             */
+            unlockWithPasskey: async (input) => {
+                await openWith(input.account, async () => {
+                    await vault.unlockWithPasskey(input);
+                });
+            },
+            enablePasskeyUnlock: async (input) => {
+                await vault.enablePasskeyUnlock(input);
+            },
+            disablePasskeyUnlock: async (id) => {
+                await vault.disablePasskeyUnlock(id);
             },
             confirmChange: async (requestId, password) => {
                 const waiting = pendingGrants.get(requestId);
@@ -999,7 +1028,20 @@ export async function runServe(argv: readonly string[]): Promise<void> {
             removePasskey: async (id) => {
                 await vault.removePasskey(id);
             },
-            beginPasskeyLogin: async (origin) => startPasskeyLogin(vault.passkeys, origin),
+            /*
+             * The assertion, with or without key material.
+             *
+             * `forUnlock` decides two things at once and they belong together: whether the
+             * authenticator is asked for a PRF output, and whether user verification is *required*
+             * rather than preferred. A passkey standing in for a password has to prove a person was
+             * there; a passkey standing beside one does not need to.
+             */
+            beginPasskeyLogin: async (origin, forUnlock) =>
+                startPasskeyLogin(
+                    vault.passkeys,
+                    origin,
+                    forUnlock === true ? await vault.ensurePrfSalt() : undefined
+                ),
             setGraceMinutes: async (minutes) => {
                 await vault.setGraceMinutes(minutes);
             },

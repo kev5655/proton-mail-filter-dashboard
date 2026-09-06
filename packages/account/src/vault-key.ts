@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 
 import { argon2id } from '@noble/hashes/argon2.js';
 import { AppError } from '@pms/core/errors';
@@ -66,6 +66,45 @@ export function deriveKek(password: string, params: KdfParams): Uint8Array {
         dkLen: KEY_BYTES,
     });
 }
+
+/**
+ * The key-encryption key a passkey produces, from the PRF extension's output.
+ *
+ * **This is the one thing that lets a passkey replace the password rather than accompany it.**
+ * Ordinary WebAuthn returns a signature — nothing to unwrap a key with — which is why a passkey was
+ * only ever a second factor here. The PRF extension returns 32 bytes that are deterministic for
+ * (credential, salt) and that no one can compute without the authenticator. That *is* a key.
+ *
+ * No Argon2id, and that is deliberate rather than an oversight: the input is not a password. It is
+ * high-entropy output from a hardware secret, so stretching it would cost a second and add nothing.
+ * What it does need is domain separation, hence HKDF with a versioned info string — the same PRF
+ * output must never be usable as a key for something else, here or later.
+ *
+ * The salt is stored in the clear beside the account. A salt is not a secret; what it does is make
+ * the PRF output specific to this installation, so the same authenticator used against something
+ * else produces unrelated bytes.
+ */
+export function kekFromPrf(prfOutput: Uint8Array, salt: Uint8Array): Uint8Array {
+    if (prfOutput.length < KEY_BYTES) {
+        throw new AppError('ACCOUNT_PASSKEY_PRF_UNSUPPORTED', {
+            message: 'Dieser Passkey liefert kein Schlüsselmaterial.',
+            hint:
+                'Der Authenticator unterstützt die PRF-Erweiterung nicht. Der Passkey funktioniert ' +
+                'weiterhin als zweiter Faktor — zum Aufschliessen bleibt das Passwort nötig.',
+            context: { length: prfOutput.length },
+        });
+    }
+    return new Uint8Array(hkdfSync('sha256', prfOutput, salt, PRF_INFO, KEY_BYTES));
+}
+
+/** Versioned, so a future change of derivation is a migration rather than a silent mismatch. */
+const PRF_INFO = 'pms-passkey-kek-v1';
+
+export function newPrfSalt(): string {
+    return randomBytes(PRF_SALT_BYTES).toString('base64');
+}
+
+const PRF_SALT_BYTES = 32;
 
 export function newKdfParams(): KdfParams {
     return { salt: randomBytes(SALT_BYTES).toString('base64'), ...PARAMS };

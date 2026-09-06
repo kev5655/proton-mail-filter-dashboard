@@ -5,6 +5,8 @@ import { finishPasskeyLogin } from './passkey.js';
 import { loadAccount, saveAccount, type AccountRecord, type StoredPasskey } from './record.js';
 import { verifyTotp } from './totp.js';
 import {
+    newPrfSalt,
+    kekFromPrf,
     deriveKek,
     newKdfParams,
     newMasterSecret,
@@ -41,7 +43,17 @@ export interface VaultState {
     username: string | undefined;
     /** What a login will additionally ask for. */
     requiresTotp: boolean;
-    passkeys: Array<{ id: string; label: string; addedAt: number }>;
+    /** `unlocks` says whether this one carries a wrapping of the key, or is only a second factor. */
+    passkeys: Array<{ id: string; label: string; addedAt: number; unlocks: boolean }>;
+    /**
+     * Whether any registered passkey can open this account on its own.
+     *
+     * The lock screen needs it *before* anything is unlocked, so it must be readable from the
+     * account file alone — which it is: only the wrapping is secret, not its existence.
+     */
+    passkeyUnlock: boolean;
+    /** The PRF salt, so the browser can ask the authenticator for the right bytes. */
+    prfSalt: string | undefined;
     /** Unix seconds at which the held key is dropped, when it is being held past a lock. */
     graceUntil: number | undefined;
     graceMinutes: number;
@@ -82,7 +94,10 @@ export class Vault {
                 id: passkey.id,
                 label: passkey.label,
                 addedAt: passkey.addedAt,
+                unlocks: passkey.wrapped !== undefined,
             })),
+            passkeyUnlock: (this.#record?.passkeys ?? []).some((passkey) => passkey.wrapped !== undefined),
+            prfSalt: this.#record?.prfSalt,
             graceUntil: this.#graceUntil,
             graceMinutes: this.#record?.graceMinutes ?? 30,
         };
@@ -291,6 +306,130 @@ export class Vault {
         this.#record = { ...rest, passkeys: record.passkeys } as AccountRecord;
     }
 
+    /**
+     * The PRF salt, creating and storing one if this account has none yet.
+     *
+     * **No key required, deliberately.** A salt is not a secret — it is stored in the clear beside
+     * the account and has to be, because the browser needs it to ask the authenticator for the
+     * right bytes before anything is open. Requiring the vault here would make it impossible to
+     * offer a passkey unlock on a locked account, which is the only situation it is for.
+     */
+    async ensurePrfSalt(): Promise<string> {
+        const record = this.#requireRecord();
+        if (record.prfSalt !== undefined) {
+            return record.prfSalt;
+        }
+        const salt = newPrfSalt();
+        await this.#update({ prfSalt: salt });
+        return salt;
+    }
+
+    /**
+     * Make a passkey an unlock method, by wrapping the master key with what its PRF produces.
+     *
+     * Requires the vault to be open, and that is the whole security argument: the master key has to
+     * be in hand to be wrapped a second time, so enabling this is something only somebody who
+     * already knows the password can do. A passkey cannot enrol itself.
+     *
+     * The assertion is verified before the output is trusted. Without that, the PRF bytes would be
+     * whatever the caller said they were, and „unlock with a passkey" would mean „unlock with
+     * anything that can POST".
+     */
+    async enablePasskeyUnlock(input: {
+        response: unknown;
+        challenge: string;
+        origin: string;
+        prfOutput: string;
+    }): Promise<void> {
+        const secret = this.#requireKey();
+        const record = this.#requireRecord();
+
+        const result = await finishPasskeyLogin(
+            input.response,
+            input.challenge,
+            input.origin,
+            record.passkeys,
+            true
+        );
+
+        const salt = record.prfSalt ?? newPrfSalt();
+        const kek = kekFromPrf(Buffer.from(input.prfOutput, 'base64'), Buffer.from(salt, 'base64'));
+
+        await this.#update({
+            prfSalt: salt,
+            passkeys: record.passkeys.map((passkey) =>
+                passkey.id === result.id
+                    ? { ...passkey, counter: result.counter, wrapped: wrapMasterKey(secret, kek) }
+                    : passkey
+            ),
+        });
+        log.info({ id: result.id.slice(0, 8) }, 'passkey can now unlock');
+    }
+
+    /** Take that back, leaving the passkey as a second factor. The password is untouched either way. */
+    async disablePasskeyUnlock(id: string): Promise<void> {
+        this.#requireKey();
+        const record = this.#requireRecord();
+        await this.#update({
+            passkeys: record.passkeys.map((passkey) =>
+                passkey.id === id ? stripWrapping(passkey) : passkey
+            ),
+        });
+    }
+
+    /**
+     * Open the account with a passkey and nothing else.
+     *
+     * No password, no TOTP. That is the point, and it is a deliberate reduction in factors: what
+     * stands in for both is the authenticator plus the user verification it performed, which
+     * `finishPasskeyLogin` is told to require rather than prefer.
+     *
+     * The order matters. The assertion is verified first, so the credential is known to be genuine
+     * and to have been unlocked by its owner; only then is its PRF output used as a key. A wrong or
+     * replayed output then fails at the GCM tag, which is where a wrong key belongs.
+     */
+    async unlockWithPasskey(input: {
+        response: unknown;
+        challenge: string;
+        origin: string;
+        prfOutput: string;
+    }): Promise<void> {
+        const record = this.#requireRecord();
+
+        const result = await finishPasskeyLogin(
+            input.response,
+            input.challenge,
+            input.origin,
+            record.passkeys,
+            true
+        );
+
+        const passkey = record.passkeys.find((entry) => entry.id === result.id);
+        if (passkey?.wrapped === undefined || record.prfSalt === undefined) {
+            throw new AppError('ACCOUNT_PASSKEY_CANNOT_UNLOCK', {
+                message: 'Dieser Passkey schliesst nicht auf.',
+                hint:
+                    'Er ist als zweiter Faktor registriert. Zum Aufschliessen ohne Passwort muss er ' +
+                    'in den Einstellungen einmal dafür freigegeben werden — dort, wo das Passwort ' +
+                    'ohnehin schon eingegeben ist.',
+            });
+        }
+
+        const kek = kekFromPrf(
+            Buffer.from(input.prfOutput, 'base64'),
+            Buffer.from(record.prfSalt, 'base64')
+        );
+        const secret = unwrapMasterKey(passkey.wrapped, kek);
+
+        await this.#update({
+            passkeys: record.passkeys.map((entry) =>
+                entry.id === result.id ? { ...entry, counter: result.counter } : entry
+            ),
+        });
+        this.#hold(secret);
+        log.info({ id: result.id.slice(0, 8) }, 'unlocked with a passkey');
+    }
+
     async addPasskey(passkey: StoredPasskey): Promise<void> {
         this.#requireKey();
         const record = this.#requireRecord();
@@ -351,4 +490,10 @@ export class Vault {
         await saveAccount(this.#path, next);
         this.#record = next;
     }
+}
+
+/** A passkey without its wrapping — the second-factor form it had before. */
+function stripWrapping(passkey: StoredPasskey): StoredPasskey {
+    const { wrapped: _dropped, ...rest } = passkey;
+    return rest as StoredPasskey;
 }

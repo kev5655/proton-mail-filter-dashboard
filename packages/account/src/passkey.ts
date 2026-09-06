@@ -22,12 +22,22 @@ const log = getLogger('account');
  * way out of, because the happy path looks identical. TOTP is thirty lines with published test
  * vectors; this is not that, so it uses `@simplewebauthn/server`.
  *
- * **A passkey here is a second factor, not the key.** The master key is unwrapped by the password
- * and by nothing else, so a passkey cannot replace it — WebAuthn produces a signature, not a
- * secret we could derive a key from. (The PRF extension can produce one, and browser support for it
- * is still uneven; when that changes, `vault-key.ts` is deliberately shaped to take a second
- * wrapping.) So the flow is password first, then this — and the interface says so, because
- * „Passkey" that still asks for a password is otherwise read as a bug.
+ * **A passkey is a second factor by default, and can become the key.** Ordinary WebAuthn produces a
+ * signature, not a secret, so there is nothing in it to unwrap a key with — which is why for most of
+ * this project's life the password was always required as well.
+ *
+ * The **PRF extension** changes that, and only that. It returns 32 bytes that are deterministic for
+ * (credential, salt) and that nobody can compute without the authenticator, and `vault-key.ts` was
+ * always shaped to take a second wrapping. A passkey that has been made an unlock method carries
+ * one; a passkey that has not is exactly what it was before.
+ *
+ * Two rules follow and both are enforced here rather than described:
+ *
+ *  - **Unlocking with a passkey requires user verification.** Possession alone must not open a
+ *    mailbox, and while the passkey was only a second factor `preferred` was enough. It is not any
+ *    more, so the unlock path passes `requireUserVerification: true`.
+ *  - **Not every authenticator can do it.** Where the browser returns no PRF result, nothing is
+ *    silently downgraded: the passkey stays a second factor and the screen says so.
  *
  * The relying party is this machine. `localhost` is treated as a secure origin by browsers
  * precisely so that a locally served page can use WebAuthn without a certificate.
@@ -61,6 +71,10 @@ export async function startPasskeyRegistration(
             transports: passkey.transports as never,
         })),
         authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+        // Announced at registration so an authenticator that can do it enables the capability then.
+        // The output is not read here — browsers are inconsistent about returning it from `create()`
+        // — so it is fetched by a `get()` afterwards, which is the reliable path.
+        extensions: { prf: {} } as never,
     });
     return { challenge: options.challenge, options };
 }
@@ -101,7 +115,14 @@ export async function finishPasskeyRegistration(
 
 export async function startPasskeyLogin(
     passkeys: readonly StoredPasskey[],
-    origin: string
+    origin: string,
+    /**
+     * The PRF salt, when this assertion is meant to produce key material.
+     *
+     * Absent for the second-factor use, where no key is being unwrapped and asking for a PRF output
+     * would be asking the authenticator for a secret nothing needs.
+     */
+    prfSalt?: string | undefined
 ): Promise<PasskeyChallenge> {
     const options = await generateAuthenticationOptions({
         rpID: rpIdFor(origin),
@@ -109,7 +130,11 @@ export async function startPasskeyLogin(
             id: passkey.id,
             transports: passkey.transports as never,
         })),
-        userVerification: 'preferred',
+        // Required where the passkey *is* the key: possession alone must not open a mailbox.
+        userVerification: prfSalt === undefined ? 'preferred' : 'required',
+        ...(prfSalt === undefined
+            ? {}
+            : { extensions: { prf: { eval: { first: prfSalt } } } as never }),
     });
     return { challenge: options.challenge, options };
 }
@@ -125,7 +150,9 @@ export async function finishPasskeyLogin(
     response: unknown,
     challenge: string,
     origin: string,
-    passkeys: readonly StoredPasskey[]
+    passkeys: readonly StoredPasskey[],
+    /** True where the passkey is unwrapping the key rather than accompanying a password. */
+    requireUserVerification = false
 ): Promise<{ id: string; counter: number }> {
     const id = (response as { id?: string }).id ?? '';
     const known = passkeys.find((passkey) => passkey.id === id);
@@ -147,7 +174,7 @@ export async function finishPasskeyLogin(
             counter: known.counter,
             transports: known.transports as never,
         },
-        requireUserVerification: false,
+        requireUserVerification,
     });
 
     if (!verification.verified) {

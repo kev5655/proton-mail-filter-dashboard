@@ -32,7 +32,14 @@ export interface AccountStatus {
     username?: string;
     requiresTotp: boolean;
     hasPasskeys: boolean;
-    passkeys: Array<{ id: string; label: string; addedAt: number }>;
+    /** `unlocks` distinguishes a passkey that carries a wrapping of the key from a second factor. */
+    passkeys: Array<{ id: string; label: string; addedAt: number; unlocks?: boolean }>;
+    /**
+     * Whether some passkey can open this account with no password.
+     *
+     * Optional so an older server, which never sends it, reads as „no" rather than as broken.
+     */
+    passkeyUnlock?: boolean;
     graceUntil?: number;
     graceMinutes: number;
     withinGrace: boolean;

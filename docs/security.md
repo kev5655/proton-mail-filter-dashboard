@@ -156,27 +156,77 @@ reached by choosing „Sperren" in the settings, where both are named side by si
 
 ---
 
-## 6. Second factors, and why a passkey cannot be the key
+## 6. Second factors, and when a passkey becomes the key
 
-TOTP and WebAuthn are **second factors**. Neither can replace the password, and the reason is
-structural rather than a policy choice: **WebAuthn returns a signature, not a secret.** There is
-nothing in an assertion to unwrap a key with. A button labelled „Passkey" that then asks for a
-password reads as a bug unless the screen says why, so it does.
+TOTP is a second factor and nothing else. A passkey is one **by default** and can be promoted to an
+unlock method, and the difference is entirely a matter of whether the authenticator supports the
+WebAuthn **PRF extension**.
 
-The way out is the **PRF extension**, which derives a stable secret from the authenticator. That
-would be a genuine second wrapping of the master key, which `vault-key.ts` is shaped to take — and
-it is the only design in which „unlock with a passkey" means what it says. Not implemented.
+**Without PRF, a passkey cannot possibly be the key**, and that is structural rather than a policy
+choice: WebAuthn returns a *signature*, and there is nothing in a signature to unwrap anything with.
+A button labelled „Passkey" that then asks for a password reads as a bug unless the screen says why,
+so it does.
 
-**The relying-party id is derived from the `Origin` header, never from the request body**
-(`account/src/passkey.ts`). A body field would let a caller choose the scope their own credential is
-bound to, which is the one thing a relying party must never delegate. The origin guard (§8) has
-already checked that header by then.
+**With PRF**, the authenticator returns 32 bytes that are deterministic for (credential, salt) and
+that nobody can compute without it. That is key material, so it can carry a **second wrapping** of
+the master key beside the password's — which is what `vault-key.ts` was shaped for from the start.
+
+```
+PRF(credential, prfSalt) ──HKDF-SHA256, info "pms-passkey-kek-v1"──▶ 32 B ──AES-256-GCM──▶ master secret
+```
+
+No Argon2id on that path, deliberately: the input is not a password but high-entropy output from a
+hardware secret, so stretching it would cost a second and add nothing. What it does need is domain
+separation, hence the versioned HKDF info string — the same PRF output must never serve as a key for
+anything else. `kekFromPrf` refuses an output shorter than 32 bytes rather than deriving a key with
+less entropy than it appears to have.
+
+**One salt per account**, stored in the clear (`prfSalt`, `record.ts`). Not per credential:
+`prf.eval.first` is supported far more widely than `evalByCredential`, and one salt suffices because
+`PRF(A, salt)` and `PRF(B, salt)` are already unrelated. The salt makes the outputs specific to this
+installation, so the same authenticator used elsewhere yields different bytes.
+
+### The two rules that are enforced, not described
+
+- **Enabling requires the vault to already be open.** The master key has to be in hand to be wrapped
+  a second time, so only somebody who knows the password can promote a passkey. **A passkey cannot
+  enrol itself**, and the assertion is verified before its PRF output is trusted — without that,
+  „unlock with a passkey" would mean „unlock with anything that can POST".
+- **Unlocking requires user verification.** `finishPasskeyLogin` is passed
+  `requireUserVerification: true` on that path, and `startPasskeyLogin` asks for `required` rather
+  than `preferred`. While the passkey was only a second factor, preferring it was enough; now that it
+  stands in for a password, possession of the authenticator alone must not open a mailbox.
+
+Both are covered in `packages/account/test/passkey-unlock.test.ts`, and both counter-checked by
+removing them.
+
+### What this costs, stated plainly
+
+It is a **reduction in factors** for the accounts that enable it: from *password* to *authenticator
+plus user verification*. That is the point rather than a side effect, and it is a choice made per
+passkey rather than for the installation. The password wrapping is never touched, so nothing is lost
+by enabling it and nothing is recovered by it either — **losing both the password and every enabled
+authenticator is still unrecoverable.**
+
+The PRF output is key material and travels from the browser to the local server, over the same
+origin the password already uses. It is sent in a field of its own and stripped from the assertion
+before that is sent, so it cannot end up inside an object that is logged or journalled
+(`apps/web/src/passkey.ts`).
+
+`@simplewebauthn/browser` 13.3.0 does not know about PRF — there is no mention of it in the package.
+It does spread `optionsJSON` into the `navigator.credentials.get()` call untouched, so the salt is
+converted to bytes on the client before the call, and the result is read out of the raw
+`clientExtensionResults`. That is a dependency detail today and a thing to re-check on upgrade.
+
+### The relying-party id
+
+Derived from the `Origin` header, never from the request body (`account/src/passkey.ts`). A body
+field would let a caller choose the scope their own credential is bound to, which is the one thing a
+relying party must never delegate. The origin guard (§8) has already checked that header by then.
 
 Consequence worth stating because it will look like a bug: **a passkey is bound to the host name.**
 Moving the dashboard from `localhost` to a tailnet name invalidates every passkey registered under
-the old one, and they must be registered again.
-
----
+the old one, and they must be registered again — including their unlock wrappings.
 
 ## 7. Separation between accounts
 
@@ -250,7 +300,10 @@ need the Docker socket to stop itself, and that socket is root on the host.
 5. **Watchtower pulls and restarts unattended**, so whoever can push to the image registry runs code
    on the machine holding the mailbox. Narrowed by pushing only on a tag and by a repo-scoped token
    behind a protected environment — narrowed, not removed.
-6. **Passkeys are bound to the host name**, so a name change silently invalidates them.
+6. **Passkeys are bound to the host name**, so a name change silently invalidates them — and with
+   them any unlock wrapping they carried.
+7. **A passkey enabled for unlocking reduces the factors to one**, namely the authenticator plus its
+   user verification. Enabled per passkey, by somebody who already holds the key, and never silently.
 
 ---
 

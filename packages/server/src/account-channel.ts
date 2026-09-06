@@ -53,7 +53,15 @@ export interface AccountView {
      * and is reported as absent rather than guessed at.
      */
     needsAccountName: boolean;
-    passkeys: Array<{ id: string; label: string; addedAt: number }>;
+    passkeys: Array<{ id: string; label: string; addedAt: number; unlocks: boolean }>;
+    /**
+     * Whether some registered passkey can open this account on its own.
+     *
+     * Reported before anything is unlocked, because the lock screen has to decide what to offer —
+     * and it is not account-shaped in the sense §7 of the security notes forbids: it says a
+     * capability exists, not whose mailbox this is.
+     */
+    passkeyUnlock: boolean;
     graceUntil?: number | undefined;
     graceMinutes: number;
     /**
@@ -104,6 +112,27 @@ export interface AccountRunner {
          */
         account?: string | undefined;
     }) => Promise<void>;
+    /**
+     * Open with a passkey and nothing else.
+     *
+     * Its own action rather than a branch of `unlock`, because it is a different promise: no
+     * password, no code, and user verification required at the authenticator. Mixing the two would
+     * make „was a password involved" a property of the request body.
+     */
+    unlockWithPasskey: (input: {
+        response: unknown;
+        challenge: string;
+        origin: string;
+        prfOutput: string;
+        account?: string | undefined;
+    }) => Promise<void>;
+    enablePasskeyUnlock: (input: {
+        response: unknown;
+        challenge: string;
+        origin: string;
+        prfOutput: string;
+    }) => Promise<void>;
+    disablePasskeyUnlock: (id: string) => Promise<void>;
     lock: (immediate: boolean) => void;
     /** Come back in while the key is still held. Refused once it is gone. */
     resume: () => Promise<void>;
@@ -136,7 +165,7 @@ export interface AccountRunner {
         origin: string;
     }) => Promise<void>;
     removePasskey: (id: string) => Promise<void>;
-    beginPasskeyLogin: (origin: string) => Promise<PasskeyOffer>;
+    beginPasskeyLogin: (origin: string, forUnlock?: boolean) => Promise<PasskeyOffer>;
     setGraceMinutes: (minutes: number) => Promise<void>;
 }
 
@@ -278,10 +307,38 @@ export class AccountChannel {
                     return this.#ok();
 
                 case 'passkey-login-begin': {
-                    const offer = await this.#runner.beginPasskeyLogin(origin);
+                    // `forUnlock` asks for key material and for user verification at once — see the
+                    // runner. The second-factor use passes neither.
+                    const offer = await this.#runner.beginPasskeyLogin(
+                        origin,
+                        input['forUnlock'] === true
+                    );
                     this.#outstanding = offer.challenge;
                     return { status: 200, body: { options: offer.options } };
                 }
+
+                case 'passkey-unlock':
+                    await this.#runner.unlockWithPasskey({
+                        response: input['response'],
+                        challenge: this.#take(),
+                        origin,
+                        prfOutput: text(input['prfOutput']),
+                        ...(text(input['account']) === '' ? {} : { account: text(input['account']) }),
+                    });
+                    return this.#ok();
+
+                case 'passkey-unlock-enable':
+                    await this.#runner.enablePasskeyUnlock({
+                        response: input['response'],
+                        challenge: this.#take(),
+                        origin,
+                        prfOutput: text(input['prfOutput']),
+                    });
+                    return this.#ok();
+
+                case 'passkey-unlock-disable':
+                    await this.#runner.disablePasskeyUnlock(text(input['id']));
+                    return this.#ok();
 
                 case 'grace':
                     await this.#runner.setGraceMinutes(Number(input['minutes']));
