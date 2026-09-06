@@ -1,6 +1,6 @@
 # Was nur du prüfen kannst
 
-Alles, was ohne dein Konto prüfbar ist, prüft die Testsuite: **993 Tests ohne Netz** und **34 im
+Alles, was ohne dein Konto prüfbar ist, prüft die Testsuite: **1004 Tests ohne Netz** und **34 im
 echten Browser**. Was hier steht, kann sie nicht — es braucht ein echtes Proton-Konto, echte Mail
 oder ein echtes Gerät.
 
@@ -136,11 +136,15 @@ verdrängt.
 
 **Neu.** Eine Instanz, von allen Geräten aus — keine zweite Installation, die sich selbst anmeldet.
 
+Der Aufbau steht jetzt im Repo `homelab`: der Dienst läuft als Container, und ein
+Tailscale-Sidecar daneben gibt ihm einen eigenen Namen mit eigenem Zertifikat. Auf dem Pi also
+nicht mehr `pnpm serve`, sondern:
+
 ```sh
-tailscale serve --bg 5174
-# den ausgegebenen Namen in .env eintragen:
-#   PMS_PUBLIC_ORIGIN=https://dein-pi.tailnet-name.ts.net
-pnpm serve
+cd homelab/stacks/proton-mail-sorter
+docker compose up -d
+# Den Namen, den der Sidecar bekommt, in .env als PMS_PUBLIC_ORIGIN eintragen
+# — und in hosts/pi/starter.env, sonst lehnt der Starter jede Anfrage ab.
 ```
 
 **Erwartet:**
@@ -203,7 +207,7 @@ erwartet. Für Intel-Macs gibt es kein Paket.
 
 Damit du es nicht doppelt tust:
 
-- **993 Unit-Tests, 34 E2E**, Typen und Build sauber.
+- **1004 Unit-Tests, 34 E2E**, Typen und Build sauber.
 - Der Zeitstempel-Fehler und seine Migration, gegengeprüft durch Wiedereinbau.
 - Dass eine Bestätigung ohne Terminal **sofort ablehnt** statt zwei Minuten zu warten.
 - Dass kein Bildschirm bei acht Breiten von 1440 bis 390 seitwärts scrollt — die Navigation hat
@@ -211,7 +215,11 @@ Damit du es nicht doppelt tust:
 - Dass die Wischgeste stellt und nicht löscht, und dass ein senkrechter Zug sie nicht auslöst.
 - Dass ein POST von fremder Herkunft mit 403 abgelehnt wird und der Entwicklungsmodus trotzdem geht.
 - Dass der Service Worker **niemals** eine `/api`-Antwort zwischenspeichert.
-- Dass es genau **sieben** Nicht-GET-Routen sind.
+- Dass es genau **sieben** Nicht-GET-Routen sind — unverändert. Anhalten und Starten laufen über
+  den Starter auf dem Host, nicht über eine achte Route.
+- Dass ein offener Dashboard-Tab den Server **nicht mehr am Beenden hindert**. Das tat er, und unter
+  `docker stop` hätte es nach zehn Sekunden ein SIGKILL mitten in einem Datenbankschreibvorgang
+  gegeben.
 
 ## T-11 · Ein zweites Konto
 
@@ -232,8 +240,38 @@ produktiven.
 
 **Melde sofort**, wenn du in einem Konto irgendetwas vom anderen siehst.
 
+## T-12 · Anhalten und wieder starten
+
+**Neu**, und der Teil, den ich am wenigsten prüfen konnte: das Image ist hier nie gebaut worden,
+weil diese Umgebung keine Verbindung zur npm-Registry hat. Der erste echte Build ist deiner.
+
+1. In der Seitenleiste **Server anhalten**, den Dialog lesen, bestätigen.
+2. Die Seite lädt neu und zeigt **„Der Server ist angehalten"** mit einem Startknopf.
+3. **Server starten** drücken, warten, **Nachsehen**.
+
+**Erwartet:**
+
+- Der Weck-Bildschirm erscheint auch **vom Handy aus** und **von unterwegs** — der Sidecar läuft
+  weiter, deshalb bleibt der Name erreichbar, obwohl der Dienst steht.
+- Nach dem Start kommt der **Sperrbildschirm**, nicht das Postfach. Starten gibt nichts frei.
+- Es wurde **nichts gelöscht**: Verlauf, Ordner und Proton-Verbindung sind nach dem Start dieselben.
+- Auf einem Rechner **ohne** Pi (also `pnpm dev` allein) erscheint der Knopf **nicht** — dort gibt
+  es keine Maschine zu starten.
+
+**Melde:** wie lange der Start auf dem Pi wirklich dauert. Wenn das unzumutbar lang ist, ist das ein
+Befund und kein Detail — dann muss der Container anders geschnitten werden.
+
+**Und melde**, ob `tailscale serve --set-path /starter` den Pfad beim Weiterleiten abschneidet. Der
+Starter nimmt vorerst beide Formen an; sobald es einmal gelaufen ist, fliegt die falsche raus.
+
+---
+
 ## Was noch nicht gebaut ist
 
-- **Ein arm64-Paket** für den Pi. Aus einem Checkout läuft es dort schon.
 - **Ein Umschalt-Knopf** zwischen Konten. Abschliessen und als jemand anderes aufschliessen ist
   derselbe Vorgang, und den gibt es.
+- **Ein Knopf, der den Pi herunterfährt.** Ohne Taster an GPIO3 gäbe es keinen Weg zurück — das
+  wäre keine Funktion, sondern eine Falle. Deshalb hält der Knopf nur den Dienst an, und das
+  spart bewusst **keinen Strom**: der Rechner läuft weiter.
+- **Wake-on-LAN aus der App.** Geht nicht, und zwar doppelt: ein Browser hat keinen UDP-Socket, und
+  ein Pi 4 hat überhaupt keinen Weckpfad übers Netz (`/sys/power/state` ist leer).
