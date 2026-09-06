@@ -23,14 +23,19 @@ import { StatusStrip } from './components/StatusStrip.js';
 import { LoginProvider } from './login.js';
 import { SyncProvider } from './sync.js';
 import { AccountProvider, isLocked, useAccount } from './account.js';
+import { PowerProvider, shouldOfferWake, usePower } from './power.js';
 import { LockScreen } from './components/LockScreen.js';
+import { WakeScreen } from './components/WakeScreen.js';
+import { PowerPanel } from './components/PowerPanel.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
 import { StoreProvider, useStore } from './store.js';
 
 export function App(): React.JSX.Element {
     return (
         <AccountProvider>
-            <Gate />
+            <PowerProvider>
+                <Gate />
+            </PowerProvider>
         </AccountProvider>
     );
 }
@@ -47,9 +52,25 @@ export function App(): React.JSX.Element {
  */
 function Gate(): React.JSX.Element {
     const { status, known, served } = useAccount();
+    const power = usePower();
 
     if (!known) {
         return <div className="lock-screen" />;
+    }
+    /*
+     * With no server answering, wait for the starter's answer too before deciding.
+     *
+     * Otherwise a machine whose service is merely stopped shows the demo mailbox for as long as
+     * that probe takes, and then replaces it — which is the same flicker the comment above rejects,
+     * arriving from the other direction. The probe gives up after three seconds, and it gives up
+     * fast against a refused connection, which is the ordinary case for somebody who has no server
+     * at all.
+     */
+    if (!served && !power.known) {
+        return <div className="lock-screen" />;
+    }
+    if (shouldOfferWake(served, power.state, power.known)) {
+        return <WakeScreen />;
     }
     if (isLocked(status, known, served)) {
         return <LockScreen />;
@@ -260,6 +281,7 @@ function Shell(): React.JSX.Element {
             <div className="sidebar-tools">
                 <LoginPanel />
                 <SyncPanel />
+                <PowerPanel />
                 <LockButton />
             </div>
 

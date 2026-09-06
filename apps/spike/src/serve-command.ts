@@ -99,6 +99,15 @@ const backupsDir = (): string => join(accountDir(), 'backups');
 /** How often the copy refreshes itself, in minutes. `--auto-sync 0` turns it off. */
 const DEFAULT_AUTO_SYNC_MINUTES = 5;
 
+/**
+ * How often to look at whether this process still has a reason to run.
+ *
+ * Half a minute: the thing being waited for is a grace period measured in minutes, so checking more
+ * often would buy nothing, and checking less often would leave a service listening for a quarter of
+ * an hour after the last thing it held went away.
+ */
+const IDLE_STOP_CHECK_MS = 30_000;
+
 export async function runServe(argv: readonly string[]): Promise<void> {
     const port = Number(value(argv, '--port') ?? process.env['PMS_SERVER_PORT'] ?? 5174);
     /*
@@ -109,6 +118,17 @@ export async function runServe(argv: readonly string[]): Promise<void> {
      * is configured stays the one that says so.
      */
     const publicOrigin = process.env['PMS_PUBLIC_ORIGIN']?.replace(/\/+$/, '') || undefined;
+    /*
+     * Whether to end once the vault is locked and holding nothing.
+     *
+     * Off unless the deployment says otherwise, and it is an environment variable rather than a
+     * setting in the dashboard on purpose: it is only safe where something outside this process can
+     * start it again. On a laptop it would be a way to make the dashboard vanish with no button
+     * anywhere that brings it back.
+     */
+    const stopWhenLocked = ['1', 'true', 'yes'].includes(
+        (process.env['PMS_STOP_WHEN_LOCKED'] ?? '').toLowerCase()
+    );
 
     console.log('\nProton Mail Sorter — lokaler Server\n');
     console.log('Liest die lokale Kopie. Zu Proton wird keine Verbindung aufgebaut.');
@@ -167,6 +187,14 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     let http: ProtonHttp | undefined;
     /** The dashboard shows the lock screen. Separate from the key being held — see the grace period. */
     let uiLocked = true;
+    /**
+     * Whether anybody has unlocked *in this process*.
+     *
+     * Only for `stopWhenLocked` below, and it is what keeps that from being a loop: a freshly
+     * started server is locked too, so a rule of "stop while locked" would end it a moment after
+     * the wake screen started it, for ever.
+     */
+    let everUnlocked = false;
     let openProblem: string | undefined;
 
     // Declared out here because the `finally` below has to see it: a disconnect closes the database
@@ -218,6 +246,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
          */
         let autoSyncMinutes = 0;
         let autoSync: ReturnType<typeof setInterval> | undefined;
+        let idleStop: ReturnType<typeof setInterval> | undefined;
         /*
          * Set the moment a disconnect begins, and checked by everything that would otherwise keep
          * using the account.
@@ -794,6 +823,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     openAccount = accounts[0];
                 }
                 uiLocked = false;
+                everUnlocked = true;
                 await openLocalData();
             },
             unlock: async (input) => {
@@ -836,6 +866,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     await vault.unlock(input);
                 }
                 uiLocked = false;
+                everUnlocked = true;
                 await openLocalData();
             },
             confirmChange: async (requestId, password) => {
@@ -865,6 +896,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                     });
                 }
                 uiLocked = false;
+                everUnlocked = true;
                 await openLocalData();
             },
             /*
@@ -988,6 +1020,13 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 ? '  Automatisch synchronisiert wird nicht (--auto-sync 0).'
                 : `  Alle ${String(autoSyncMinutes)} Minuten wird nachgeholt, was seit dem letzten Mal dazugekommen ist.`
         );
+        if (stopWhenLocked) {
+            // Said out loud, because a service that ends by itself is a surprise otherwise — and
+            // the person reading this log is the one who would go looking for a crash.
+            console.log(
+                '  Beendet sich, sobald abgeschlossen ist und die Nachfrist abgelaufen (PMS_STOP_WHEN_LOCKED).'
+            );
+        }
         const logFile = logFilePath();
         if (logFile !== undefined) {
             console.log(`  Protokoll: ${logFile}`);
@@ -1004,11 +1043,41 @@ export async function runServe(argv: readonly string[]): Promise<void> {
                 if (autoSync !== undefined) {
                     clearInterval(autoSync);
                 }
+                if (idleStop !== undefined) {
+                    clearInterval(idleStop);
+                }
                 console.log('\nServer beendet.\n');
                 void server.close().then(resolve);
             };
             process.once('SIGINT', stop);
             process.once('SIGTERM', stop);
+
+            /*
+             * Ending once there is nothing left to hold.
+             *
+             * The moment the vault is locked and its grace has run out, this process holds nothing:
+             * the key is gone, the database is closed, the Proton session is dropped, and the auto
+             * sync only ever runs while the vault is open. What remains is a port and a lock screen.
+             * On a machine nobody is sitting at, that is a service listening for no reason.
+             *
+             * **An environment variable rather than a switch in the dashboard, and deliberately.**
+             * This is only safe where something outside can start the process again — the starter on
+             * the host, published beside the dashboard. Offering it in the settings of an
+             * installation that has no such thing would be offering somebody a way to lock
+             * themselves out from a phone. Where the deployment provides the way back, the
+             * deployment can turn this on.
+             *
+             * Polled rather than driven by a callback because the grace period expires on a timer
+             * inside the vault, which reports its state but announces nothing.
+             */
+            idleStop = stopWhenLocked
+                ? setInterval(() => {
+                      if (everUnlocked && uiLocked && !vault.state.unlocked) {
+                          console.log('\n  Gesperrt und nichts mehr zu halten — Server beendet sich.\n');
+                          stop();
+                      }
+                  }, IDLE_STOP_CHECK_MS)
+                : undefined;
         });
     } finally {
         // A disconnect closes it before deleting its files; closing twice would throw on the way

@@ -35,6 +35,17 @@ export default defineConfig({
              * to widen a service's access rules to accommodate our page. A proxy on the machine
              * that already runs both is the smaller ask.
              */
+            /*
+             * The starter, which lives on the host rather than in the server. In production the
+             * Tailscale sidecar puts it on this same origin under this same path; proxying it here
+             * means development behaves the way production does, including when nothing is
+             * listening — a refused connection is exactly the "no starter here" the probe expects,
+             * and it is the honest answer for a checkout with no Pi behind it.
+             */
+            '/starter': {
+                target: `http://127.0.0.1:${process.env['PMS_STARTER_PORT'] ?? 5175}`,
+                changeOrigin: false,
+            },
             '/ollama': {
                 target: process.env['PMS_OLLAMA_URL'] ?? 'http://127.0.0.1:11434',
                 changeOrigin: true,
