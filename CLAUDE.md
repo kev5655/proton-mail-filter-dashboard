@@ -219,6 +219,59 @@ else, starts it with the Node that ships in it, and checks that the page is serv
 directory has no account, and that the mailbox answers `423` rather than empty. It never reaches
 Proton — a fresh directory has no session to reach it with.
 
+### The container image, and the one rule it breaks
+
+`Dockerfile` builds an arm64 image for the Raspberry Pi; `.github/workflows/image.yml` pushes it to
+a private registry, where Watchtower picks it up. The **machine** — Docker, Tailscale, routing,
+backups — lives in a separate repository (`homelab`); this one produces an image and nothing else.
+Two deployment paths that both claim to set up a host is exactly the divergence this project argues
+against elsewhere, so there is one.
+
+The build is split across two architectures, and almost nothing needs the target's.
+`package-app.mjs --bundle-only` does everything expensive — installing, compiling, bundling,
+building the dashboard — **natively via `$BUILDPLATFORM`**, producing plain JavaScript. Only the
+install of the two external packages is emulated, and it is a *download*: SQLCipher publishes a
+prebuilt `linux-arm64` binary for this ABI, confirmed on the actual Pi. `--bundle-only` exists
+because running that install on the build machine would put an x64 `.node` beside an arm64 Node,
+and the failure would appear at the first database open rather than at build time. **Node 24 is
+pinned and the major version is load-bearing** for the same reason.
+
+**The image carries a Chromium, and the archives deliberately do not.** That is not a change of
+mind; it is a different machine. An archive ships none because the login belongs in the user's own
+browser, where their password manager's extension is and where a passkey's credential lives. A
+headless server has no such browser and nobody sitting at it, so the choice there is a browser in
+the image or no way to sign in at all. Headless Chromium still runs Proton's anti-abuse script and
+produces a genuine `Payload`; the passkey is what is lost, and it was already lost on a machine with
+no screen.
+
+**Watchtower means whoever can push to that registry runs code on the machine holding the mailbox.**
+Ordinary practice, and still worth writing down here. Two things narrow it and both are cheap: the
+workflow **pushes on a tag and on nothing else**, so an accidental commit to `main` does not roll
+out; and the token is scoped to that one repository behind a protected environment. `workflow_dispatch`
+builds and smoke-tests without publishing — the smoke test asks the image the same three questions
+`smoke-release.mjs` asks an archive.
+
+### Stopping the server, and why starting is somebody else's job
+
+The dashboard can stop its own server (`PowerPanel`), and offer to start it again (`WakeScreen`).
+The second half cannot live here: nothing inside a stopped process can restart it, and **the
+container must never hold the Docker socket** — that socket is root on the host, and giving it to a
+process that parses HTTP and holds a mailbox trades the whole machine for a convenience. So the
+starting is a small program on the host, published under the same name at `/starter` by the
+Tailscale sidecar, which makes it same-origin. **That is why there is no eighth non-GET route.**
+
+`power.tsx` **asks** rather than remembers. A flag in local storage would also distinguish „my
+machine is off" from „there was never a machine here" — the second being a demo visitor, who must
+not be offered a button that starts something which does not exist — but asking the host is the
+better answer: it survives cleared site data and it tells a stopped service apart from an absent
+host. The probe checks the *shape* of the reply, because vite serves the application shell for
+unknown paths and a `200` full of HTML read as „not running" would show the button to everyone.
+
+`PMS_STOP_WHEN_LOCKED` lets the process end once the vault is locked and its grace has expired —
+the moment it demonstrably holds nothing. Off by default, and an **environment variable rather than
+a setting in the dashboard**, because it is only safe where a starter exists to bring it back;
+offering it on a laptop would be offering somebody a way to make their dashboard vanish.
+
 ### More than one Proton account, and where the wall is
 
 An installation may hold several accounts. It does **not** hold them in one database with a column
@@ -439,6 +492,7 @@ pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the sessi
 pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
 pnpm package            # build a downloadable copy into release/
 pnpm smoke              # start that copy somewhere else and check it works
+docker build .          # the arm64 image for the Pi — see the container section above
 ```
 
 The dashboard renders whichever mailbox it is given — the demo, or the real mirror when
