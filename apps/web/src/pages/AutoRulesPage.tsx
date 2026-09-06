@@ -4,6 +4,7 @@ import { categoryName, type AutoRule } from '@pms/grouping';
 
 import { useMailbox, useMailboxStatus } from '../mailbox.js';
 import { useAppState } from '../state.js';
+import { Info } from '../components/Info.js';
 
 /**
  * Proton's own sorting, made visible.
@@ -46,20 +47,26 @@ export function AutoRulesPage(): React.JSX.Element {
             <header className="page-head">
                 <h1>Auto-Regeln</h1>
                 <p>
-                    Proton sortiert Posteingangs-Mail selbst in Kategorien, und macht damit weiter,
-                    sobald du eine Mail einmal von Hand woanders hin gelegt hast. Diese Regel hat
-                    keine Oberfläche und lässt sich nicht abfragen — auch Protons eigene App
-                    schickt nichts, was sie setzen oder lesen würde. Sichtbar ist nur, was sie tut.
-                    Deshalb steht hier, was <em>beobachtet</em> wurde, nie was Proton „macht".
+                    Proton sortiert Posteingangs-Mail selbst in Kategorien. Hier steht, was davon{' '}
+                    <em>beobachtet</em> wurde — nie, was Proton „macht".{' '}
+                    <Info label="Warum hier nur beobachtet wird">
+                        Protons Regel greift, sobald du eine Mail einmal von Hand woanders hin gelegt
+                        hast. Sie hat keine Oberfläche und lässt sich nicht abfragen — auch Protons
+                        eigene App schickt nichts, was sie setzen oder lesen würde. Sichtbar ist nur,
+                        was sie tut, und deshalb ist jede Aussage hier eine Beobachtung.
+                    </Info>
                 </p>
             </header>
 
             {syncs < 2 && (
                 <p className="notice notice-warning">
                     <strong>Noch zu wenig gesehen.</strong> Ein Verlauf entsteht erst durch mehrere
-                    Synchronisationen — bisher {syncs === 0 ? 'keine' : 'eine'}. Bis dahin lässt sich
-                    nicht unterscheiden, ob Proton etwas <em>immer</em> so macht oder ob es das heute
-                    getan hat. Das ist keine Fehlfunktion; die Seite füllt sich mit der Zeit.
+                    Synchronisationen — bisher {syncs === 0 ? 'keine' : 'eine'}.{' '}
+                    <Info label="Was das bedeutet und was nicht">
+                        Bis dahin lässt sich nicht unterscheiden, ob Proton etwas <em>immer</em> so
+                        macht oder ob es das heute getan hat. Das ist keine Fehlfunktion; die Seite
+                        füllt sich mit der Zeit.
+                    </Info>
                 </p>
             )}
 
@@ -91,12 +98,14 @@ export function AutoRulesPage(): React.JSX.Element {
 
                 {domains.length > 0 && (
                     <>
-                        <h3 style={{ marginTop: 20 }}>Dieselbe Frage nach Domäne</h3>
-                        <p className="faint">
-                            Ob Proton nach Absender, nach Domäne oder nach etwas ganz anderem
-                            entscheidet, wissen wir nicht. Beides nebeneinander zu zeigen ist
-                            ehrlicher, als eines davon auszuwählen.
-                        </p>
+                        <h3 style={{ marginTop: 20 }}>
+                            Dieselbe Frage nach Domäne{' '}
+                            <Info label="Warum beides nebeneinander steht">
+                                Ob Proton nach Absender, nach Domäne oder nach etwas ganz anderem
+                                entscheidet, wissen wir nicht. Beides nebeneinander zu zeigen ist
+                                ehrlicher, als eines davon auszuwählen.
+                            </Info>
+                        </h3>
                         {domains
                             .filter((rule) => rule.verdict.kind === 'stable')
                             .map((rule) => (

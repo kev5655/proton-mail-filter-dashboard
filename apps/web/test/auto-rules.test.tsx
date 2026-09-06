@@ -134,3 +134,47 @@ describe('what the screen says', () => {
         expect(fresh.categoryCoverage(['irgendeine'])).toEqual([]);
     });
 });
+
+describe('what stays on screen and what moves behind the mark', () => {
+    /*
+     * `Info` states the rule this checks: the claim stays visible, the argument moves in. Never the
+     * other way round — nothing that changes what somebody would decide belongs behind a hover.
+     *
+     * This page is where that is easiest to get wrong, because almost everything on it is a caveat.
+     * „Observed, not known" is not a caveat though; it is the finding, and a page that tucked it
+     * away would be claiming to know what Proton does.
+     */
+    it('keeps the claim itself in the text rather than behind a mark', () => {
+        // The distinctive sentence, not the word „beobachtet" — that appears five times on this
+        // page in row labels, so asserting on it would pass with the header deleted.
+        expect(render()).toMatch(/nie, was Proton/);
+    });
+
+    it('moves the reason it can only observe behind a mark', () => {
+        const text = render();
+
+        // The argument, not the claim: why no interface exists to ask Proton about this.
+        expect(text).not.toMatch(/keine Oberfläche/);
+    });
+
+    it('offers the argument, rather than dropping it', () => {
+        const root = createRoot(container);
+        act(() => {
+            root.render(
+                <Providers>
+                    <AutoRulesPage />
+                </Providers>
+            );
+        });
+
+        // An `i` per moved explanation. Hiding text is only defensible if there is a way to it.
+        const labels = [...container.querySelectorAll('.info-mark')].map((mark) =>
+            mark.getAttribute('aria-label')
+        );
+        expect(labels.some((label) => (label ?? '').includes('beobachtet'))).toBe(true);
+
+        act(() => {
+            root.unmount();
+        });
+    });
+});
