@@ -353,6 +353,34 @@ describe('the running server', () => {
             await server.close();
         }
     });
+
+    /*
+     * The shutdown path, and it is worth a test of its own because its failure is invisible.
+     *
+     * `server.close()` waits for open connections, and an event stream never closes on its own — it
+     * sends a keep-alive every twenty seconds for as long as the tab exists. One open dashboard
+     * therefore kept the process alive indefinitely. At a terminal that looked fine, because Ctrl-C
+     * took the terminal with it; under `docker stop` it means SIGTERM is answered by a process that
+     * does not exit, and SIGKILL arrives ten seconds later, mid-write.
+     */
+    it('ends an open event stream instead of waiting for it', async () => {
+        const server = await serveMailbox({ db, port: 0, sync: new SyncChannel(async () => summary()) });
+        const opened = new AbortController();
+
+        try {
+            const stream = await fetch(`${server.url}/api/sync/stream`, { signal: opened.signal });
+            // Read the first event, so the connection is genuinely established and not merely
+            // requested — otherwise the test could pass against a stream that never opened.
+            await stream.body!.getReader().read();
+
+            const started = Date.now();
+            await server.close();
+
+            expect(Date.now() - started).toBeLessThan(1_000);
+        } finally {
+            opened.abort();
+        }
+    });
 });
 
 

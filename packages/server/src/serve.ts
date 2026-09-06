@@ -81,9 +81,24 @@ export interface RunningServer {
 const DEFAULT_PORT = 5174;
 const LOOPBACK = '127.0.0.1';
 
+/**
+ * How long `close()` waits for an ordinary request before cutting the connection.
+ *
+ * Every request this server answers reads a local SQLite file, so a second is already generous.
+ * The point of the limit is that shutting down must not be able to hang: see `shutDown`.
+ */
+const CLOSE_GRACE_MS = 3_000;
+
 export async function serveMailbox(options: ServeOptions): Promise<RunningServer> {
     const port = options.port ?? DEFAULT_PORT;
     const host = options.host ?? LOOPBACK;
+
+    /*
+     * The open server-sent-event streams, so shutting down can end them.
+     *
+     * They are the only connections here that never finish on their own — see `shutDown`.
+     */
+    const streams = new Set<ServerResponse>();
 
     const server = createServer((request, response) => {
         const path = new URL(request.url ?? '/', `http://${host}`).pathname;
@@ -112,7 +127,8 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
             streamState(
                 request,
                 response,
-                path === '/api/login/stream' ? options.login : options.sync
+                path === '/api/login/stream' ? options.login : options.sync,
+                streams
             );
             return;
         }
@@ -211,11 +227,63 @@ export async function serveMailbox(options: ServeOptions): Promise<RunningServer
     return {
         port: actual,
         url: `http://${host}:${actual}`,
-        close: () =>
-            new Promise<void>((resolve) => {
-                server.close(() => resolve());
-            }),
+        close: () => shutDown(server, streams),
     };
+}
+
+/**
+ * Stop listening, and let the process end.
+ *
+ * `server.close()` stops accepting new connections and then waits for every open one. Two of this
+ * server's connections never finish on their own: `/api/sync/stream` and `/api/login/stream` are
+ * server-sent events with a keep-alive ticking every twenty seconds, so a single dashboard tab left
+ * open kept the process alive for as long as that tab existed.
+ *
+ * On a terminal that was invisible — Ctrl-C appeared to work because the terminal went away too.
+ * Under `docker stop` it is not invisible at all: SIGTERM is answered by a process that then does
+ * not exit, the ten-second grace runs out, and SIGKILL arrives — in the middle of whatever SQLite
+ * was doing. That is the corruption this project guards against everywhere else, arriving through
+ * the shutdown path.
+ *
+ * So the streams are **ended**, not waited for, and an ordinary request gets `CLOSE_GRACE_MS`
+ * before its connection is cut as well. Shutting down must not be able to hang; a request that
+ * takes longer than three seconds against a local file has already gone wrong.
+ */
+async function shutDown(server: Server, streams: Set<ServerResponse>): Promise<void> {
+    for (const stream of streams) {
+        stream.end();
+    }
+    streams.clear();
+
+    const closed = new Promise<void>((resolve) => {
+        server.close(() => resolve());
+    });
+
+    /*
+     * Keep-alive connections sitting between requests wait for their own timeout otherwise — and a
+     * stream that was just ended is exactly such a connection a moment later.
+     *
+     * On the next tick rather than straight away: `end()` above has not finished flushing yet, so a
+     * socket that is about to become idle is not idle *now*, and calling this synchronously would
+     * miss the very connections it exists for.
+     */
+    const idle = setInterval(() => {
+        server.closeIdleConnections();
+    }, 50);
+    idle.unref?.();
+
+    const backstop = setTimeout(() => {
+        log.warn({ graceMs: CLOSE_GRACE_MS }, 'a request outlived the shutdown grace; cutting it');
+        server.closeAllConnections();
+    }, CLOSE_GRACE_MS);
+    backstop.unref?.();
+
+    try {
+        await closed;
+    } finally {
+        clearInterval(idle);
+        clearTimeout(backstop);
+    }
 }
 
 function currentDb(served: ServeOptions): Db | undefined {
@@ -248,7 +316,8 @@ function streamState(
               state: unknown;
               subscribe: (listener: (state: unknown) => void) => () => void;
           }
-        | undefined
+        | undefined,
+    streams: Set<ServerResponse>
 ): void {
     response.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -290,9 +359,14 @@ function streamState(
         response.write(': keep-alive\n\n');
     }, 20_000);
 
+    // Registered only once the stream is actually live, so `shutDown` never holds a response that
+    // has already ended itself.
+    streams.add(response);
+
     const stop = (): void => {
         clearInterval(keepAlive);
         unsubscribe();
+        streams.delete(response);
     };
     request.on('close', stop);
     response.on('close', stop);
