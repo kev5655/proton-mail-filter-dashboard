@@ -2,17 +2,22 @@ import { useAccount } from '../account.js';
 import { Hint } from './Hint.js';
 
 /**
- * Locking the dashboard, from wherever you happen to be.
+ * Logging out, from wherever you happen to be.
  *
  * In the sidebar rather than in the settings, because it is not a setting: it is the thing you do
  * when you stand up, and a control you need on the way out should not be three clicks away behind a
- * tab. The settings keep the fuller version — „sofort sperren", the grace period, the password.
+ * tab.
  *
- * It says what it will do before it does it. „Abmelden" that silently held the key for half an hour
- * would be a lie about how locked „gesperrt" is; the grace period is a real convenience and it is
- * stated where it applies. But it is stated on the button itself, not next to it: an `i` mark here
- * meant a second thing to aim at in the corner of the navigation, for a sentence that belongs to the
- * button anyway.
+ * **It discards the key immediately, and that is a change.** It used to take the grace period — so
+ * „Abmelden" held the key for half an hour, kept the database open and kept the Proton session
+ * live. That put the weakening on the button people press most and the strong version behind a
+ * settings tab, which is the wrong way round: the word means „I am done here", and a control whose
+ * name promises more than it does is the kind nobody checks twice.
+ *
+ * The grace period still exists and is still worth having — it is what makes closing a tab cheap
+ * rather than a reconnection to Proton a minute later. It is reachable as „Sperren" in the
+ * settings, next to „Sofort sperren", where the two intentions are named side by side and the
+ * difference between them is the point of the screen.
  */
 export function LockButton(): React.JSX.Element | null {
     const { status, served, perform } = useAccount();
@@ -27,16 +32,15 @@ export function LockButton(): React.JSX.Element | null {
             <span className="faint">{status.username ?? 'angemeldet'}</span>
             <Hint
                 text={
-                    status.graceMinutes > 0
-                        ? `Der Schlüssel wird noch ${String(status.graceMinutes)} Minuten gehalten — so lange kommst du ohne Passwort zurück und die Verbindung zu Proton bleibt bestehen. Danach ist er weg und die lokale Kopie wird geschlossen. Die Dauer lässt sich in den Einstellungen ändern, bis hinunter auf 0.`
-                        : 'Der Schlüssel wird sofort verworfen und die lokale Kopie geschlossen. Der nächste Zugang braucht wieder das Passwort.'
+                    'Der Schlüssel wird sofort verworfen, die lokale Kopie geschlossen und die Proton-Sitzung in diesem Prozess beendet. Der nächste Zugang braucht wieder das Passwort. ' +
+                    'Wenn du gleich zurückkommen willst, nimm „Sperren“ in den Einstellungen — das hält den Schlüssel für die Nachfrist.'
                 }
             >
                 <button
                     type="button"
                     className="button button-quiet"
                     onClick={() => {
-                        void perform({ action: 'lock' });
+                        void perform({ action: 'lock', immediate: true });
                     }}
                 >
                     Abmelden

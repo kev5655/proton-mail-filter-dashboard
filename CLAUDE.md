@@ -344,6 +344,11 @@ configurable while, so closing a tab does not mean reconnecting to Proton a minu
 it off, and the way back in during it is its own button — „weiter ohne Passwort" — rather than an
 empty password quietly being accepted.
 
+**„Abmelden" in the sidebar does not take it.** It used to, which put the weakening on the button
+people press most and the strong version behind a settings tab — the wrong way round for a word
+that means „I am done here". The grace period is now reached by choosing it: „Sperren" in the
+settings, beside „Sofort sperren", where the two intentions are named next to each other.
+
 ### Where the category ids and the category endpoint come from
 
 The ids in `CATEGORY_LABELS` (`packages/grouping/src/group.ts`) are Proton's own `MAILBOX_LABEL_IDS`,

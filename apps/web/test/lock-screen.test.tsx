@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountProvider, isLocked, type AccountStatus } from '../src/account.js';
 import { App } from '../src/App.js';
 import { LockScreen } from '../src/components/LockScreen.js';
+import { LockButton } from '../src/components/LockButton.js';
 
 /**
  * Whether the dashboard is behind a password, and — more importantly — when it must not be.
@@ -235,6 +236,104 @@ describe('unlocking', () => {
         expect(findText(/ersetzt es nicht/)).toBe(true);
         // Offered only alongside a password, never on its own.
         expect(button('Passwort und Passkey').disabled).toBe(true);
+    });
+});
+
+describe('logging out', () => {
+    /*
+     * „Abmelden" used to take the grace period, so it held the key for half an hour, kept the
+     * database open and kept the Proton session live. That put the weakening on the button people
+     * press most and the strong version behind a settings tab — the wrong way round for a word that
+     * means „I am done here".
+     *
+     * The grace period is still worth having and still exists; it is „Sperren" in the settings,
+     * beside „Sofort sperren", where the two intentions are named next to each other.
+     */
+    it('discards the key immediately rather than taking the grace period', async () => {
+        serve({ available: true, registered: true, unlocked: true, graceMinutes: 30 });
+        await mount(<LockButton />);
+
+        await act(async () => {
+            button('Abmelden').click();
+        });
+
+        expect(sent).toEqual([{ action: 'lock', immediate: true }]);
+    });
+
+    it('says so on the button, rather than beside it', async () => {
+        serve({ available: true, registered: true, unlocked: true, graceMinutes: 30 });
+        await mount(<LockButton />);
+
+        // The bubble exists only while the trigger is hovered or focused, and it renders into the
+        // document body rather than into the button — see `Hint`, which was moved out of the
+        // sidebar's scroll container on purpose.
+        await act(async () => {
+            container.querySelector('.hint')?.dispatchEvent(new Event('mouseover', { bubbles: true }));
+            container.querySelector('.hint')?.dispatchEvent(new MouseEvent('mouseenter'));
+        });
+
+        expect(document.body.textContent).toMatch(/sofort verworfen/);
+    });
+
+    it('offers nothing when there is nothing open to close', async () => {
+        serve({ available: true, registered: true, unlocked: false });
+        await mount(<LockButton />);
+
+        expect(container.textContent).toBe('');
+    });
+});
+
+describe('adding a second Proton account', () => {
+    /*
+     * There was no way in at all. The registration form appeared only while the installation had
+     * *no* account, so once one existed the substrate underneath — a directory, a database, a
+     * Proton session and a password per account — was reachable only by deleting the first
+     * account's files. The server side was always right; the screen simply had no door.
+     */
+    it('offers a way to the form once an account already exists', async () => {
+        serve({ available: true, registered: true, unlocked: false });
+
+        await mount(<LockScreen />);
+
+        expect(findText('Ein weiteres Konto anlegen')).toBe(true);
+    });
+
+    it('says the open account will be closed, and that nothing carries over', async () => {
+        serve({ available: true, registered: true, unlocked: false });
+        await mount(<LockScreen />);
+
+        await act(async () => {
+            button('Ein weiteres Konto anlegen').click();
+        });
+
+        expect(findText('Weiteres Konto anlegen')).toBe(true);
+        // The consequence belongs on the screen that performs it: unlocking as somebody else *is*
+        // the switch, so creating an account closes the one that is open.
+        expect(findText(/wird beim Anlegen geschlossen/)).toBe(true);
+        expect(findText(/eigenes Verzeichnis/)).toBe(true);
+    });
+
+    it('can be backed out of without creating anything', async () => {
+        serve({ available: true, registered: true, unlocked: false });
+        await mount(<LockScreen />);
+
+        await act(async () => {
+            button('Ein weiteres Konto anlegen').click();
+        });
+        await act(async () => {
+            button('Zurück').click();
+        });
+
+        expect(findText('Aufschliessen')).toBe(true);
+        expect(sent).toEqual([]);
+    });
+
+    it('does not offer it on a first run, where there is nothing to add to', async () => {
+        serve({ available: true, registered: false, unlocked: false });
+
+        await mount(<LockScreen />);
+
+        expect(findText('Ein weiteres Konto anlegen')).toBe(false);
     });
 });
 

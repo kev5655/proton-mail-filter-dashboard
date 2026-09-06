@@ -108,6 +108,29 @@ const DEFAULT_AUTO_SYNC_MINUTES = 5;
  */
 const IDLE_STOP_CHECK_MS = 30_000;
 
+/**
+ * Whether this process still has a reason to run.
+ *
+ * A predicate of its own so it can be checked, because the failure it guards against is a loop
+ * rather than a wrong answer: a freshly started server is locked too, so the obvious rule — „stop
+ * while locked" — would end it a moment after the wake screen started it, and the wake screen would
+ * start it again. `everUnlocked` is what breaks that, and a rule with three conditions where one
+ * exists solely to prevent a loop is a rule that deserves a test rather than a comment.
+ *
+ * `withinGrace` is not consulted separately: `unlocked` is already false only once the grace has
+ * expired and the key has actually been dropped.
+ */
+export function nothingLeftToHold(state: {
+    /** Somebody has unlocked at least once *in this process*. */
+    everUnlocked: boolean;
+    /** The dashboard is showing the lock screen. */
+    uiLocked: boolean;
+    /** The vault still holds the key — during the grace period this is still true. */
+    vaultUnlocked: boolean;
+}): boolean {
+    return state.everUnlocked && state.uiLocked && !state.vaultUnlocked;
+}
+
 export async function runServe(argv: readonly string[]): Promise<void> {
     const port = Number(value(argv, '--port') ?? process.env['PMS_SERVER_PORT'] ?? 5174);
     /*
@@ -1072,7 +1095,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
              */
             idleStop = stopWhenLocked
                 ? setInterval(() => {
-                      if (everUnlocked && uiLocked && !vault.state.unlocked) {
+                      if (nothingLeftToHold({
+                          everUnlocked,
+                          uiLocked,
+                          vaultUnlocked: vault.state.unlocked,
+                      })) {
                           console.log('\n  Gesperrt und nichts mehr zu halten — Server beendet sich.\n');
                           stop();
                       }

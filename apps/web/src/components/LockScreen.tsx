@@ -19,6 +19,19 @@ import { useAccount } from '../account.js';
  */
 export function LockScreen(): React.JSX.Element {
     const { status } = useAccount();
+    /*
+     * Whether the second form is showing.
+     *
+     * There was no way to reach it at all once an account existed, which meant an installation
+     * could hold several Proton accounts and offer no way to create the second one — the whole
+     * substrate underneath was reachable only by deleting the first account's files. The server has
+     * always handled it correctly: registering while one account exists creates a *new directory*,
+     * closes the open one and registers there, so nothing of the first is touched.
+     *
+     * Local state rather than a route, because it is a choice about this screen and nothing else
+     * should be able to land somebody on it.
+     */
+    const [adding, setAdding] = useState(false);
 
     return (
         <div className="lock-screen">
@@ -36,13 +49,42 @@ export function LockScreen(): React.JSX.Element {
                         <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
                     </svg>
                 </div>
-                {status.registered ? <Unlock /> : <Register />}
+                {status.registered && !adding ? (
+                    <>
+                        <Unlock />
+                        {/*
+                          * Quiet, and below the password. It is not what anybody came here to do —
+                          * and it says „weiteres", so it cannot be mistaken for a way to recover
+                          * the account whose password somebody has just failed to remember. There
+                          * is no such way, by design.
+                          */}
+                        <button
+                            type="button"
+                            className="button button-quiet lock-secondary"
+                            onClick={() => {
+                                setAdding(true);
+                            }}
+                        >
+                            Ein weiteres Konto anlegen
+                        </button>
+                    </>
+                ) : (
+                    <Register
+                        {...(status.registered
+                            ? {
+                                  onCancel: () => {
+                                      setAdding(false);
+                                  },
+                              }
+                            : {})}
+                    />
+                )}
             </div>
         </div>
     );
 }
 
-function Register(): React.JSX.Element {
+function Register({ onCancel }: { onCancel?: () => void }): React.JSX.Element {
     const { perform } = useAccount();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -69,7 +111,15 @@ function Register(): React.JSX.Element {
                     });
             }}
         >
-            <h1>Konto anlegen</h1>
+            <h1>{onCancel === undefined ? 'Konto anlegen' : 'Weiteres Konto anlegen'}</h1>
+            {onCancel === undefined ? null : (
+                <p className="notice notice-info">
+                    Das neue Konto bekommt ein eigenes Verzeichnis mit eigener Datenbank, eigener
+                    Proton-Verbindung und eigenem Passwort. Vom bisherigen wird nichts übernommen und
+                    nichts angefasst — <strong>es wird beim Anlegen geschlossen</strong>, und du
+                    kommst mit seinem Namen und seinem Passwort wieder hinein.
+                </p>
+            )}
             <p className="muted">
                 Dieses Passwort ist der Schlüssel für alles, was auf diesem Rechner liegt — die
                 Kopie deines Postfachs und die gespeicherte Proton-Sitzung. Ohne das Passwort ist
@@ -131,6 +181,16 @@ function Register(): React.JSX.Element {
             <button type="submit" className="button" disabled={!usable || busy}>
                 {busy ? 'Wird angelegt …' : 'Konto anlegen'}
             </button>
+            {onCancel === undefined ? null : (
+                <button
+                    type="button"
+                    className="button button-quiet"
+                    disabled={busy}
+                    onClick={onCancel}
+                >
+                    Zurück
+                </button>
+            )}
             <p className="faint">
                 Zwei-Faktor und Passkeys lassen sich danach in den Einstellungen einschalten.
             </p>

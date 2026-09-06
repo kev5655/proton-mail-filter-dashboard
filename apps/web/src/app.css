@@ -1415,6 +1415,20 @@
     margin: 0;
 }
 
+/*
+ * The way to a second account, below the password and visibly quieter than it.
+ *
+ * Separated by a rule rather than by spacing alone: it is a different act, not another way to do
+ * the one above it — and on a lock screen the thing somebody must never confuse it with is a way
+ * back into an account whose password they have just forgotten. There is none.
+ */
+.lock-secondary {
+    width: 100%;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
 .lock-mark {
     display: flex;
     align-items: center;
