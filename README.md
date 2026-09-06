@@ -259,6 +259,16 @@ Four things worth knowing before you do it:
 - **The key stays in memory for as long as the grace period**, on a machine you are not watching.
   Shorten it in the settings, or set it to `0` and type the password each time.
 
+## Auf dem Raspberry Pi
+
+Eine Instanz auf einem Pi hinter Tailscale, erreichbar von Telefon und beiden Rechnern. Die
+Einrichtung steht in `deploy/pi/` als vier Skripte, damit ein Defekt ein erneuter Lauf ist und
+keine Rekonstruktion aus dem Gedächtnis: `provision.sh` (System), `deploy.sh` (Code),
+`backup.sh` (`data/`, das Einzige was sich nicht neu bauen lässt) und `stress.sh` (prüft, ob
+das Netzteil unter Last trägt — Unterspannung ist der leiseste Weg zu einer kaputten Datenbank).
+
+Siehe `deploy/pi/README.md`.
+
 ## More than one Proton account
 
 Each account gets its own directory under `data/`, with its own database, its own Proton session and

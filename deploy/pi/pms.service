@@ -1,0 +1,45 @@
+# Placeholders are filled in by provision.sh: @CHECKOUT@, @USER@, @NODEHOME@.
+[Unit]
+Description=proton-mail-sorter — hält die Proton-Sitzung und bedient das Dashboard
+Documentation=file://@CHECKOUT@/CLAUDE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@CHECKOUT@
+
+# The server comes up locked: no key, no database, only /api/account and the lock screen.
+# That is what makes starting it unattended at boot defensible — nothing is open until
+# somebody types the password.
+Environment=PATH=@NODEHOME@/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-@CHECKOUT@/.env
+EnvironmentFile=-@CHECKOUT@/.env.pi
+ExecStart=@NODEHOME@/bin/pnpm serve
+
+Restart=on-failure
+RestartSec=5
+# Give up after five failures in five minutes rather than restarting into the same wall for
+# ever — a crash loop against Proton is exactly what LoginGuard exists to prevent.
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# The binding stays on 127.0.0.1; tailscale serve is what puts it on a name. These keep a
+# compromise of the process from reaching the rest of the machine.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@CHECKOUT@/data @CHECKOUT@/node_modules/.vite
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pms
+
+[Install]
+WantedBy=multi-user.target
