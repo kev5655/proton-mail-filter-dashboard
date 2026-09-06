@@ -101,7 +101,7 @@ jobs:
       # is deliberately here rather than in the test suite: what it exercises is the archive.
       - name: Smoke test the archive
         shell: bash
-        run: node scripts/smoke-release.mjs
+        run: node scripts/smoke/archive.mjs
 
       - name: Name the archive
         id: name

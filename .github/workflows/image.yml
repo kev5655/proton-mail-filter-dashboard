@@ -75,29 +75,16 @@ jobs:
           cache-to: type=gha,mode=max
           outputs: type=docker,dest=/tmp/image.tar
 
-      # The same three questions `scripts/smoke-release.mjs` asks a downloaded archive, asked of the
-      # image: does it start, does it serve the page, and does it refuse the mailbox when there is no
-      # account. It never reaches Proton — a fresh volume has no session to reach it with.
+      # The same four questions `scripts/smoke/archive.mjs` asks a downloaded archive — asked by
+      # the same code, not by a second copy of it in YAML. A contract that exists twice drifts, and
+      # the copy in a workflow is the one nobody runs before pushing.
       - name: Smoke test the image
         run: |
-          set -euo pipefail
+          set -eu
           docker load -i /tmp/image.tar
-          tag="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -1)"
-          docker run -d --name pms-smoke -p 127.0.0.1:5174:5174 "$tag"
-
-          for _ in $(seq 1 60); do
-            if curl -fsS -o /dev/null http://127.0.0.1:5174/api/health; then break; fi
-            sleep 2
-          done
-
-          echo "· die Seite"
-          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5174/ | grep -qx 200
-
-          echo "· ohne Konto ist das Postfach gesperrt"
-          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5174/api/mailbox)"
-          [ "$code" = "423" ] || { echo "erwartet 423, bekam $code"; docker logs pms-smoke; exit 1; }
-
-          docker rm -f pms-smoke
+          PMS_IMAGE="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -1)" \
+          PMS_IMAGE_PLATFORM=linux/arm64 \
+            node scripts/smoke/image.mjs --no-build
 
       - name: Push
         if: startsWith(github.ref, 'refs/tags/v')

@@ -214,7 +214,7 @@ Four things about it are load-bearing:
   them — not in a hidden directory under the home, which would bury the one thing this tool promises
   you can remove.
 
-`scripts/smoke-release.mjs` is what catches that class of failure: it copies `release/` somewhere
+`scripts/smoke/archive.mjs` is what catches that class of failure: it copies `release/` somewhere
 else, starts it with the Node that ships in it, and checks that the page is served, that a fresh
 directory has no account, and that the mailbox answers `423` rather than empty. It never reaches
 Proton — a fresh directory has no session to reach it with.
@@ -248,8 +248,10 @@ no screen.
 Ordinary practice, and still worth writing down here. Two things narrow it and both are cheap: the
 workflow **pushes on a tag and on nothing else**, so an accidental commit to `main` does not roll
 out; and the token is scoped to that one repository behind a protected environment. `workflow_dispatch`
-builds and smoke-tests without publishing — the smoke test asks the image the same three questions
-`smoke-release.mjs` asks an archive.
+builds and smoke-tests without publishing — the smoke test asks the image the same four questions
+`scripts/smoke/archive.mjs` asks an archive — literally the same code, from
+`scripts/smoke/checks.mjs`. An image and an archive are two shapes of one promise, and the moment
+that promise is written down twice the two answer differently and nobody notices which.
 
 ### Stopping the server, and why starting is somebody else's job
 

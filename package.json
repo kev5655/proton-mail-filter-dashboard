@@ -23,7 +23,8 @@
     "dev": "pnpm --filter @pms/web dev",
     "icons": "node scripts/make-icons.mjs",
     "package": "node scripts/package-app.mjs",
-    "smoke": "node scripts/smoke-release.mjs"
+    "smoke": "node scripts/smoke/archive.mjs",
+    "smoke:image": "node scripts/smoke/image.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
