@@ -41,6 +41,8 @@ export const ERROR_CODES = [
     'BROWSER_LOGIN_UI_CHANGED',
     'BROWSER_LOGIN_TIMEOUT',
     'BROWSER_LOGIN_2FA_UNSUPPORTED',
+    'BROWSER_LOGIN_UNFINISHED',
+    'PROTON_SESSION_UNDERSCOPED',
     // A login started from the dashboard that could not even open: no profile, no browser.
     'BROWSER_LOGIN_NOT_CONFIGURED',
     // Asked to do something at Proton after the connection was cut.
@@ -169,6 +171,28 @@ export class ProtonSchemaError extends AppError {
  * said" with a guess turns a diagnosable failure into a mystery, which is exactly what happened
  * once already during the login work.
  */
+/**
+ * The one Proton refusal that means something specific and actionable.
+ *
+ * HTTP 403 with „sufficient scope" in it is not a permission problem with the account: it is a
+ * session that was captured before its login finished, so Proton issued a token that may do almost
+ * nothing. The way it reached a user was as a failed sync, minutes later, on a screen with no
+ * mention of logging in — so the sentence that explains it belongs on the error rather than in a
+ * commit message.
+ *
+ * Matched on the message rather than on a numeric code because the code for it is not documented and
+ * this API has no stability guarantee; a wrong hint on a 403 costs a misleading sentence, while a
+ * missing one costs an afternoon.
+ */
+function underscoped(status: number, message: string | undefined): boolean {
+    return status === 403 && (message ?? '').toLowerCase().includes('scope');
+}
+
+const SCOPE_HINT =
+    'Die Sitzung durfte das nicht — sie wurde vermutlich übernommen, bevor die Anmeldung fertig ' +
+    'war (zweiter Faktor nicht bestätigt, oder ein zweites Passwort offen). Neu anmelden und die ' +
+    'Anmeldung im Browser-Fenster zu Ende führen. Am Konto wurde nichts geändert.';
+
 export class ProtonApiError extends AppError {
     readonly httpStatus: number;
     readonly protonCode: number | undefined;
@@ -186,6 +210,7 @@ export class ProtonApiError extends AppError {
         const detail = params.protonMessage ? `: ${params.protonMessage}` : '';
         super('PROTON_API_ERROR', {
             message: `Proton hat \`${params.endpoint}\` mit HTTP ${params.httpStatus} abgelehnt${detail}`,
+            ...(underscoped(params.httpStatus, params.protonMessage) ? { hint: SCOPE_HINT } : {}),
             context: {
                 endpoint: params.endpoint,
                 httpStatus: params.httpStatus,

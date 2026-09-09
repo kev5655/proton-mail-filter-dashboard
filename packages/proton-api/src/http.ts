@@ -23,6 +23,15 @@ export interface ProtonSession {
      * effectively does and costs nothing.
      */
     cookies?: string | undefined;
+    /**
+     * What Proton says this session may do, where the login could establish it.
+     *
+     * Carried so that a session which cannot read anything can be refused before a request is spent
+     * on finding that out. Undefined means „not known" and is never treated as a refusal: a stored
+     * session from before this field existed has none, and neither has one whose login involved a
+     * second factor.
+     */
+    scope?: string | undefined;
 }
 
 export interface ProtonHttpOptions {

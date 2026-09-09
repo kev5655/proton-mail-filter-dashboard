@@ -13,6 +13,7 @@ import {
     refreshSession,
     revokeSession,
     saveSession,
+    scopeIsPartial,
     type LoginAttemptState,
     type ProtonSession,
     type StoredSession,
@@ -421,6 +422,25 @@ export async function loginInBrowser(options: {
     } catch (error) {
         await guard.recordFailure(error);
         throw error;
+    }
+
+    /*
+     * A session Proton has already said is not finished.
+     *
+     * This covers the case the waiting in `@pms/browser-auth` cannot: an account with a second
+     * *password* rather than a second factor reports `TwoFactor: 0`, so nothing is pending as far
+     * as the login is concerned, and the scope is the only thing that says the session is still
+     * shut. Storing it would produce a tool that believes it is signed in and fails on every read.
+     */
+    if (scopeIsPartial(session.scope)) {
+        throw new AppError('PROTON_SESSION_UNDERSCOPED', {
+            message: 'Proton hat eine Sitzung ausgegeben, die noch nichts lesen darf.',
+            hint:
+                'Die Anmeldung im Fenster ist nicht abgeschlossen — bei einem Konto mit zweitem ' +
+                'Passwort fehlt dieses noch. Im Browser fertig anmelden und es erneut versuchen; ' +
+                'gespeichert wurde nichts.',
+            context: { scope: session.scope },
+        });
     }
 
     options.http?.setSession(session);

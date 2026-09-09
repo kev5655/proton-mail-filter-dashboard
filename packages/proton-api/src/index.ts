@@ -5,6 +5,7 @@ export {
     login,
     refreshSession,
     revokeSession,
+    scopeIsPartial,
     type LoginCredentials,
     type LoginResult,
     type TwoFactorPrompt,

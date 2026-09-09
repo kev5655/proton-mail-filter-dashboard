@@ -418,3 +418,34 @@ function cookieValue(cookies: string | undefined, name: string): string | undefi
     }
     return undefined;
 }
+
+/**
+ * Scopes that mean „this session cannot do anything yet".
+ *
+ * Proton hands out a session as soon as the password checks out and upgrades it once whatever else
+ * the account demands has happened — a second factor, or the second password of two-password mode.
+ * Until then the token exists, looks like a session, and is refused by every read with HTTP 403.
+ *
+ * The list is what Proton is known to use for those states. Anything unrecognised counts as fine:
+ * this is an internal API with no stability guarantee, and a guess that refuses a working session
+ * would be worse than the failure it is meant to explain — it would cost a login, which is the one
+ * thing this project spends carefully.
+ */
+const PARTIAL_SCOPES = new Set(['locked', 'twofactor', 'password', 'nondelinquent']);
+
+/**
+ * Whether a session's scope says it is not finished.
+ *
+ * `undefined` is not partial. A stored session from before the scope was recorded has none, and so
+ * has one whose login involved a second factor — there the scope is only stated before the factor,
+ * where it would be a lie. Absent means unknown, and unknown is allowed to try.
+ */
+export function scopeIsPartial(scope: string | undefined): boolean {
+    if (scope === undefined || scope.trim() === '') {
+        return false;
+    }
+    const parts = scope.toLowerCase().split(/[\s,]+/).filter((part) => part !== '');
+    // Every part being a partial one is the test, not any part: a full scope is a list that
+    // *includes* the ordinary capabilities, and one that consists solely of „locked" does not.
+    return parts.length > 0 && parts.every((part) => PARTIAL_SCOPES.has(part));
+}

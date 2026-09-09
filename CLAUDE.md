@@ -487,6 +487,31 @@ it stays because the browser is a cost, not a preference.
 Two of our own bugs made it worse before that was understood: the spike re-authenticated on every
 run, and one run sent an empty password because of a prompt bug.
 
+**A session is not finished when its cookie appears.** Proton sets `AUTH-<UID>` on the answer to
+`core/v4/auth` — *before* a second factor. `collectSession` waited for that cookie to exist, so every
+login on an account with a factor returned at once with a session Proton had scoped to almost
+nothing, and the failure surfaced minutes later as `PROTON_API_ERROR`, „HTTP 403 … access token does
+not have sufficient scope", on a mailbox read, on a screen that said nothing about logging in.
+`loginByHandInBrowser` — the path the dashboard uses — did not look at `TwoFactor` at all.
+
+Two signals now say the ceremony finished, watched together so neither has to be the one Proton
+keeps doing: the access cookie is **re-issued** with the upgraded scope, so its value changes, and
+the browser **leaves the login page**. Neither names an endpoint, which is the point — the previous
+attempt watched `core/v4/auth/2fa` and hung on a passkey, because Proton confirms one some other way.
+Watching for a URL is also not an option here: `write-isolation.test.ts` allows exactly one Proton
+address in `browser-auth/src`, so the page test is on the *path*.
+
+Where nothing is pending the cookie really is the whole story, and that path is unchanged — making
+it wait for a change too would hang every login on an account without a second factor.
+
+**The scope is recorded, but only where it is the final word.** After a login with a factor the only
+place a scope is stated is the pre-factor answer, and storing that would be a stale claim behind a
+field name. Where it *is* final, `scopeIsPartial` refuses a session that says it can do nothing —
+which is the case the waiting cannot see: an account with a second **password** reports
+`TwoFactor: 0`, so nothing is pending, and the scope is all that says the session is still shut.
+Unknown is deliberately allowed through: refusing on a scope string nobody promised would cost a
+login, and logins are what this project rations.
+
 Consequences that are now load-bearing:
 
 - **Never log in when a stored session would do.** `apps/spike/src/session.ts` is the order to
