@@ -323,15 +323,32 @@ Four consequences worth knowing before touching any of it:
 - **There is no password recovery, and there cannot be one.** A way back would have to keep the key
   somewhere a password does not protect. The registration screen says so before the password is
   chosen, which is the only honest place to say it.
-- **A passkey is a second factor by default, and can become the key.** WebAuthn returns a signature,
+- **A passkey is the key wherever its authenticator can produce one.** WebAuthn returns a signature,
   not a secret, so a passkey on its own could never unwrap anything — which is why the password was
-  always required as well. The **PRF extension** is the exception and is now implemented: it returns
-  32 bytes that only that authenticator can produce, and `vault-key.ts` was always shaped to take a
-  second wrapping. A passkey enabled for it opens the account with no password; one that is not is
-  exactly what it was. Two rules are enforced rather than described: **enabling it requires the vault
-  to already be open**, so a passkey cannot enrol itself, and **unlocking with one requires user
+  always required as well. The **PRF extension** is the exception: it returns 32 bytes that only that
+  authenticator can produce, and `vault-key.ts` was always shaped to take a second wrapping. Two
+  rules are enforced rather than described: **releasing a passkey for unlocking requires the vault to
+  already be open**, so a passkey cannot enrol itself, and **unlocking with one requires user
   verification** rather than merely preferring it, because possession alone must not open a mailbox.
   See `docs/security.md` §6.
+
+  **Registering a passkey releases it, in the same act.** It did not, and the consequence was not
+  cosmetic: releasing was a second, separate step in a second place, so every passkey stayed a second
+  factor, the lock screen offered no passkey button and gave no reason, and a working passkey was
+  indistinguishable from a broken one. Registration runs from the settings, behind an open vault, so
+  doing it there breaks no rule — the authenticator is simply touched twice, once to create and once
+  for the key material, because there is no way to ask for both in one gesture. An authenticator with
+  no PRF stays a second factor and the screen says so, as an outcome rather than as an error.
+
+- **The lock screen leads with the passkey, and assumes nothing about who is looking at it.** Where a
+  passkey can open the account it is the first and widest button and the password sits one quiet
+  click below — never gone, because an authenticator left at home must not be a lock-out. What it
+  must not do is treat whoever loaded the page as the account holder: anybody who can reach the port
+  can reach this screen, so it greets nobody by name until this browser has actually opened the
+  account before (`device.ts`, a flag that holds no secret and grants nothing — forging it buys a
+  friendlier sentence and not one byte of access). Recognition otherwise happens in the
+  authenticator, where it belongs. The API still reports the username for a single-account
+  installation, as it always has; it is the *screen* that stops presuming.
 - **The KDF is slow on purpose.** Argon2id at 64 MiB costs about 1.5 s per derivation, which is what
   makes a stolen file useless. The KDF is never made cheap for tests; `store/test/encryption.test.ts`
   pays two real derivations and fits inside vitest's default five seconds, which also makes it the

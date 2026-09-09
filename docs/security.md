@@ -192,6 +192,12 @@ installation, so the same authenticator used elsewhere yields different bytes.
   a second time, so only somebody who knows the password can promote a passkey. **A passkey cannot
   enrol itself**, and the assertion is verified before its PRF output is trusted — without that,
   „unlock with a passkey" would mean „unlock with anything that can POST".
+
+  Registering a passkey now performs that release in the same act, which does **not** weaken this
+  rule: registration is reachable only from the settings, behind an open vault. What changed is that
+  it no longer waits for a second visit to a second screen — the state it used to leave behind was a
+  passkey that could not unlock, on a lock screen that offered no passkey button and gave no reason,
+  which is what a broken passkey looks like from the outside.
 - **Unlocking requires user verification.** `finishPasskeyLogin` is passed
   `requireUserVerification: true` on that path, and `startPasskeyLogin` asks for `required` rather
   than `preferred`. While the passkey was only a second factor, preferring it was enough; now that it
@@ -204,9 +210,26 @@ removing them.
 
 It is a **reduction in factors** for the accounts that enable it: from *password* to *authenticator
 plus user verification*. That is the point rather than a side effect, and it is a choice made per
-passkey rather than for the installation. The password wrapping is never touched, so nothing is lost
+passkey rather than for the installation — but it is now the **default** for a newly registered
+passkey rather than an opt-in, so the trade is made by adding a passkey at all. An authenticator
+that cannot do PRF stays a second factor, and the screen reports that as an outcome rather than as
+a failure. The password wrapping is never touched, so nothing is lost
 by enabling it and nothing is recovered by it either — **losing both the password and every enabled
 authenticator is still unrecoverable.**
+
+### What the lock screen tells a stranger
+
+The page is reachable by anybody who can reach the port, so it treats the visitor as one until shown
+otherwise: it greets nobody by the account's name unless this browser has completed an unlock before
+(`apps/web/src/device.ts`). That flag holds no secret and grants nothing — forging it buys a
+friendlier sentence, not a byte of access — which is why it is allowed to be a browser flag rather
+than something the server vouches for. Recognition otherwise happens in the authenticator: pressing
+„Mit Passkey aufschliessen" either produces a credential this server knows or it does not, and the
+screen has asserted nothing either way.
+
+This is the *screen's* discretion, not the API's. With a single account `/api/account` still reports
+the username to anyone who asks, as it always has; with more than one it withholds everything
+account-shaped until a name has been given (`serve-command.ts`, `view()`).
 
 The PRF output is key material and travels from the browser to the local server, over the same
 origin the password already uses. It is sent in a field of its own and stripped from the assertion

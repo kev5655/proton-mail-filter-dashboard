@@ -1429,6 +1429,21 @@
     border-top: 1px solid var(--border);
 }
 
+/*
+ * The passkey offer, where a passkey can open the account.
+ *
+ * Above the password rather than beside it, and full width, because it is the way in rather than an
+ * alternative to it. The password half sits behind one quiet click below.
+ */
+.lock-primary {
+    width: 100%;
+}
+
+.button-wide {
+    width: 100%;
+    justify-content: center;
+}
+
 .lock-mark {
     display: flex;
     align-items: center;

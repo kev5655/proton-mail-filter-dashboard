@@ -4,6 +4,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import { assertWithPrf } from '../passkey.js';
 
 import { useAccount } from '../account.js';
+import { deviceIsKnown, rememberDevice } from '../device.js';
 
 /**
  * The first screen, and on most days the only one that asks for anything.
@@ -14,10 +15,21 @@ import { useAccount } from '../account.js';
  * is no way back from losing it. A recovery path would have to store the key somewhere a password
  * does not protect, which is the whole thing this is for.
  *
- * A passkey is offered as a *second* factor and never as a replacement for the password. WebAuthn
- * hands back a signature, not a secret, so there is nothing in it to unwrap a key with — and a
- * button labelled „Passkey" that then asks for a password anyway reads as a bug unless the screen
- * says why.
+ * **Where a passkey can open the account, it is the first thing offered and the password is the
+ * fallback.** Not because it is more convenient — because it is the stronger of the two: the secret
+ * never leaves the authenticator, there is nothing to type, and nothing to phish.
+ *
+ * A passkey can only do that once it has been *released* for it, and that release requires the vault
+ * to already be open, so a passkey cannot enrol itself. A passkey that has not been released is what
+ * it always was — a second factor beside the password — and the screen says so in as many words,
+ * because the failure it otherwise produces is „mein Passkey funktioniert nicht" with nothing on
+ * screen to contradict it.
+ *
+ * **It does not assume the visitor is the account holder.** This page is reachable by anybody who
+ * can reach the port, so it greets nobody by name until this browser has actually opened the account
+ * before. Recognition otherwise happens in the authenticator, where it belongs: pressing the button
+ * either produces a credential this server knows or it does not, and the screen has asserted nothing
+ * either way.
  */
 export function LockScreen(): React.JSX.Element {
     const { status } = useAccount();
@@ -214,6 +226,17 @@ function Unlock(): React.JSX.Element {
     const [totp, setTotp] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>();
+    /** Whether this browser has opened this account before. Decides the greeting and nothing else. */
+    const [known] = useState(deviceIsKnown);
+    /*
+     * Whether the password half is on screen.
+     *
+     * Where a passkey can open the account it is the offer, and the password is one click away
+     * rather than in front of it. It is never *gone*: an authenticator can be forgotten at home, be
+     * out of battery, or refuse, and a lock screen with no way in but a device somebody does not
+     * have on them is a lock-out with better manners.
+     */
+    const [withPassword, setWithPassword] = useState(status.passkeyUnlock !== true);
 
     const submit = (passkey?: unknown): void => {
         setError(undefined);
@@ -226,6 +249,9 @@ function Unlock(): React.JSX.Element {
             origin: window.location.origin,
             ...(passkey === undefined ? {} : { passkey }),
         })
+            .then(() => {
+                rememberDevice();
+            })
             .catch((cause: Error) => {
                 setError(cause.message);
             })
@@ -269,6 +295,7 @@ function Unlock(): React.JSX.Element {
                     origin: window.location.origin,
                     account,
                 });
+                rememberDevice();
             } catch (cause) {
                 setError(
                     cause instanceof Error ? cause.message : 'Der Passkey wurde nicht akzeptiert.'
@@ -311,27 +338,64 @@ function Unlock(): React.JSX.Element {
             <p className="muted">
                 {status.needsAccountName === true
                     ? 'Auf diesem Rechner liegt mehr als ein Konto. Jedes hat seinen eigenen Schlüssel — solange dieses hier offen ist, bleiben die anderen verschlüsselt.'
-                    : status.username === undefined
-                      ? 'Die lokale Kopie ist verschlüsselt und wird erst nach der Anmeldung geöffnet.'
-                      : `Angemeldet wird als ${status.username}. Die lokale Kopie ist verschlüsselt und wird erst danach geöffnet.`}
+                    : /*
+                       * The name only where this browser has opened the account before.
+                       *
+                       * Anybody who can reach the port can load this page, and „angemeldet wird als
+                       * …" hands them the account's name for having done nothing but ask. On a
+                       * device that has unlocked before, the holder has demonstrably sat here and
+                       * the sentence tells them nothing they did not bring with them.
+                       */
+                      known && status.username !== undefined
+                      ? `Angemeldet wird als ${status.username}. Die lokale Kopie ist verschlüsselt und wird erst danach geöffnet.`
+                      : 'Die lokale Kopie ist verschlüsselt und wird erst nach der Anmeldung geöffnet.'}
             </p>
 
             {status.passkeyUnlock === true && (
-                <div className="notice notice-info form-stack">
-                    <p>
-                        Ein Passkey auf diesem Konto schliesst <strong>ohne Passwort</strong> auf.
-                        Der Schlüssel wird dabei wirklich aus dem Passkey entpackt — es wird kein
-                        Passwort übergangen.
-                    </p>
+                <div className="form-stack lock-primary">
                     <button
                         type="button"
-                        className="button"
+                        className="button button-wide"
                         disabled={busy}
                         onClick={withPasskeyOnly}
                     >
-                        Mit Passkey aufschliessen
+                        {busy ? 'Warte auf den Schlüssel …' : 'Mit Passkey aufschliessen'}
                     </button>
+                    <p className="faint">
+                        Der Schlüssel wird dabei wirklich aus dem Passkey entpackt — es wird kein
+                        Passwort übergangen. Er verlangt deine Bestätigung am Gerät.
+                    </p>
+                    {!withPassword && (
+                        <button
+                            type="button"
+                            className="button button-quiet"
+                            onClick={() => {
+                                setWithPassword(true);
+                            }}
+                        >
+                            Stattdessen Passwort eingeben
+                        </button>
+                    )}
                 </div>
+            )}
+
+            {/*
+             * A passkey that is only a second factor, and the one sentence that was missing.
+             *
+             * Without it the screen offers no passkey button, gives no reason, and reads as „der
+             * Passkey funktioniert nicht". It is not broken: it has not been released for
+             * unlocking, and releasing it needs the vault open — which is the rule that stops a
+             * passkey enrolling itself, so the way through it really is the password, once.
+             */}
+            {status.hasPasskeys && status.passkeyUnlock !== true && (
+                <p className="notice notice-info">
+                    <strong>Dein Passkey ist hier nur der zweite Faktor.</strong> Zum Aufschliessen
+                    ohne Passwort muss er einmal freigegeben werden, und das geht nur bei offenem
+                    Tresor — ein Passkey kann sich nicht selbst dazu befördern. Also: einmal mit dem
+                    Passwort aufschliessen, dann unter <strong>Einstellungen → Konto → Passkeys</strong>{' '}
+                    auf <strong>„Ohne Passwort aufschliessen"</strong>. Danach ist der Passkey hier
+                    der erste Knopf.
+                </p>
             )}
 
             {status.withinGrace && (
@@ -377,22 +441,7 @@ function Unlock(): React.JSX.Element {
                 </label>
             )}
 
-            {status.needsAccountName === true && (
-                <label className="field">
-                    <span>Konto</span>
-                    <input
-                        type="text"
-                        className="text-input"
-                        autoComplete="username"
-                        autoCapitalize="none"
-                        value={account}
-                        onChange={(event) => {
-                            setAccount(event.target.value);
-                        }}
-                    />
-                </label>
-            )}
-
+            {withPassword && (
             <label className="field">
                 <span>Passwort</span>
                 <input
@@ -405,8 +454,9 @@ function Unlock(): React.JSX.Element {
                     }}
                 />
             </label>
+            )}
 
-            {status.requiresTotp && (
+            {withPassword && status.requiresTotp && (
                 <label className="field field-narrow">
                     <span>Code aus der Authenticator-App</span>
                     <input
@@ -425,6 +475,7 @@ function Unlock(): React.JSX.Element {
 
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
+            {withPassword && (
             <div className="row">
                 <button
                     type="submit"
@@ -444,12 +495,13 @@ function Unlock(): React.JSX.Element {
                     </button>
                 )}
             </div>
+            )}
 
-            {status.hasPasskeys && (
+            {withPassword && status.hasPasskeys && status.passkeyUnlock !== true && (
                 <p className="faint">
-                    Der Passkey kommt zum Passwort dazu, er ersetzt es nicht: aus einer
-                    WebAuthn-Signatur lässt sich kein Schlüssel gewinnen, und der Schlüssel ist genau
-                    das, was das Passwort aufschliesst.
+                    „Passwort und Passkey" verlangt beides. Der Passkey kommt hier zum Passwort dazu,
+                    er ersetzt es nicht: aus einer WebAuthn-Signatur lässt sich kein Schlüssel
+                    gewinnen, und der Schlüssel ist genau das, was das Passwort aufschliesst.
                 </p>
             )}
         </form>

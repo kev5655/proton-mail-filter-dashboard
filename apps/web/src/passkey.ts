@@ -19,6 +19,25 @@ import { startAuthentication } from '@simplewebauthn/browser';
  * field of its own, to one action, over the same origin the password already uses.
  */
 
+/**
+ * The authenticator cannot produce key material, which is not a failure of anything.
+ *
+ * Its own type because the two callers answer it differently: releasing a passkey for unlocking
+ * reports „dieser Authenticator kann das nicht, er bleibt zweiter Faktor" and carries on, while
+ * unlocking with one has nothing left to try. A message string cannot be told apart from a real
+ * refusal, and treating „kann kein PRF" as a rejected passkey is how somebody concludes their
+ * hardware is broken.
+ */
+export class PrfUnsupportedError extends Error {
+    constructor() {
+        super(
+            'Dieser Passkey liefert kein Schlüsselmaterial. Der Authenticator unterstützt die ' +
+                'PRF-Erweiterung nicht — als zweiter Faktor funktioniert er weiterhin.'
+        );
+        this.name = 'PrfUnsupportedError';
+    }
+}
+
 export interface PrfAssertion {
     /** The assertion, without its extension results. */
     response: unknown;
@@ -58,10 +77,7 @@ export async function assertWithPrf(optionsJSON: unknown): Promise<PrfAssertion>
     ).prf?.results?.first;
 
     if (first === undefined) {
-        throw new Error(
-            'Dieser Passkey liefert kein Schlüsselmaterial. Der Authenticator unterstützt die ' +
-                'PRF-Erweiterung nicht — als zweiter Faktor funktioniert er weiterhin.'
-        );
+        throw new PrfUnsupportedError();
     }
 
     // Deliberately dropped: extension results carry the very bytes that are the key here, and an
