@@ -266,7 +266,7 @@ describe('the tools panel', () => {
         await harness.page.setViewportSize({ width: 390, height: 800 });
         await harness.page.goto(harness.url, { waitUntil: 'networkidle' });
 
-        const banner = (await harness.page.locator('.demo-banner').first().boundingBox())?.y ?? 0;
+        const banner = (await harness.page.locator('.source-banner').first().boundingBox())?.y ?? 0;
         const content = (await harness.page.locator('.main').boundingBox())?.y ?? 0;
 
         expect(banner).toBeLessThan(content);

@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DEMO_LABELS } from '@pms/demo';
+import { DEMO_LABELS } from './fixtures/index.js';
 
 import { LabelPicker } from '../src/components/LabelPicker.js';
 import { DEFAULTS } from '../src/settings.js';

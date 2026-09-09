@@ -12,10 +12,14 @@ import { LockButton } from '../src/components/LockButton.js';
  * Whether the dashboard is behind a password, and — more importantly — when it must not be.
  *
  * The failure this file exists for is the second one. A gate that errs towards locking looks
- * cautious and is not: the demo mailbox has nothing worth guarding, and a password field in front
- * of it asks somebody to type a password that no account has. Three separate states all mean „show
- * the dashboard" and all of them look alike unless they are kept apart: no server, a server without
- * an account surface, and an answer that has not arrived yet.
+ * cautious and is not: a password field in front of a server that has no account asks somebody to
+ * type a password that does not exist. Three separate states all mean „not locked" and all of them
+ * look alike unless they are kept apart: no server, a server without an account surface, and an
+ * answer that has not arrived yet.
+ *
+ * „Not locked" is no longer the same as „show the dashboard". With no server there is no mailbox
+ * either, so the gate says so — see the last block. That used to be the demo mailbox, which is why
+ * a locked account could produce a complete dashboard full of invented mail.
  */
 
 const OPEN: AccountStatus = {
@@ -36,7 +40,8 @@ describe('when the lock screen appears', () => {
     });
 
     it('does not, when no server answered at all', () => {
-        // The demo. Nothing here is encrypted and nothing is being withheld.
+        // Nothing here is encrypted and nothing is being withheld — there is simply nothing.
+        // `NoServerScreen` is what that state gets; „gesperrt" would be a claim about a key.
         expect(isLocked(OPEN, true, false)).toBe(false);
     });
 
@@ -338,6 +343,21 @@ describe('adding a second Proton account', () => {
 });
 
 describe('the whole application', () => {
+    it('says there is no server rather than showing a mailbox there is no server for', async () => {
+        // The state Kevin was stuck in, from the other direction. This used to be the demo: a
+        // complete, plausible dashboard, with no lock screen and nothing on it that led anywhere.
+        answers = [];
+        vi.stubGlobal('fetch', async (url: string) => {
+            asked.push(String(url));
+            throw new Error('no server');
+        });
+
+        await mount(<App />);
+
+        expect(findText('Kein Server erreichbar')).toBe(true);
+        expect(findText('pnpm serve')).toBe(true);
+    });
+
     it('never asks for a mailbox it has been told is locked', async () => {
         serve({ available: true, registered: true, unlocked: false });
 
@@ -345,8 +365,7 @@ describe('the whole application', () => {
 
         expect(findText('Anmelden')).toBe(true);
         // The point of putting the gate above `MailboxProvider`: a locked server answers 423 to
-        // this, and a dashboard that asked anyway would fall back to the demo and show it behind
-        // the lock screen.
+        // this, and asking anyway would spend a request on an answer that cannot be used.
         expect(asked.some((url) => url.includes('/api/mailbox'))).toBe(false);
     });
 });

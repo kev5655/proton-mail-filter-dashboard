@@ -9,7 +9,7 @@ import {
     DEMO_FOLDERS,
     DEMO_RULES,
     generateMailbox,
-} from '@pms/demo';
+} from './fixtures/index.js';
 
 import { buildMailbox } from '../src/data.js';
 import { AutoRulesPage } from '../src/pages/AutoRulesPage.js';
@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 /**
- * Rendered through the real providers, which means the demo mailbox — the same history the
+ * Rendered through the real providers against the fixture mailbox — the same history the
  * dashboard shows when no server answers. Rendering the page against a hand-built mailbox would
  * skip `MailboxProvider` and test a shape the application never mounts.
  */
@@ -68,7 +68,7 @@ describe('the derivation behind the screen', () => {
         const senders = withHistory.autoRules.filter((rule) => rule.scope.kind === 'sender');
         const kinds = new Set(senders.map((rule) => rule.verdict.kind));
 
-        // The demo history is built to produce all four, because a screen that has only ever
+        // The fixture history is built to produce all four, because a screen that has only ever
         // rendered the confident case is a screen whose careful wording has never been seen.
         expect(kinds).toEqual(new Set(['stable', 'changed', 'mixed', 'too-few']));
     });

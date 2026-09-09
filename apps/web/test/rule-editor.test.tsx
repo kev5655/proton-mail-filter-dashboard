@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DEMO_RULES } from '@pms/demo';
+import { DEMO_RULES } from './fixtures/index.js';
 
 import { RuleEditor } from '../src/components/RuleEditor.js';
 import { fromRule, newDraft, type RuleDraft } from '../src/rules/draft.js';
@@ -168,7 +168,7 @@ describe('the preview', () => {
 describe('a Sieve-authored rule', () => {
     const sieveRule = DEMO_RULES.find((rule) => rule.authoredAs === 'sieve');
 
-    it('exists in the demo, or this test is testing nothing', () => {
+    it('exists in the fixture, or this test is testing nothing', () => {
         expect(sieveRule).toBeDefined();
     });
 

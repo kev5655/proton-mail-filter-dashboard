@@ -528,13 +528,11 @@ export function SettingsPage(): React.JSX.Element {
             <div className="card">
                 <h2>Postfach</h2>
                 <p className="faint">
-                    {status.source === 'demo'
-                        ? 'Demo-Daten. Für das echte Postfach: pnpm sync, dann pnpm serve.'
-                        : `Echtes Postfach, gelesen aus der lokalen Kopie. Stand: ${
-                              status.syncedAt === undefined
-                                  ? 'unbekannt'
-                                  : new Date(status.syncedAt * 1000).toLocaleString('de-CH')
-                          }.`}
+                    {`Echtes Postfach, gelesen aus der lokalen Kopie. Stand: ${
+                        status.syncedAt === undefined
+                            ? 'unbekannt'
+                            : new Date(status.syncedAt * 1000).toLocaleString('de-CH')
+                    }.`}
                 </p>
                 {status.truncated && (
                     <p className="notice notice-warning">

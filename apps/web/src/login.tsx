@@ -107,7 +107,7 @@ export function LoginProvider({
             if (next.state === 'disconnected') {
                 log('info', 'login.disconnected', { revoked: next.revoked });
                 // The mailbox copy is gone with the connection, so what is on screen now describes
-                // nothing. Asking again is how the dashboard falls back to the demo honestly.
+                // nothing. Asking again is how the dashboard reports that honestly.
                 onSignedIn?.();
             }
         };

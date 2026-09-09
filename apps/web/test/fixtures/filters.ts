@@ -4,7 +4,7 @@ import {
     FilterStatement,
     type SimpleObject,
 } from '@proton/sieve/filterModel';
-import type { OrderedRule } from '@pms/rules';
+import type { MailboxRule } from '@pms/server/types';
 
 /**
  * The filters the demo mailbox starts with.
@@ -39,19 +39,7 @@ function rule(
     };
 }
 
-export interface DemoRule extends OrderedRule {
-    /** Sieve-authored rules have no Simple field in the API and cannot be edited in Proton's UI. */
-    authoredAs: 'tree' | 'sieve';
-    /**
-     * `false` for a rule that appeared at Proton and has not been taken responsibility for.
-     *
-     * Absent means adopted, the same convention the real snapshot uses — so the demo can show the
-     * state without every other rule having to declare it.
-     */
-    adopted?: boolean;
-}
-
-export const DEMO_RULES: DemoRule[] = [
+export const DEMO_RULES: MailboxRule[] = [
     {
         // First, so the specific rules below override it. A catch-all placed last would make every
         // other rule ineffective at once, which is true but teaches nothing: the point is to show

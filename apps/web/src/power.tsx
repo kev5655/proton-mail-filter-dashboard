@@ -9,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
  *
  * **It asks rather than remembers.** The obvious design was a flag in local storage, set the first
  * time a real server answered, so the page could tell "my machine is off" from "there was never a
- * machine here" — the second being an ordinary demo visitor, who must not be offered a button that
+ * machine here" — the second being somebody with no server at all, who must not be offered a button that
  * starts something which does not exist. Asking the starter answers the same question better: it is
  * the machine's own answer rather than this browser's memory of it, it survives cleared site data,
  * and it distinguishes a stopped container from a host that is not there at all, which a
@@ -165,11 +165,12 @@ export function usePower(): PowerContext {
 }
 
 /**
- * Whether to offer waking the machine instead of the demo mailbox.
+ * Whether to offer waking the machine rather than merely reporting no server.
  *
  * Only when the API is silent *and* a starter answered saying the service is stopped. Either alone
- * is not enough: a silent API with no starter is an ordinary visitor with no server, and a starter
- * reporting a running service alongside a silent API is a fault, not something a start would fix.
+ * is not enough: a silent API with no starter is simply no server — `NoServerScreen` — and a
+ * starter reporting a running service alongside a silent API is a fault, not something a start
+ * would fix.
  */
 export function shouldOfferWake(served: boolean, state: PowerState, known: boolean): boolean {
     return !served && known && state === 'stopped';

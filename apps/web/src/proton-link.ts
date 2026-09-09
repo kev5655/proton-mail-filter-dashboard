@@ -50,7 +50,7 @@ export function protonMailUrl(message: LinkableMessage, config: ProtonLinkConfig
     return `${base}/almost-all-mail/${encodeURIComponent(target)}`;
 }
 
-/** The fallback, also useful on its own when a message id is meaningless — as in the demo. */
+/** The fallback, for when a message id is not one Proton would recognise. */
 export function protonSearchUrl(subject: string, config: ProtonLinkConfig = DEFAULT_LINK_CONFIG): string {
     return searchUrl(`https://${config.host}/u/${String(Math.max(0, Math.trunc(config.account)))}`, subject);
 }

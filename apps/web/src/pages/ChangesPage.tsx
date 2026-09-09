@@ -1,4 +1,3 @@
-import { useMailboxStatus } from '../mailbox.js';
 import { useStore } from '../store.js';
 
 /**
@@ -17,7 +16,6 @@ import { useStore } from '../store.js';
  */
 export function ChangesPage(): React.JSX.Element {
     const { drift, resolveDrift, rules, stage } = useStore();
-    const { source } = useMailboxStatus();
     const open = drift.filter((item) => item.resolved === undefined);
 
     return (
@@ -140,7 +138,6 @@ export function ChangesPage(): React.JSX.Element {
                 <p className="notice notice-info">
                     {drift.filter((item) => item.resolved === 'adopt').length} übernommen,{' '}
                     {drift.filter((item) => item.resolved === 'reject').length} abgelehnt.
-                    {source === 'demo' && ' In der Demo wird nichts geschrieben.'}
                 </p>
             )}
         </>

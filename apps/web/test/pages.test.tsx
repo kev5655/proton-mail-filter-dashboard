@@ -2,13 +2,13 @@ import { FilterStatement } from '@proton/sieve/filterModel';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { Dashboard } from '../src/App.js';
+import { Shell } from '../src/App.js';
 import { FoldersPage } from '../src/pages/FoldersPage.js';
 import { RulesPage } from '../src/pages/RulesPage.js';
 import { TriagePage } from '../src/pages/TriagePage.js';
 import { MailList } from '../src/components/MailList.js';
 import { RuleConditions } from '../src/components/RuleConditions.js';
-import { DEMO_RULES as rules } from '@pms/demo';
+import { DEMO_RULES as rules } from './fixtures/index.js';
 import { Providers } from './harness.js';
 import { ChangesPage } from '../src/pages/ChangesPage.js';
 import { HistoryPage } from '../src/pages/HistoryPage.js';
@@ -31,7 +31,7 @@ import { StoreProvider } from '../src/store.js';
  */
 function render(element: React.JSX.Element): string {
     return renderToStaticMarkup(
-<Providers withStore>{element}</Providers>
+<Providers withStore withStreams>{element}</Providers>
     );
 }
 
@@ -193,15 +193,16 @@ describe('the folders page', () => {
 });
 
 describe('the shell', () => {
-    // The dashboard, not `App`: `App` waits for the server's answer about whether anything is
-    // locked, and a synchronous render never gets past that wait. The gate is checked in
-    // `lock-screen.test.tsx`, which can await.
-    const html = render(<Dashboard />);
+    // `Shell`, not `App` and not `Dashboard`: both of those fetch before they render anything, and
+    // a synchronous render never gets past that. The gate is checked in `lock-screen.test.tsx`,
+    // which can await; what the mailbox provider does with an answer is checked where it lives.
+    const html = render(<Shell />);
 
-    it('says on every screen that this is demo data', () => {
-        // Someone looking at a plausible list of folder names must never wonder whether it is real.
-        expect(text(html)).toContain('Demo-Daten');
-        expect(text(html)).toContain('Kein Proton-Konto verbunden');
+    it('says on every screen which copy this is and how old it is', () => {
+        // Someone looking at a plausible list of folder names must never wonder whether it is
+        // theirs — nor, having settled that, how stale it is.
+        expect(text(html)).toContain('Echtes Postfach');
+        expect(text(html)).toMatch(/Stand: \d/);
     });
 
     it('offers all three sections', () => {
@@ -228,8 +229,9 @@ describe('changes made in Proton itself', () => {
     const html = render(<ChangesPage />);
 
     it('lists what appeared without the tool doing it', () => {
+        // From the copy's own rules — one that arrived unadopted. There used to be an invented
+        // folder beside it, shown only where there was no account to have drifted from.
         expect(text(html)).toContain('Zahnarzt');
-        expect(text(html)).toContain('Steuern 2026');
     });
 
     it('offers disabling alongside deleting, and names both', () => {

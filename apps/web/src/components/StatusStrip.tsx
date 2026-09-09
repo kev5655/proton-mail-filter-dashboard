@@ -14,15 +14,10 @@ import { useSync } from '../sync.js';
  * every screen: somebody looking at a plausible list of their own folder names must never have to
  * hover something to find out whether it is theirs.
  */
-export function StatusStrip(): React.JSX.Element | null {
+export function StatusStrip(): React.JSX.Element {
     const status = useMailboxStatus();
     const login = useLogin();
     const sync = useSync();
-
-    // Nothing to report about a demo: there is no connection, no copy and no timer.
-    if (status.source === 'demo') {
-        return null;
-    }
 
     const connected = login.status.signedIn;
     const running = sync.status.state === 'running';

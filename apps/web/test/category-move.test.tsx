@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { generateMailbox } from '@pms/demo';
+import { generateMailbox } from './fixtures/index.js';
 
 import { CategoryMoveDialog } from '../src/components/CategoryMoveDialog.js';
 import { Providers } from './harness.js';

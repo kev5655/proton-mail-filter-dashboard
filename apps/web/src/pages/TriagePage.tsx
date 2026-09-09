@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
-import type { DemoRule } from '@pms/demo';
 import { explainScore } from '@pms/grouping';
+import type { MailboxRule } from '@pms/server/types';
 
 import { MailList } from '../components/MailList.js';
 import { ScoreBar } from '../components/ScoreBar.js';
@@ -23,14 +23,10 @@ import { useStore } from '../store.js';
 export function TriagePage(): React.JSX.Element {
     const { inboxMessages, suggestions, messagesInGroup, caughtBy } = useMailbox();
     const settings = useSettings();
-    const { source } = useMailboxStatus();
     const { setOpen } = useAppState();
 
-    // Only for the real mailbox: a demo message id points at nothing in anyone's account.
-    const linkFor =
-        source === 'proton'
-            ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
-            : undefined;
+    const linkFor = (message: { ID: string; Subject: string }): string =>
+        protonMailUrl(message, settings.proton);
     const { stage, rules } = useStore();
     const reload = useReloadMailbox();
     const { hiddenSuggestions } = useMailboxStatus();
@@ -41,12 +37,7 @@ export function TriagePage(): React.JSX.Element {
      * „Nicht vorschlagen" was a React state and nothing else, so every hidden suggestion came back
      * on the next reload — the button meant „until you look away". It goes to the local database
      * now, which is also what lets a second device see the same list.
-     *
-     * The demo has no database, so it keeps its own set in memory and says so by simply working:
-     * the screens must be interchangeable, and one that offers a button the demo cannot honour
-     * would make the demo stop being a test of anything.
      */
-    const [demoHidden, setDemoHidden] = useState<Record<string, number>>({});
     const [hideError, setHideError] = useState<string | undefined>(undefined);
     const [openKey, setOpenKey] = useState<string | undefined>(undefined);
     const [query, setQuery] = useState('');
@@ -58,9 +49,7 @@ export function TriagePage(): React.JSX.Element {
     const [showHidden, setShowHidden] = useState(false);
 
     const hiddenAt = new Map<string, number>(
-        source === 'demo'
-            ? Object.entries(demoHidden)
-            : hiddenSuggestions.map((entry) => [entry.groupKey, entry.atSeconds])
+        hiddenSuggestions.map((entry) => [entry.groupKey, entry.atSeconds])
     );
 
     const open = suggestions.filter(
@@ -77,18 +66,6 @@ export function TriagePage(): React.JSX.Element {
      */
     const setHidden = (groupKey: string, next: boolean): void => {
         setHideError(undefined);
-        if (source === 'demo') {
-            setDemoHidden((current) => {
-                const copy = { ...current };
-                if (next) {
-                    copy[groupKey] = Math.floor(Date.now() / 1000);
-                } else {
-                    delete copy[groupKey];
-                }
-                return copy;
-            });
-            return;
-        }
         void (async () => {
             try {
                 const response = await fetch('/api/suggestions/hidden', {
@@ -382,7 +359,7 @@ export function TriagePage(): React.JSX.Element {
                                     // Built as a named value rather than inline: a rule literal
                                     // passed straight into the change would be checked against the
                                     // narrower OrderedRule and lose `authoredAs`.
-                                    const created: DemoRule = {
+                                    const created: MailboxRule = {
                                         id: `r-${entry.group.key}`,
                                         name: entry.folder,
                                         priority: rules.length + 1,

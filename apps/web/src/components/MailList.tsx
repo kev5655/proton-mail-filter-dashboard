@@ -56,7 +56,7 @@ export function MailList({
     annotate?: ((message: ListableMessage) => MailNote | undefined) | undefined;
     /** Extra searchable text — the destination folder, Proton's category. */
     terms?: SearchTerms | undefined;
-    /** A link that opens this message at Proton. Absent for the demo, whose mail does not exist. */
+    /** A link that opens this message at Proton. */
     linkFor?: ((message: ListableMessage) => string) | undefined;
 }): React.JSX.Element {
     const { isSelected, toggleSelection, selectMany } = useAppState();

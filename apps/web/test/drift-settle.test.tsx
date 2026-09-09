@@ -14,8 +14,9 @@ import { Providers } from './harness.js';
  * before the terminal question — so declining in the terminal left the rule marked as handled and
  * the list empty.
  *
- * Driven through the store rather than through the screen on purpose. The demo's drift entries name
- * ids no demo rule has, so both write-answers are disabled there and a click would prove nothing;
+ * Driven through the store rather than through the screen on purpose. Drift is derived from the
+ * copy's own unadopted rules, so what a click reaches depends on the fixture rather than on a list
+ * written for the test;
  * what is worth pinning is the rule about *when* a resolution is recorded, not which button is lit.
  */
 

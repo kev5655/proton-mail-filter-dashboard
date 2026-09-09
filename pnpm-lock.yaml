@@ -77,9 +77,6 @@ importers:
       '@pms/changes':
         specifier: workspace:*
         version: link:../../packages/changes
-      '@pms/demo':
-        specifier: workspace:*
-        version: link:../../packages/demo
       '@pms/grouping':
         specifier: workspace:*
         version: link:../../packages/grouping
@@ -204,18 +201,6 @@ importers:
       '@pms/core':
         specifier: workspace:*
         version: link:../core
-
-  packages/demo:
-    dependencies:
-      '@pms/grouping':
-        specifier: workspace:*
-        version: link:../grouping
-      '@pms/rules':
-        specifier: workspace:*
-        version: link:../rules
-      '@proton/sieve':
-        specifier: workspace:*
-        version: link:../../vendor/proton/sieve
 
   packages/grouping: {}
 

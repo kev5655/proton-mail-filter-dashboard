@@ -12,7 +12,6 @@
   "dependencies": {
     "@pms/apply": "workspace:*",
     "@pms/changes": "workspace:*",
-    "@pms/demo": "workspace:*",
     "@pms/grouping": "workspace:*",
     "@pms/llm": "workspace:*",
     "@pms/mail-view": "workspace:*",

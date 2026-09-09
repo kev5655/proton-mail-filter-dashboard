@@ -10,7 +10,7 @@ import { shouldOfferWake } from '../src/power.js';
  * Whether the dashboard offers to start the machine — and, mostly, when it must not.
  *
  * The failure this file exists for is offering it to somebody who has no machine. A silent `/api`
- * is the ordinary state of a demo visitor: no server, nothing to start, and a button that starts
+ * with no starter behind it means no server at all — nothing to start, and a button that starts
  * something which does not exist is worse than no button. So two things have to be true at once,
  * and the second one has to come from the host rather than from this browser's memory of it.
  *
@@ -26,7 +26,7 @@ describe('when the wake screen appears', () => {
     });
 
     it('does not, when there is no starter at all', () => {
-        // The demo. Nobody here has a machine to wake.
+        // No server and no host answering for one. Nobody here has a machine to wake.
         expect(shouldOfferWake(false, 'absent', true)).toBe(false);
     });
 

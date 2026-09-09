@@ -55,7 +55,7 @@ export interface SeedOptions {
     folders?: ProtonLabel[];
     filters?: ProtonFilter[];
     messages?: MessageMetadata[];
-    /** Leave the account unsynced, so the dashboard falls back to the demo mailbox. */
+    /** Leave the account unsynced — the server answers, with an empty mailbox. */
     empty?: boolean;
 }
 

@@ -26,7 +26,7 @@ import { Info } from '../components/Info.js';
  */
 export function AutoRulesPage(): React.JSX.Element {
     const { autoRules, categories } = useMailbox();
-    const { source, syncedAt } = useMailboxStatus();
+    const { syncedAt } = useMailboxStatus();
     const { goTo } = useAppState();
     const [showAll, setShowAll] = useState(false);
 
@@ -223,14 +223,6 @@ export function AutoRulesPage(): React.JSX.Element {
                 einsortiert — „unverändert" heisst hier genau genommen „nicht nachgesehen". Und wenn
                 du selbst in Protons App etwas verschiebst, steht das hier genauso drin wie eine
                 Entscheidung von Proton; auseinanderhalten lässt sich das nicht.
-                {source === 'demo' && (
-                    <>
-                        <br />
-                        <br />
-                        <strong>Demo-Daten:</strong> dieser Verlauf ist erfunden, damit die Seite
-                        ohne Konto etwas zeigt.
-                    </>
-                )}
             </footer>
         </>
     );

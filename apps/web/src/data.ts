@@ -1,12 +1,12 @@
 import type { SimpleObject } from '@proton/sieve/filterModel';
 import { toSieveTree } from '@proton/sieve/toSieveTree';
 
-import { INBOX } from '@pms/demo';
 import type { MailboxFolder, MailboxMessage, MailboxRule } from '@pms/server/types';
 import {
     categoryIdsOf,
     CATEGORY_IDS,
     CATEGORY_LABELS,
+    INBOX_LABEL,
     deriveAutoRules,
     groupMessages,
     scoreGroups,
@@ -27,9 +27,9 @@ import {
 /**
  * Everything the interface shows, derived from one mailbox.
  *
- * A function of its input rather than a module of constants, because there are now two inputs: the
- * demo mailbox and the real one the local server mirrors. The screens must not be able to tell
- * which they were given — a dashboard that only works on the demo has been testing itself.
+ * A function of its input rather than a module of constants. The screens are handed a mailbox and
+ * derive everything from it, which is what lets a test build one by hand and get the same screens
+ * the account gets — rather than a second code path that only tests itself.
  *
  * The point of wiring the real engine to the data rather than mocking the screens still holds: what
  * appears here is genuinely what the matcher, the grouping and the conflict analysis produce. If a
@@ -213,8 +213,8 @@ function proposeFolder(group: ScoredGroup): string {
 /**
  * Derive everything the screens read from one mailbox.
  *
- * Called once per source. Nothing in here reaches for a module-level constant, which is what makes
- * the demo and the real account interchangeable rather than merely similar.
+ * Called once per mailbox. Nothing in here reaches for a module-level constant, which is what lets
+ * a fixture and the real account go through the same code rather than merely similar code.
  */
 export function buildMailbox(input: MailboxInput): MailboxData {
     const labels = input.labels ?? [];
@@ -229,7 +229,7 @@ export function buildMailbox(input: MailboxInput): MailboxData {
     const labelNames = new Set(labels.map((label) => label.Name));
     const { messages, folders, rules } = input;
 
-    const inboxMessages = messages.filter((message) => message.LabelIDs.includes(INBOX));
+    const inboxMessages = messages.filter((message) => message.LabelIDs.includes(INBOX_LABEL));
     const groups = scoreGroups(groupMessages(inboxMessages));
     const analysis = analyseRules(rules, messages);
 
@@ -383,7 +383,7 @@ export function buildMailbox(input: MailboxInput): MailboxData {
                 id,
                 label: CATEGORY_LABELS[id] ?? `Unbekannte Kategorie ${id}`,
                 messages: list,
-                inInbox: list.filter((message) => message.LabelIDs.includes(INBOX)).length,
+                inInbox: list.filter((message) => message.LabelIDs.includes(INBOX_LABEL)).length,
                 topSenders: [...senders.entries()]
                     .map(([address, count]) => ({ address, count }))
                     .sort((a, b) => b.count - a.count)

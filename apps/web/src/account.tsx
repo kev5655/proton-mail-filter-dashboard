@@ -10,8 +10,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
  *
  * Three states matter and are kept apart on purpose:
  *
- *  - **no server** — `pnpm serve` is not running. The dashboard shows the demo mailbox, and no lock
- *    screen: there is nothing to unlock and a password field would be a lie about what is there.
+ *  - **no server** — `pnpm serve` is not running. There is nothing to unlock and nothing to show,
+ *    so `NoServerScreen` says so; a password field would be a lie about what is there.
  *  - **not registered** — a first run. The screen asks for a password to *create*, and says what
  *    happens if it is lost, because there is no way back.
  *  - **registered and locked** — the ordinary state at start-up.
@@ -56,7 +56,7 @@ interface AccountContext {
     status: AccountStatus;
     /** False until the first answer arrives, so nothing renders a lock screen on a guess. */
     known: boolean;
-    /** True when a local server answered at all. False means the demo, and no gate. */
+    /** True when a local server answered at all. False means there is nothing to show. */
     served: boolean;
     /** Perform one action. Throws with the server's own message, which the forms show verbatim. */
     perform: (action: AccountAction) => Promise<unknown>;
@@ -68,9 +68,9 @@ const ENDPOINT = '/api/account';
 /**
  * What the dashboard assumes before it has heard anything.
  *
- * Unlocked and ready, deliberately. The alternative — assume locked — puts a password field in
- * front of every demo user for as long as a fetch takes, and in front of them permanently when
- * there is no server at all.
+ * Unlocked and ready, deliberately. The alternative — assume locked — puts a password field on
+ * screen for as long as a fetch takes, and permanently where there is no server at all. `known`
+ * is what the gate waits for; this is only what it reads before the answer arrives.
  */
 const OPEN: AccountStatus = {
     available: false,
@@ -102,8 +102,8 @@ export function AccountProvider({ children }: { children: React.ReactNode }): Re
                 setStatus((await response.json()) as AccountStatus);
                 setServed(true);
             } catch {
-                // No server, or one that does not know the route. Both mean the demo, and the demo
-                // has nothing to lock.
+                // No server, or one that does not know the route. Both mean there is nothing here
+                // to lock, and nothing to show either.
                 setStatus(OPEN);
                 setServed(false);
             } finally {
@@ -157,10 +157,9 @@ export function useAccount(): AccountContext {
 /**
  * Whether the dashboard should be behind the lock screen.
  *
- * Only when a server actually answered, has an account surface, and says it is not open.
- * Everything else — no server, a server without one, an answer still in flight — shows the
- * dashboard, because the demo mailbox has nothing worth guarding and a spurious password field is
- * its own kind of failure.
+ * Only when a server actually answered, has an account surface, and says it is not open. No
+ * server is not „locked" — it is `NoServerScreen`, decided before this is asked — and a server
+ * without an account surface has nothing to check a password against.
  */
 export function isLocked(status: AccountStatus, known: boolean, served: boolean): boolean {
     if (!known || !served || !status.available) {

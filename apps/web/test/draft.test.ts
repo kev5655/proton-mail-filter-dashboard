@@ -1,6 +1,6 @@
-import { DEMO_FOLDERS, DEMO_RULES } from '@pms/demo';
+import { DEMO_FOLDERS, DEMO_RULES } from './fixtures/index.js';
 import { matchesRule } from '@pms/rules';
-import { generateMailbox } from '@pms/demo';
+import { generateMailbox } from './fixtures/index.js';
 import { ConditionComparator, ConditionType, FilterStatement } from '@proton/sieve/filterModel';
 import { describe, expect, it } from 'vitest';
 
@@ -22,7 +22,7 @@ import {
  * alter what happens to their mail — and the alteration would show up as mail quietly going
  * somewhere else, weeks later, with nothing to point at.
  *
- * Round-tripping the demo rules covers the shapes that matter, including the Sieve-authored one
+ * Round-tripping the fixture rules covers the shapes that matter, including the Sieve-authored one
  * that Proton's own interface refuses to edit.
  */
 

@@ -174,9 +174,6 @@ export function SelectionDialog({
                                 Verwerfen
                             </button>
                         </div>
-                        <p className="faint" style={{ marginTop: 8 }}>
-                            In der Demo wird nichts geschrieben.
-                        </p>
                     </section>
                 )}
             </div>

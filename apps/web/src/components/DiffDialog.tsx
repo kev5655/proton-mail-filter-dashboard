@@ -22,8 +22,7 @@ import { RuleConditions } from './RuleConditions.js';
  * dialog people learn to dismiss.
  */
 export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => void }): React.JSX.Element | null {
-    const { staged, discard, confirm, settle } = useStore();
-    const { source } = useMailboxStatus();
+    const { staged, discard, settle } = useStore();
     const { categoryCoverage } = useMailbox();
     const { phase, offer, reset } = useApply();
 
@@ -268,7 +267,7 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                  * still never moves a message itself, which is what keeps the core rule intact
                  * while the backlog gets sorted.
                  */}
-                {moves.length > 0 && !movesMail && source !== 'demo' && (
+                {moves.length > 0 && !movesMail && (
                     <label className="row" style={{ marginTop: 16, gap: 8 }}>
                         <input
                             type="checkbox"
@@ -291,11 +290,6 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                         disabled={phase.phase === 'offering' || phase.phase === 'waiting'}
                         aria-busy={phase.phase === 'offering' || phase.phase === 'waiting'}
                         onClick={() => {
-                            if (source === 'demo') {
-                                // The demo has no account to write to; the local apply is the point.
-                                confirm();
-                                return;
-                            }
                             offer(staged.change, staged, moves.length > 0 && applyToExisting);
                         }}
                     >
@@ -333,17 +327,14 @@ export function DiffDialog({ onOpenMail }: { onOpenMail: (message: never) => voi
                 </div>
 
                 <p className="faint" style={{ marginTop: 8 }}>
-                    {source === 'demo'
-                        ? 'Demo-Daten: es wird nichts geschrieben, die Änderung wirkt nur hier.'
-                        : /*
-                           * No promise about the terminal here. Most changes are confirmed once, in
-                           * this dialog; only the expensive ones — a deletion, a change that moves
-                           * mail, one that resorts a large share of the mailbox — are asked about
-                           * again. Announcing a second question for every change and then not
-                           * asking it teaches people to disbelieve the sentence, which is the one
-                           * thing it cannot afford.
-                           */
-                          'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Beim Löschen wird gleich hier noch einmal nach deinem Passwort gefragt; bei Änderungen, die Mail verschieben, kommt eine Rückfrage im Terminal.'}{' '}
+                    {/*
+                     * No promise about the terminal here. Most changes are confirmed once, in this
+                     * dialog; only the expensive ones — a deletion, a change that moves mail, one
+                     * that resorts a large share of the mailbox — are asked about again. Announcing
+                     * a second question for every change and then not asking it teaches people to
+                     * disbelieve the sentence, which is the one thing it cannot afford.
+                     */
+                    'Vor dem Schreiben wird eine vollständige Sicherung aller Filter und Ordner angelegt. Beim Löschen wird gleich hier noch einmal nach deinem Passwort gefragt; bei Änderungen, die Mail verschieben, kommt eine Rückfrage im Terminal.'}{' '}
                     Die Änderung lässt sich im Verlauf einzeln rückgängig machen.
                 </p>
             </div>

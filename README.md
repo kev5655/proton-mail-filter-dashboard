@@ -178,9 +178,10 @@ A failed login is **not** retried. This account was locked out once by repeated 
 `LoginGuard` rations them and a refusal is shown as a refusal — `pnpm spike --lockout-cleared`
 releases a block, and only after you have signed in at mail.proton.me and seen the account is fine.
 
-The dashboard now reads your mirror instead of the demo, and says so — including how old the copy is
-and whether the last sync was cut short. Stop the server and reload, and it falls back to the demo
-without an error: no server running is the ordinary case, not a failure.
+The dashboard reads your mirror and nothing else — it says how old the copy is and whether the last
+sync was cut short. Stop the server and reload, and it says there is no server rather than showing
+you a mailbox: there used to be a demo mailbox behind that, and it appeared for a locked vault too,
+which meant a shut account looked like a working dashboard full of somebody else's mail.
 
 The dashboard can now start a sync itself — there is a button and a progress bar — and it can offer
 a change to your filters. Both need the serving process to hold a Proton session, and the guarantee

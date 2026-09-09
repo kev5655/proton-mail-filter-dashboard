@@ -25,6 +25,7 @@ import { SyncProvider } from './sync.js';
 import { AccountProvider, isLocked, useAccount } from './account.js';
 import { PowerProvider, shouldOfferWake, usePower } from './power.js';
 import { LockScreen } from './components/LockScreen.js';
+import { NoServerScreen } from './components/NoServerScreen.js';
 import { WakeScreen } from './components/WakeScreen.js';
 import { PowerPanel } from './components/PowerPanel.js';
 import { AppStateProvider, useAppState, type Page } from './state.js';
@@ -43,15 +44,15 @@ export function App(): React.JSX.Element {
 /**
  * Nothing below this renders until it is known whether anything is locked.
  *
- * The wait is one request and it is worth it. Rendering the dashboard first would show the demo
- * mailbox for a moment and then replace it with a password field — which looks like the tool
- * logging somebody out, and teaches them to distrust a screen that is telling the truth.
+ * The wait is one request and it is worth it. Rendering the dashboard first would show a mailbox
+ * for a moment and then replace it with a password field — which looks like the tool logging
+ * somebody out, and teaches them to distrust a screen that is telling the truth.
  *
  * The providers underneath are mounted only once past the gate, so a locked server is never asked
  * for a mailbox it cannot open.
  */
 function Gate(): React.JSX.Element {
-    const { status, known, served } = useAccount();
+    const { status, known, served, refresh } = useAccount();
     const power = usePower();
 
     if (!known) {
@@ -60,9 +61,9 @@ function Gate(): React.JSX.Element {
     /*
      * With no server answering, wait for the starter's answer too before deciding.
      *
-     * Otherwise a machine whose service is merely stopped shows the demo mailbox for as long as
-     * that probe takes, and then replaces it — which is the same flicker the comment above rejects,
-     * arriving from the other direction. The probe gives up after three seconds, and it gives up
+     * Otherwise a machine whose service is merely stopped shows „kein Server" for as long as that
+     * probe takes, and then replaces it with the wake button — which is the same flicker the
+     * comment above rejects, arriving from the other direction. The probe gives up after three seconds, and it gives up
      * fast against a refused connection, which is the ordinary case for somebody who has no server
      * at all.
      */
@@ -71,6 +72,9 @@ function Gate(): React.JSX.Element {
     }
     if (shouldOfferWake(served, power.state, power.known)) {
         return <WakeScreen />;
+    }
+    if (!served) {
+        return <NoServerScreen retry={refresh} />;
     }
     if (isLocked(status, known, served)) {
         return <LockScreen />;
@@ -101,25 +105,24 @@ export function Dashboard(): React.JSX.Element {
 /**
  * Remount the store when the mailbox underneath it changes.
  *
- * The dashboard renders the demo while it asks the local server, so the source can change once,
- * shortly after startup. `key` makes that a fresh store rather than a merge: staged changes,
- * journal and drift all belong to one mailbox, and carrying them into another would show the user
- * a history of things that never happened to the account they are now looking at.
+ * A finished sync or a landed write replaces the copy underneath. `key` makes that a fresh store
+ * rather than a merge: staged changes and drift belong to one picture of the account, and carrying
+ * them into another would show the user consequences worked out against data that has moved on.
  */
 function Sources(): React.JSX.Element {
-    const { source, syncedAt, version } = useMailboxStatus();
+    const { syncedAt, version } = useMailboxStatus();
     const reload = useReloadMailbox();
 
     return (
         <SyncProvider onFinished={reload}>
             {/* A finished login means the server can reach Proton now, so the copy is worth asking
-                for again — the dashboard was very likely showing the demo a moment ago. */}
+                for again. */}
             <LoginProvider onSignedIn={reload}>
             <ApplyProvider onApplied={reload}>
             {/*
-             * Keyed on the source, the sync time *and* the account fingerprint.
+             * Keyed on the sync time *and* the account fingerprint.
              *
-             * The first two cover a finished sync: it replaces the mailbox under the store, and
+             * The first covers a finished sync: it replaces the mailbox under the store, and
              * rules seeded from the previous copy would otherwise be edited against data that has
              * moved on.
              *
@@ -130,7 +133,7 @@ function Sources(): React.JSX.Element {
              * store kept showing the list from before. `syncedAt` cannot stand in for this: a write
              * is not a sync and leaves it untouched.
              */}
-            <StoreProvider key={`${source}:${String(syncedAt ?? 'none')}:${version ?? 'none'}`}>
+            <StoreProvider key={`${String(syncedAt ?? 'none')}:${version ?? 'none'}`}>
                 <Shell />
             </StoreProvider>
             </ApplyProvider>
@@ -185,13 +188,18 @@ const PAGE_LABELS: Record<Page, string> = {
     settings: 'Einstellungen',
 };
 
-function Shell(): React.JSX.Element {
+/**
+ * The dashboard itself, once there is a mailbox to draw it from.
+ *
+ * Exported because the providers above it fetch, and a synchronous render never gets past that. A
+ * test mounts this inside the same provider stack with a mailbox handed in — see `test/harness.tsx`.
+ */
+export function Shell(): React.JSX.Element {
     const { nav, goTo, selected, selectedFrom, clearSelection, open, setOpen } = useAppState();
     const { groups, categories, autoRules } = useMailbox();
     const status = useMailboxStatus();
-    const { rules, folders, drift, journal } = useStore();
-    // What actually reached the account, or the demo's local record when there is no account.
-    const historyCount = status.source === 'demo' ? journal.length : status.history.length;
+    const { rules, folders, drift } = useStore();
+    const historyCount = status.history.length;
     const [buildingRule, setBuildingRule] = useState(false);
     const [movingToCategory, setMovingToCategory] = useState(false);
 
@@ -387,43 +395,20 @@ function Shell(): React.JSX.Element {
 }
 
 /**
- * Which mailbox is on screen, said plainly and on every screen.
+ * Which copy is on screen, said plainly and on every screen.
  *
- * The demo half of this was already load-bearing: someone looking at a plausible list of folder
- * names must never have to wonder whether it is theirs. The real half is load-bearing for the
- * opposite reason — once the names *are* theirs, the questions become "how old is this" and "is it
- * all of it", and both have to be answered where the data is, not in a settings page.
+ * It used to have a second half, announcing invented data whenever the local server was silent.
+ * There is no such state any more — the dashboard renders nothing but the real mirror — so what is
+ * left is the half that was always the harder one: once the names *are* yours, the questions become
+ * "how old is this" and "is it all of it", and both have to be answered where the data is rather
+ * than in a settings page.
  *
  * Nothing here claims a live connection. The dashboard reads a copy; the copy is as old as the last
  * sync, and saying so is the difference between a stale screen and a lying one.
  */
 export function SourceBanner({ status }: { status: ReturnType<typeof useMailboxStatus> }): React.JSX.Element {
-    if (status.source === 'demo') {
-        return (
-            <p className="demo-banner">
-                <strong>Demo-Daten.</strong> Kein Proton-Konto verbunden. Alle Mails, Regeln und
-                Ordner sind erfunden — es wird nichts gelesen und nichts verändert.
-                {status.problem !== undefined && (
-                    <>
-                        <br />
-                        <br />
-                        <strong>Der lokale Server hat geantwortet, aber unbrauchbar:</strong>{' '}
-                        {status.problem}
-                    </>
-                )}
-                {status.problem === undefined && !status.loading && (
-                    <>
-                        <br />
-                        <br />
-                        Für das echte Postfach: <code>pnpm sync</code>, dann <code>pnpm serve</code>.
-                    </>
-                )}
-            </p>
-        );
-    }
-
     return (
-        <p className="demo-banner">
+        <p className="source-banner">
             <strong>Echtes Postfach.</strong> Gelesen aus der lokalen, verschlüsselten Kopie. Es
             werden keine Mails verschoben und nichts an Proton gesendet.
             <br />

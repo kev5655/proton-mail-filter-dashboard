@@ -1,5 +1,4 @@
 import { useSettings } from '../llm.js';
-import { useMailboxStatus } from '../mailbox.js';
 import { STAGE_NAMES, useSync } from '../sync.js';
 import { ProtonSessionHint } from './ProtonSessionHint.js';
 
@@ -11,14 +10,9 @@ import { ProtonSessionHint } from './ProtonSessionHint.js';
  * comes back, so for the first second there is no total — and inventing a number to fill the bar
  * would be a small lie in a tool whose whole argument is that it does not tell them.
  */
-export function SyncPanel(): React.JSX.Element | null {
-    const mailbox = useMailboxStatus();
+export function SyncPanel(): React.JSX.Element {
     const { status, connected, start, refusal } = useSync();
     const settings = useSettings();
-
-    if (mailbox.source === 'demo') {
-        return null;
-    }
 
     const running = status.state === 'running';
     const progress = running ? status.progress : undefined;

@@ -1,4 +1,4 @@
-import { generateMailbox } from '@pms/demo';
+import { generateMailbox } from './fixtures/index.js';
 import { matchesRule } from '@pms/rules';
 import { ConditionComparator, ConditionType, FilterStatement } from '@proton/sieve/filterModel';
 import { describe, expect, it } from 'vitest';

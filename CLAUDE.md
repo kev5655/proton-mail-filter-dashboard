@@ -263,8 +263,8 @@ starting is a small program on the host, published under the same name at `/star
 Tailscale sidecar, which makes it same-origin. **That is why there is no eighth non-GET route.**
 
 `power.tsx` **asks** rather than remembers. A flag in local storage would also distinguish „my
-machine is off" from „there was never a machine here" — the second being a demo visitor, who must
-not be offered a button that starts something which does not exist — but asking the host is the
+machine is off" from „there was never a machine here" — the second being somebody with no server
+at all, who must not be offered a button that starts something which does not exist — but asking the host is the
 better answer: it survives cleared site data and it tells a stopped service apart from an absent
 host. The probe checks the *shape* of the reply, because vite serves the application shell for
 unknown paths and a `200` full of HTML read as „not running" would show the button to everyone.
@@ -475,7 +475,6 @@ packages/browser-auth/  Signing in through a real browser, because the login car
 packages/proton-api/    SRP login, HTTP client, response validation, read endpoints, session store
 packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
 packages/grouping/      Subject templates, grouping, and the triage ranking
-packages/demo/          A synthetic mailbox, so the interface can be built without an account
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
 packages/changes/       Diff, the change record, category moves and post-write verification
@@ -485,7 +484,7 @@ packages/account/       The app's own account: the password that is the key to t
 packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
 packages/apply/         The one path that writes to Proton, behind a second confirmation
 apps/spike/             M0 read-only probe, plus `--sync` and `--serve`; the packaged entry point
-apps/web/               The dashboard. Reads the real mirror when the server runs, else the demo.
+apps/web/               The dashboard. Reads the real mirror, and nothing else.
 ```
 
 The rule engine has three parts that must agree: the **compiler** (vendored, produces what Proton
@@ -503,24 +502,49 @@ pnpm spike              # the M0 probe — asks for credentials, reads only
 pnpm sync               # mirror the account into the local encrypted database
 pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
                         # and for holding the session; changes are confirmed in the dashboard
-pnpm dev                # the dashboard, http://localhost:5173 (demo data unless `pnpm serve` runs)
+pnpm dev                # the dashboard, http://localhost:5173 (needs `pnpm serve` for a mailbox)
 pnpm package            # build a downloadable copy into release/
 pnpm smoke              # start that copy somewhere else and check it works
 docker build .          # the arm64 image for the Pi — see the container section above
 ```
 
-The dashboard renders whichever mailbox it is given — the demo, or the real mirror when
-`pnpm serve` is running — through the same screens and the same engine. It says which one it is
-showing, on every screen, along with how old the copy is and whether it is complete. That the two
-sources are interchangeable is the point: a dashboard that only works on the demo has been testing
-itself.
+### The dashboard has one mailbox, and it is yours
+
+**There is no demo mode, and removing it was a bug fix rather than a simplification.** The dashboard
+used to fall back to a synthetic mailbox whenever `/api/mailbox` did not answer `200` — and that
+covered **`423`, the locked vault**. So a running server whose account was merely shut produced a
+complete, plausible dashboard full of invented folders and rules, with no lock screen, no sign-in
+button and nothing on screen that led anywhere. The two states that most needed saying out loud were
+the two the fallback hid.
+
+Every reason the mirror cannot be shown is now a state with a sentence and a way onward:
+`NoServerScreen` („kein Server"), `WakeScreen` (a host answered, the service is stopped), the lock
+screen, and `MailboxProblem` for a vault that locks while the tab is open or a reply that cannot be
+used. None of them renders the dashboard, so nothing below `MailboxProvider` has to ask which
+mailbox it has — there is no `source` field to branch on, and `no-demo.test.ts` checks that no file
+under `apps/web/src` reintroduces one or reaches into the fixtures.
+
+The synthetic mailbox still exists, at `apps/web/test/fixtures/`, and it is deliberately awkward — a
+sender whose mail splits in two, a rule that never fires, one that is always overridden, folders
+shadowing Proton's own — because a tidy fixture makes every screen look good and proves nothing. Its
+location *is* the guarantee: `src/` cannot reach it. Tests hand it to `MailboxScope`, the seam that
+takes a mailbox rather than fetching one, so a screen under test goes through the same `buildMailbox`
+and the same context the account goes through. What that seam cannot exercise — the request, the
+`423`, the refused connection — is `mailbox-source.test.tsx`.
 
 The web app is wired to the real engine, not to mock screens: what it shows is genuinely what the
-matcher, the grouping and the conflict analysis produce from its source. A preview that looks wrong
-on screen is a bug in the logic, not in a fixture someone typed to look convincing. Its demo
-mailbox is deliberately awkward — a sender whose mail splits in two, a rule that never fires, one
-that is always overridden, folders shadowing Proton's own — because a tidy demo makes every screen
-look good and teaches nothing.
+matcher, the grouping and the conflict analysis produce from its input. A preview that looks wrong
+on screen is a bug in the logic, not in a fixture someone typed to look convincing.
+
+**One thing was lost with it, and it is worth knowing.** The demo was the only source of mail
+*bodies*, so `MailViewer` no longer renders one — Proton encrypts bodies end to end and the endpoint
+this dashboard reads carries none, which was already true for every real message. The sanitiser, the
+sandboxed frame and the image notices went with it rather than staying as scaffolding around
+nothing, and `apps/web/e2e/mail-view.e2e.ts` — the only browser-level proof that no tracking pixel
+loaded — went with them. `@pms/mail-view` is untouched and still tested on its own
+(`packages/mail-view/test/sanitize.test.ts`); it is what this screen mounts again on the day a body
+can actually be fetched and decrypted, and that day starts from the sanitiser rather than from an
+innerHTML.
 
 `pnpm spike` must be run by the account owner. **Never ask for credentials and never accept a
 token** — not to test something, not to save a round trip.
@@ -614,12 +638,14 @@ for the vendoring, so do not weaken them to make a refresh pass. If upstream cha
 is a finding to surface, not a test to adjust. `packages/rules/test/sieve-compiler.test.ts` also
 documents a real lossiness: version 1 filters cannot be read back as `starts`/`ends`.
 
-**Displaying mail.** Bodies are hostile input. `@pms/mail-view` sanitises, the viewer renders into
-an `iframe sandbox=""`, and that frame carries a CSP forbidding every outbound request — three
-layers, each written assuming the other two failed. Remote images stay off until the user turns them
-on for one message: a tracking pixel hands the sender the reader's IP and the time they opened it,
-which is exactly what a Proton account exists to withhold. Do not add a global "always load images"
-setting.
+**Displaying mail.** Bodies are hostile input, and **nothing displays one today** — Proton encrypts
+them end to end and the endpoint this dashboard reads carries none, so `MailViewer` shows headers
+and says why. The machinery for the day that changes is `@pms/mail-view`: it sanitises, the viewer
+renders into an `iframe sandbox=""`, and that frame carries a CSP forbidding every outbound request
+— three layers, each written assuming the other two failed. Remote images stay off until the user
+turns them on for one message: a tracking pixel hands the sender the reader's IP and the time they
+opened it, which is exactly what a Proton account exists to withhold. Do not add a global "always
+load images" setting, and do not put a body on screen by any route that skips the sanitiser.
 
 **What the model may decide.** It names and explains. It does not decide what a rule matches. A
 proposal comes back as *criteria*, is validated against the fields Proton can actually filter on,

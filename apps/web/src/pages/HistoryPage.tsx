@@ -1,7 +1,5 @@
 import { useState } from 'react';
 
-import { describeChange } from '@pms/changes';
-
 import { useMailboxStatus, useReloadMailbox } from '../mailbox.js';
 import { useStore } from '../store.js';
 import { ActivityLog } from '../components/ActivityLog.js';
@@ -13,7 +11,7 @@ import { Info } from '../components/Info.js';
  * Two questions on one screen, in that order, because they were two screens and the second kept
  * being read as an answer to the first. „Verlauf" listed changes and „Protokoll" listed events, and
  * against a real mailbox the first was permanently empty — the write path built a correct entry and
- * the process that called it threw it away, so the only thing that ever filled up was the demo.
+ * the process that called it threw it away.
  *
  * They stay distinct sections rather than one merged list. The upper one is what happened *at
  * Proton*, read back from the local database and surviving a restart. The lower one is what
@@ -26,49 +24,30 @@ import { Info } from '../components/Info.js';
  * description of the change.
  */
 export function HistoryPage(): React.JSX.Element {
-    const { journal, undo, stageUndo, stageRewind } = useStore();
-    const { source, history, historyLimit } = useMailboxStatus();
+    const { stageUndo, stageRewind } = useStore();
+    const { history, historyLimit } = useMailboxStatus();
     const reload = useReloadMailbox();
     const [clearing, setClearing] = useState(false);
     const [clearError, setClearError] = useState<string | undefined>();
 
-    // The demo has no account to have changed, so it shows its own local record; everything else
-    // reads what actually reached Proton.
-    const entries =
-        source === 'demo'
-            ? journal.map((entry) => ({
-                  id: entry.id,
-                  at: entry.atSeconds * 1000,
-                  summary: describeChange(entry.change),
-                  confirmed: entry.verification?.confirmed,
-                  stragglers: entry.verification?.stragglers.length,
-                  undoneAt: entry.undoneAtSeconds === undefined ? undefined : entry.undoneAtSeconds * 1000,
-                  backupPath: undefined as string | undefined,
-                  undoable: entry.undoneAtSeconds === undefined,
-                  moved: entry.moved.length,
-                  snapshot: entry.moved,
-                  take: () => {
-                      undo(entry.id);
-                  },
-              }))
-            : history.map((entry) => ({
-                  id: entry.id,
-                  at: entry.atSeconds * 1000,
-                  summary: entry.summary,
-                  confirmed: entry.verification?.confirmed,
-                  stragglers: entry.verification?.stragglers,
-                  undoneAt: entry.undoneAtSeconds === undefined ? undefined : entry.undoneAtSeconds * 1000,
-                  backupPath: entry.backupPath,
-                  // An undo is not itself undoable. Redoing is a different act from reversing, it
-                  // needs its own diff, and offering it here would let two entries in the record
-                  // disagree about what the account looks like.
-                  undoable: entry.undoneAtSeconds === undefined && entry.undoesId === undefined,
-                  moved: entry.moved.length,
-                  snapshot: entry.moved,
-                  take: () => {
-                      stageUndo({ id: entry.id, summary: entry.summary, moved: entry.moved });
-                  },
-              }));
+    const entries = history.map((entry) => ({
+        id: entry.id,
+        at: entry.atSeconds * 1000,
+        summary: entry.summary,
+        confirmed: entry.verification?.confirmed,
+        stragglers: entry.verification?.stragglers,
+        undoneAt: entry.undoneAtSeconds === undefined ? undefined : entry.undoneAtSeconds * 1000,
+        backupPath: entry.backupPath,
+        // An undo is not itself undoable. Redoing is a different act from reversing, it
+        // needs its own diff, and offering it here would let two entries in the record
+        // disagree about what the account looks like.
+        undoable: entry.undoneAtSeconds === undefined && entry.undoesId === undefined,
+        moved: entry.moved.length,
+        snapshot: entry.moved,
+        take: () => {
+            stageUndo({ id: entry.id, summary: entry.summary, moved: entry.moved });
+        },
+    }));
 
     return (
         <>
@@ -97,7 +76,7 @@ export function HistoryPage(): React.JSX.Element {
                  * Not in a card of its own: a card is for a thing, and this is an action on the
                  * list below it.
                  */}
-                {source !== 'demo' && history.length > 0 && !clearing && (
+                {history.length > 0 && !clearing && (
                     <div className="row">
                         <Info label="Was der Verlauf enthält">
                             {historyLimit === undefined
@@ -154,9 +133,7 @@ export function HistoryPage(): React.JSX.Element {
 
             {entries.length === 0 && (
                 <p className="muted">
-                    {source === 'demo'
-                        ? 'Noch nichts geändert. Was du bestätigst, erscheint hier.'
-                        : 'Noch nichts geändert — oder die Kopie stammt von vor der Einführung dieses Verlaufs. Ältere Änderungen wurden nicht aufgezeichnet und lassen sich deshalb auch nicht zurücknehmen; die Sicherungen unter data/backups liegen aber alle noch.'}
+                    {'Noch nichts geändert — oder die Kopie stammt von vor der Einführung dieses Verlaufs. Ältere Änderungen wurden nicht aufgezeichnet und lassen sich deshalb auch nicht zurücknehmen; die Sicherungen unter data/backups liegen aber alle noch.'}
                 </p>
             )}
 
@@ -186,7 +163,7 @@ export function HistoryPage(): React.JSX.Element {
                                  * On the newest entry a rewind is the same act as the undo beside
                                  * it, and two buttons doing one thing is a choice nobody needs.
                                  */}
-                                {index > 0 && source !== 'demo' && (
+                                {index > 0 && (
                                     <button
                                         type="button"
                                         className="button button-quiet"

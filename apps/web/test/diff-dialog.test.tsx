@@ -61,9 +61,10 @@ describe('what the dialog promises before anything is sent', () => {
         expect(container.textContent).toContain('Ordner „Ablage" anlegen');
     });
 
-    it('says nothing is written yet', () => {
-        // Rendered against the demo mailbox, which is the only source this harness can produce.
-        expect(container.textContent).toContain('es wird nichts geschrieben');
+    it('names the backup that is taken before anything is written', () => {
+        // The dialog is an offer. What it promises about the moment of writing is the one thing
+        // somebody reads before clicking, so it has to be there rather than merely true.
+        expect(container.textContent).toContain('vollständige Sicherung');
     });
 });
 

@@ -34,12 +34,12 @@ async function open(page = ''): Promise<void> {
 }
 
 describe('the browser reaches the server', () => {
-    it('shows the real mailbox rather than falling back to the demo', async () => {
+    it('shows the real mailbox and says how old the copy is', async () => {
         await open();
 
         // The banner is the honesty check: it names which mailbox is on screen.
         await expect
-            .poll(async () => harness.page.locator('.demo-banner').innerText(), { timeout: 10_000 })
+            .poll(async () => harness.page.locator('.source-banner').innerText(), { timeout: 10_000 })
             .toContain('Echtes Postfach');
     });
 
@@ -49,9 +49,10 @@ describe('the browser reaches the server', () => {
         expect(await harness.page.locator('.rule-list').innerText()).toContain('Rechnungen einsortieren');
     });
 
-    it('falls back to the demo, and says so, when no server answers', async () => {
-        // Nobody has to run a server to look at the demo, so a refused connection is an ordinary
-        // state and must read as one — not as an error, and not as a blank page.
+    it('says the mirror is unreadable rather than drawing a dashboard without one', async () => {
+        // This used to be the demo mailbox, and that is the bug: a dashboard drawn from invented
+        // data whenever the real one could not be fetched — including when the vault was merely
+        // locked. A refused mailbox must read as a refused mailbox.
         const solo = await start({ empty: true });
         try {
             await solo.page.route('**/api/mailbox', async (route) => {
@@ -60,8 +61,9 @@ describe('the browser reaches the server', () => {
             await solo.page.goto(solo.url, { waitUntil: 'networkidle' });
 
             await expect
-                .poll(async () => solo.page.locator('.demo-banner').innerText(), { timeout: 10_000 })
-                .toContain('Demo-Daten');
+                .poll(async () => solo.page.locator('body').innerText(), { timeout: 10_000 })
+                .toContain('nicht lesbar');
+            expect(await solo.page.locator('.source-banner').count()).toBe(0);
         } finally {
             await solo.close();
         }

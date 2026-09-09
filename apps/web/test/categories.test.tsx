@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DEMO_FOLDERS, DEMO_RULES, generateMailbox } from '@pms/demo';
+import { DEMO_FOLDERS, DEMO_RULES, generateMailbox } from './fixtures/index.js';
 import { CATEGORY_LABELS } from '@pms/grouping';
 
 import { buildMailbox } from '../src/data.js';
@@ -26,10 +26,10 @@ const mailbox = buildMailbox({
 });
 
 describe('the derivation', () => {
-    it('finds the categories the demo mailbox actually carries', () => {
+    it('finds the categories the fixture mailbox actually carries', () => {
         const ids = mailbox.categories.map((entry) => entry.id);
 
-        // The demo generator assigns 21, 22, 25 and 26 to its senders.
+        // The fixture generator assigns 21, 22, 25 and 26 to its senders.
         expect(ids).toContain('25');
         expect(ids).toContain('21');
         expect(mailbox.categories.every((entry) => entry.messages.length > 0)).toBe(true);
@@ -86,7 +86,7 @@ describe('the derivation', () => {
 
     it('names the own rules that move categorised mail as well', () => {
         // The one actionable fact on the screen: Proton already sorts this, so a rule doing it too
-        // is a second thing to keep in step. The demo's catch-all guarantees at least one.
+        // is a second thing to keep in step. The fixture's catch-all guarantees at least one.
         const withRules = mailbox.categories.filter((entry) => entry.alsoMovedByRules.length > 0);
 
         expect(withRules.length).toBeGreaterThan(0);

@@ -1,4 +1,4 @@
-import { DEMO_FOLDERS, DEMO_LABELS, DEMO_RULES, generateMailbox } from '@pms/demo';
+import { DEMO_FOLDERS, DEMO_LABELS, DEMO_RULES, generateMailbox } from './fixtures/index.js';
 import { describe, expect, it } from 'vitest';
 
 import { buildMailbox } from '../src/data.js';

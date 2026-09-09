@@ -3,7 +3,7 @@ import { useDeferredValue, useMemo, useState } from 'react';
 import type { MailboxMessage, MailboxRule } from '@pms/server/types';
 import { FilterStatement } from '@proton/sieve/filterModel';
 
-import { useMailbox, useMailboxStatus } from '../mailbox.js';
+import { useMailbox } from '../mailbox.js';
 import { useSettings } from '../llm.js';
 import { LabelPicker } from './LabelPicker.js';
 import { protonMailUrl } from '../proton-link.js';
@@ -61,7 +61,6 @@ export function RuleEditor({
 }): React.JSX.Element {
     const { messages, folders, labels, caughtBy, categoryCoverage } = useMailbox();
     const settings = useSettings();
-    const { source } = useMailboxStatus();
     const [showAllOthers, setShowAllOthers] = useState(false);
     const [showSieve, setShowSieve] = useState(false);
 
@@ -160,10 +159,8 @@ export function RuleEditor({
     const stillSieve = savedAsSieve && !showSieve;
     const locked = stillSieve;
 
-    const linkFor =
-        source === 'proton'
-            ? (message: { ID: string; Subject: string }) => protonMailUrl(message, settings.proton)
-            : undefined;
+    const linkFor = (message: { ID: string; Subject: string }): string =>
+        protonMailUrl(message, settings.proton);
 
     const noteFor = (message: { ID: string }): MailNote | undefined => {
         const owner = caughtBy(message.ID);
