@@ -332,13 +332,32 @@ Four consequences worth knowing before touching any of it:
   verification** rather than merely preferring it, because possession alone must not open a mailbox.
   See `docs/security.md` §6.
 
-  **Registering a passkey releases it, in the same act.** It did not, and the consequence was not
-  cosmetic: releasing was a second, separate step in a second place, so every passkey stayed a second
-  factor, the lock screen offered no passkey button and gave no reason, and a working passkey was
-  indistinguishable from a broken one. Registration runs from the settings, behind an open vault, so
-  doing it there breaks no rule — the authenticator is simply touched twice, once to create and once
-  for the key material, because there is no way to ask for both in one gesture. An authenticator with
-  no PRF stays a second factor and the screen says so, as an outcome rather than as an error.
+  **A passkey is set up where the account is, and registering one releases it in the same act.** Both
+  halves were missing and the consequence was not cosmetic: a passkey was something to find later, in
+  a settings tab, on an account that already worked — and releasing it for unlocking was a second,
+  separate step after that. So nobody performed either, every passkey stayed a second factor, the
+  lock screen offered no passkey button and gave no reason, and a working passkey was
+  indistinguishable from a broken one. The registration form now carries the offer, checked by
+  default, and `enrolPasskey` (`apps/web/src/passkey.ts`) is the one place the ceremony is written —
+  the settings call the same function, because two copies would be two chances for one of them to
+  stop at „registered".
+
+  Neither breaks the rule that a passkey cannot enrol itself: both callers hold an open vault, one
+  because it has just created it. The authenticator is touched twice, once to create and once for
+  the key material, because WebAuthn cannot be asked for both in one gesture — so it is a checkbox
+  rather than a silent act. An authenticator with no PRF stays a second factor, reported as an
+  outcome rather than as an error.
+
+  **The password is not replaced and is not going to be.** It is the way back when the authenticator
+  is not at hand, and it is what `weigh()`'s second confirmation is checked against before a deletion
+  or a change that moves mail — `verifyPassword` is the only other thing in the codebase that depends
+  on it. What changed is that the passkey works from the first minute rather than the second day.
+
+  Registering *opens* the account, so the gate would swap the form for the dashboard the moment the
+  answer lands — mid-ceremony, taking the only place the outcome could be reported with it. Hence
+  `perform(action, { silent: true })`: the answer is kept out of the context until „Weiter" is
+  pressed. A result that differs run to run — it unlocks, or this authenticator cannot be a key — is
+  not something to show for the length of one render.
 
 - **The lock screen leads with the passkey, and assumes nothing about who is looking at it.** Where a
   passkey can open the account it is the first and widest button and the password sits one quiet

@@ -194,10 +194,18 @@ installation, so the same authenticator used elsewhere yields different bytes.
   „unlock with a passkey" would mean „unlock with anything that can POST".
 
   Registering a passkey now performs that release in the same act, which does **not** weaken this
-  rule: registration is reachable only from the settings, behind an open vault. What changed is that
-  it no longer waits for a second visit to a second screen — the state it used to leave behind was a
-  passkey that could not unlock, on a lock screen that offered no passkey button and gave no reason,
-  which is what a broken passkey looks like from the outside.
+  rule: both places it can happen hold an open vault — the settings, and the registration form,
+  which has just created the account and holds the key it minted. What changed is that it no longer
+  waits for a second visit to a second screen — the state it used to leave behind was a passkey that
+  could not unlock, on a lock screen that offered no passkey button and gave no reason, which is
+  what a broken passkey looks like from the outside.
+
+  **An account is never created without a password.** A passkey-only account was considered and
+  declined: the password is the way back when the authenticator is not at hand, and it is the secret
+  `weigh()`'s second confirmation is checked against before a deletion or a change that moves mail.
+  Replacing it would mean replacing that confirmation with a second passkey assertion — defensible,
+  but a change to what „a second answer" means, and not one to make as a side effect of a
+  convenience.
 - **Unlocking requires user verification.** `finishPasskeyLogin` is passed
   `requireUserVerification: true` on that path, and `startPasskeyLogin` asks for `required` rather
   than `preferred`. While the passkey was only a second factor, preferring it was enough; now that it
@@ -211,7 +219,8 @@ removing them.
 It is a **reduction in factors** for the accounts that enable it: from *password* to *authenticator
 plus user verification*. That is the point rather than a side effect, and it is a choice made per
 passkey rather than for the installation — but it is now the **default** for a newly registered
-passkey rather than an opt-in, so the trade is made by adding a passkey at all. An authenticator
+passkey rather than an opt-in, and the registration form offers one with the box already ticked, so
+the trade is made by accepting the offer when the account is created. An authenticator
 that cannot do PRF stays a second factor, and the screen reports that as an outcome rather than as
 a failure. The password wrapping is never touched, so nothing is lost
 by enabling it and nothing is recovered by it either — **losing both the password and every enabled

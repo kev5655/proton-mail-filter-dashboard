@@ -3,25 +3,26 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@simplewebauthn/browser', () => ({
-    startRegistration: () => Promise.resolve({ id: 'new-credential' }),
-    startAuthentication: () => Promise.resolve({ id: 'new-credential' }),
-}));
-
 const prf = vi.hoisted(() => ({ supported: true }));
 
-vi.mock('../src/passkey.js', async () => {
-    const actual = await vi.importActual<typeof import('../src/passkey.js')>('../src/passkey.js');
-    return {
-        ...actual,
-        assertWithPrf: () => {
-            if (!prf.supported) {
-                throw new actual.PrfUnsupportedError();
-            }
-            return Promise.resolve({ response: { id: 'new-credential' }, prfOutput: 'AAAA' });
-        },
-    };
-});
+/*
+ * The authenticator, and only the authenticator.
+ *
+ * `passkey.ts` itself is deliberately *not* mocked: converting the salt, reading
+ * `clientExtensionResults` and stripping the key material out of the response before it is sent is
+ * exactly the part that has to work, and a mock of it would test the test. So the fake stops at the
+ * browser API, and PRF support is the one thing it varies.
+ */
+vi.mock('@simplewebauthn/browser', () => ({
+    startRegistration: () => Promise.resolve({ id: 'new-credential' }),
+    startAuthentication: () =>
+        Promise.resolve({
+            id: 'new-credential',
+            clientExtensionResults: prf.supported
+                ? { prf: { results: { first: new Uint8Array(32).fill(7) } } }
+                : {},
+        }),
+}));
 
 import { AccountSettings } from '../src/components/AccountSettings.js';
 import { AccountProvider, type AccountStatus } from '../src/account.js';
@@ -59,11 +60,22 @@ beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     vi.stubGlobal('fetch', (_url: string, init?: { method?: string; body?: string }) => {
-        if (init?.method === 'POST' && init.body !== undefined) {
-            actions.push((JSON.parse(init.body) as { action: string }).action);
+        const action =
+            init?.method === 'POST' && init.body !== undefined
+                ? (JSON.parse(init.body) as { action: string }).action
+                : undefined;
+        if (action !== undefined) {
+            actions.push(action);
         }
+        // The offer the server makes for an assertion that is meant to produce key material. Its
+        // salt is what `assertWithPrf` converts and hands to the authenticator; without it the
+        // module refuses before the authenticator is ever asked.
+        const body =
+            action === 'passkey-login-begin'
+                ? { options: { extensions: { prf: { eval: { first: btoa('a-32-byte-salt-for-the-test-xyz') } } } } }
+                : OPEN;
         return Promise.resolve(
-            new Response(JSON.stringify(OPEN), {
+            new Response(JSON.stringify(body), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
             })

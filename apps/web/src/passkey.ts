@@ -1,4 +1,4 @@
-import { startAuthentication } from '@simplewebauthn/browser';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 
 /**
  * A WebAuthn assertion that also produces key material.
@@ -103,4 +103,76 @@ function toBase64(value: ArrayBuffer | Uint8Array): string {
         binary += String.fromCharCode(byte);
     }
     return btoa(binary);
+}
+
+/** What became of a passkey that was just created. */
+export type Enrolment =
+    /** It carries a wrapping of the key and opens the account on its own. */
+    | { kind: 'unlocks' }
+    /** Registered, but its authenticator cannot produce key material. Still a second factor. */
+    | { kind: 'second-factor'; reason: 'no-prf' }
+    /** Registered, and the release was interrupted — the assertion was cancelled or refused. */
+    | { kind: 'second-factor'; reason: 'interrupted' };
+
+/**
+ * Create a passkey and, in the same act, make it able to open the account.
+ *
+ * One function because it happens in two places — creating an account, and adding a passkey later —
+ * and two copies of it would be two chances for one of them to stop at „registered" and leave a
+ * passkey that cannot unlock. That state is exactly what made a working passkey look broken: no
+ * button on the lock screen, and no reason given.
+ *
+ * **It does not break the rule that a passkey cannot enrol itself.** Both callers run with the vault
+ * already open — one has just created it, the other is inside the settings — so the master key is in
+ * hand and can be wrapped a second time. What the caller must not do is offer this from a locked
+ * screen.
+ *
+ * The authenticator is touched twice: once to create the credential, once to produce the key
+ * material. WebAuthn has no way to ask for both in one gesture, so the second prompt is the price
+ * and the caller should say so before starting.
+ *
+ * Registering and releasing are reported apart because they fail apart. A failure *after* the
+ * credential exists leaves a usable second factor rather than nothing, and reporting that as an
+ * error would send somebody looking for a problem they do not have.
+ */
+export async function enrolPasskey(
+    perform: (action: { action: string; [key: string]: unknown }) => Promise<unknown>,
+    label: string
+): Promise<Enrolment> {
+    const origin = window.location.origin;
+
+    const begun = (await perform({ action: 'passkey-register-begin', origin })) as {
+        options: Parameters<typeof startRegistration>[0]['optionsJSON'];
+    };
+    const created = await startRegistration({ optionsJSON: begun.options });
+    // Anything that throws up to here leaves no credential, so the caller reports a plain failure.
+    await perform({ action: 'passkey-register-finish', label, response: created, origin });
+
+    try {
+        const login = (await perform({
+            action: 'passkey-login-begin',
+            origin,
+            forUnlock: true,
+        })) as { options: unknown };
+        const { response, prfOutput } = await assertWithPrf(login.options);
+        await perform({ action: 'passkey-unlock-enable', response, prfOutput, origin });
+        return { kind: 'unlocks' };
+    } catch (cause) {
+        return cause instanceof PrfUnsupportedError
+            ? { kind: 'second-factor', reason: 'no-prf' }
+            : { kind: 'second-factor', reason: 'interrupted' };
+    }
+}
+
+/** The sentence for an outcome, so the two screens cannot describe one result differently. */
+export function describeEnrolment(outcome: Enrolment): string {
+    if (outcome.kind === 'unlocks') {
+        return 'Der Passkey ist eingerichtet und schliesst ohne Passwort auf.';
+    }
+    return outcome.reason === 'no-prf'
+        ? 'Der Passkey ist eingerichtet und gilt als zweiter Faktor. Ohne Passwort aufschliessen ' +
+              'kann er nicht: dieser Authenticator beherrscht die PRF-Erweiterung nicht.'
+        : 'Der Passkey ist eingerichtet und gilt als zweiter Faktor. Das Freischalten zum ' +
+              'Aufschliessen wurde abgebrochen — „Ohne Passwort aufschliessen" in den Einstellungen ' +
+              'holt es nach.';
 }

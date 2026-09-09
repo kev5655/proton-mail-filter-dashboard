@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { startRegistration } from '@simplewebauthn/browser';
 
 import { useAccount } from '../account.js';
-import { assertWithPrf, PrfUnsupportedError } from '../passkey.js';
+import { assertWithPrf, describeEnrolment, enrolPasskey } from '../passkey.js';
 
 /**
  * Changing what guards the local data, from inside the thing it guards.
@@ -429,64 +428,12 @@ function Passkeys(): React.JSX.Element {
                 disabled={label.trim() === '' || busy}
                 onClick={() => {
                     run(async () => {
-                        const begun = (await perform({
-                            action: 'passkey-register-begin',
-                            origin: window.location.origin,
-                        })) as { options: Parameters<typeof startRegistration>[0]['optionsJSON'] };
-                        const created = await startRegistration({ optionsJSON: begun.options });
-                        await perform({
-                            action: 'passkey-register-finish',
-                            label: label.trim(),
-                            response: created,
-                            origin: window.location.origin,
-                        });
+                        // The same ceremony the registration screen runs, from the one place it is
+                        // written. Two copies would be two chances for one of them to stop at
+                        // „registered" and leave a passkey that cannot unlock.
+                        const outcome = await enrolPasskey(perform, label.trim());
                         setLabel('');
-
-                        /*
-                         * Released for unlocking straight away, where the authenticator can do it.
-                         *
-                         * A passkey that only stands beside the password is the weaker thing and was
-                         * the default purely because releasing it is a second, separate act nobody
-                         * knew to perform — so every passkey on this installation stayed a second
-                         * factor and the lock screen offered nothing.
-                         *
-                         * The rule it must not break is that a passkey cannot enrol *itself*, and it
-                         * does not: this runs from the settings, where the vault is already open and
-                         * the password has already been given. The second ceremony is the price —
-                         * the authenticator is touched twice, once to create and once to produce the
-                         * key material, and there is no way to ask for both in one gesture.
-                         */
-                        try {
-                            const login = (await perform({
-                                action: 'passkey-login-begin',
-                                origin: window.location.origin,
-                                forUnlock: true,
-                            })) as { options: unknown };
-                            const { response, prfOutput } = await assertWithPrf(login.options);
-                            await perform({
-                                action: 'passkey-unlock-enable',
-                                response,
-                                prfOutput,
-                                origin: window.location.origin,
-                            });
-                            return 'Der Passkey ist registriert und schliesst ohne Passwort auf.';
-                        } catch (cause) {
-                            if (cause instanceof PrfUnsupportedError) {
-                                return (
-                                    'Der Passkey ist registriert und gilt als zweiter Faktor. ' +
-                                    'Ohne Passwort aufschliessen kann er nicht: dieser Authenticator ' +
-                                    'beherrscht die PRF-Erweiterung nicht.'
-                                );
-                            }
-                            // Anything else — a cancelled second prompt, a refused verification —
-                            // leaves a registered passkey behind, and saying so is the difference
-                            // between „nichts passiert" and „die Hälfte ist passiert".
-                            return (
-                                'Der Passkey ist registriert und gilt als zweiter Faktor. Das ' +
-                                'Freischalten zum Aufschliessen wurde abgebrochen — „Ohne Passwort ' +
-                                'aufschliessen" holt es nach.'
-                            );
-                        }
+                        return describeEnrolment(outcome);
                     }, 'Der Passkey ist registriert.');
                 }}
             >

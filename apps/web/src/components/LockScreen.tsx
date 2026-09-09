@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
 
-import { assertWithPrf } from '../passkey.js';
+import { assertWithPrf, describeEnrolment, enrolPasskey } from '../passkey.js';
 
 import { useAccount } from '../account.js';
 import { deviceIsKnown, rememberDevice } from '../device.js';
@@ -99,15 +99,70 @@ export function LockScreen(): React.JSX.Element {
 }
 
 function Register({ onCancel }: { onCancel?: () => void }): React.JSX.Element {
-    const { perform } = useAccount();
+    const { perform, refresh } = useAccount();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [repeat, setRepeat] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | undefined>();
+    /*
+     * A passkey, set up here rather than found later.
+     *
+     * On by default, because a passkey that opens the account is the better of the two ways in and
+     * because the alternative — finding a settings tab afterwards — is a step nobody took. It is a
+     * checkbox rather than a silent act: it makes the authenticator ask twice, and a prompt nobody
+     * asked for reads as a fault.
+     */
+    const [withPasskey, setWithPasskey] = useState(true);
+    /** What the enrolment did, once the account exists. Reported on this screen, not the next one. */
+    const [outcome, setOutcome] = useState<string | undefined>();
 
     const mismatch = repeat !== '' && repeat !== password;
     const usable = username.trim() !== '' && password.length >= 8 && !mismatch && repeat !== '';
+
+    /*
+     * Create the account, then give it a passkey, and only then let the screen change.
+     *
+     * `silent` is what holds it: registering opens the account, so the gate above would swap this
+     * screen for the dashboard the moment the answer arrives — and the passkey ceremony that
+     * follows would be reporting to a form that no longer exists.
+     *
+     * Where a passkey was asked for, the screen is held one step longer still: the outcome is not
+     * the same every time — it can unlock, or it can turn out that this authenticator cannot be a
+     * key — and a sentence that appears for the length of one render is a sentence nobody reads.
+     * „Weiter" is what calls `refresh()`, so moving on is a deliberate act. With no passkey there is
+     * nothing to report and nothing to hold.
+     */
+    const create = async (): Promise<void> => {
+        await perform(
+            { action: 'register', username: username.trim(), password },
+            { silent: true }
+        );
+
+        if (!withPasskey) {
+            refresh();
+            return;
+        }
+
+        try {
+            const result = await enrolPasskey(
+                (action) => perform(action, { silent: true }),
+                'Dieses Gerät'
+            );
+            setOutcome(describeEnrolment(result));
+        } catch (cause) {
+            /*
+             * The account exists; the passkey does not. That is a genuinely different thing from a
+             * failed registration and must not read as one — the password works, and this is
+             * something to try again from the settings.
+             */
+            setOutcome(
+                `Das Konto ist angelegt, der Passkey nicht: ${
+                    cause instanceof Error ? cause.message : 'unbekannter Fehler'
+                } Unter Einstellungen → Konto → Passkeys lässt er sich nachtragen.`
+            );
+        }
+    };
 
     return (
         <form
@@ -115,8 +170,9 @@ function Register({ onCancel }: { onCancel?: () => void }): React.JSX.Element {
             onSubmit={(event) => {
                 event.preventDefault();
                 setError(undefined);
+                setOutcome(undefined);
                 setBusy(true);
-                void perform({ action: 'register', username: username.trim(), password })
+                void create()
                     .catch((cause: Error) => {
                         setError(cause.message);
                     })
@@ -190,11 +246,45 @@ function Register({ onCancel }: { onCancel?: () => void }): React.JSX.Element {
                 {mismatch && <span className="field-error">Die beiden stimmen nicht überein.</span>}
             </label>
 
+            <label className="row check-row">
+                <input
+                    type="checkbox"
+                    checked={withPasskey}
+                    disabled={busy}
+                    onChange={(event) => {
+                        setWithPasskey(event.target.checked);
+                    }}
+                />
+                <span>
+                    <strong>Passkey gleich einrichten.</strong> Danach schliesst er dieses Konto
+                    ohne Passwort auf — das Passwort bleibt daneben gültig und ist der Weg zurück,
+                    wenn der Authenticator einmal nicht da ist. Dein Gerät fragt zweimal: einmal zum
+                    Anlegen des Passkeys, einmal für das Schlüsselmaterial. Kann dein Authenticator
+                    die PRF-Erweiterung nicht, bleibt der Passkey zweiter Faktor und du erfährst es
+                    hier.
+                </span>
+            </label>
+
             {error !== undefined && <p className="notice notice-danger">{error}</p>}
 
-            <button type="submit" className="button" disabled={!usable || busy}>
-                {busy ? 'Wird angelegt …' : 'Konto anlegen'}
-            </button>
+            {outcome === undefined ? (
+                <button type="submit" className="button" disabled={!usable || busy}>
+                    {busy ? 'Wird angelegt …' : 'Konto anlegen'}
+                </button>
+            ) : (
+                <>
+                    <p className="notice notice-info">{outcome}</p>
+                    <button
+                        type="button"
+                        className="button"
+                        onClick={() => {
+                            refresh();
+                        }}
+                    >
+                        Weiter
+                    </button>
+                </>
+            )}
             {onCancel === undefined ? null : (
                 <button
                     type="button"

@@ -58,8 +58,16 @@ interface AccountContext {
     known: boolean;
     /** True when a local server answered at all. False means there is nothing to show. */
     served: boolean;
-    /** Perform one action. Throws with the server's own message, which the forms show verbatim. */
-    perform: (action: AccountAction) => Promise<unknown>;
+    /**
+     * Perform one action. Throws with the server's own message, which the forms show verbatim.
+     *
+     * `silent` keeps the answer out of the context, so the screen does not change underneath a form
+     * that is not finished yet. Registering is the case it exists for: the account is open the
+     * moment it is created, the gate would swap the lock screen for the dashboard, and the passkey
+     * ceremony that follows would lose the screen it reports to. The caller calls `refresh()` when
+     * it is done.
+     */
+    perform: (action: AccountAction, options?: { silent?: boolean }) => Promise<unknown>;
     refresh: () => void;
 }
 
@@ -114,7 +122,10 @@ export function AccountProvider({ children }: { children: React.ReactNode }): Re
 
     useEffect(refresh, [refresh]);
 
-    const perform = useCallback(async (action: AccountAction): Promise<unknown> => {
+    const perform = useCallback(async (
+        action: AccountAction,
+        options?: { silent?: boolean }
+    ): Promise<unknown> => {
         const response = await fetch(ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -131,7 +142,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }): Re
         }
 
         // Every successful action answers with the new state, so nothing has to ask twice.
-        if (typeof body['registered'] === 'boolean') {
+        if (typeof body['registered'] === 'boolean' && options?.silent !== true) {
             setStatus(body as unknown as AccountStatus);
             setServed(true);
         }
