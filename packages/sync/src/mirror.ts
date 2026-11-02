@@ -1,3 +1,4 @@
+import { categoryIdsOf, emailDomain } from '@pms/grouping';
 import type { MessageMetadata, ProtonFilter, ProtonLabel } from '@pms/proton-api/schemas';
 import type { Db } from '@pms/store';
 
@@ -61,14 +62,28 @@ export function mirrorFilters(db: Db, filters: readonly ProtonFilter[]): number 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    // Which rules the user has already accepted responsibility for. Replacing the table would
-    // otherwise silently un-adopt every one of them, and they would all reappear as "found in
-    // Proton, please confirm" — training people to click through the confirmation.
-    const adopted = new Set(
-        (db.prepare('SELECT id FROM filters WHERE adopted = 1').all() as Array<{ id: string }>).map(
-            (row) => row.id
-        )
-    );
+    /*
+     * Which rules the user has already accepted responsibility for.
+     *
+     * Replacing the table would otherwise silently un-adopt every one of them, and they would all
+     * reappear as "found in Proton, please confirm" — training people to click through the
+     * confirmation.
+     *
+     * A filter that is *not* in this set after a first sync is one that appeared at Proton without
+     * this tool doing it. That is the drift the „Änderungen" screen is for, and it used to be
+     * invisible: a rule created in Proton's own interface simply turned up among the others, as
+     * though the tool had known about it all along.
+     *
+     * The first mirror is the exception and adopts everything. A brand new copy has no history to
+     * compare against, so calling the user's entire existing rule set "unexpected" would be both
+     * wrong and the fastest possible way to teach them to dismiss the screen.
+     */
+    const known = db.prepare('SELECT id, adopted FROM filters').all() as Array<{
+        id: string;
+        adopted: number;
+    }>;
+    const first = known.length === 0;
+    const adopted = new Set(known.filter((row) => row.adopted === 1).map((row) => row.id));
 
     db.transaction(() => {
         db.exec('DELETE FROM filters');
@@ -82,7 +97,7 @@ export function mirrorFilters(db: Db, filters: readonly ProtonFilter[]): number 
                 filter.Sieve ?? null,
                 filter.Tree === undefined ? null : JSON.stringify(filter.Tree),
                 filter.Simple === undefined ? null : JSON.stringify(filter.Simple),
-                adopted.has(filter.ID) ? 1 : 0
+                first || adopted.has(filter.ID) ? 1 : 0
             );
         }
     })();
@@ -165,4 +180,109 @@ export function setMeta(db: Db, key: string, value: string): void {
 export function getMeta(db: Db, key: string): string | undefined {
     const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
     return row?.value;
+}
+
+/**
+ * Record that the user has taken responsibility for these filters.
+ *
+ * Called for a rule this tool wrote — it is not a surprise if we made it — and for one the user
+ * looked at on the „Änderungen" screen and kept. Nothing else marks a filter adopted, which is what
+ * makes the absence of the flag mean something.
+ */
+export function markAdopted(db: Db, filterIds: readonly string[]): number {
+    if (filterIds.length === 0) {
+        return 0;
+    }
+    const update = db.prepare('UPDATE filters SET adopted = 1 WHERE id = ?');
+    let changed = 0;
+    db.transaction(() => {
+        for (const id of filterIds) {
+            changed += update.run(id).changes;
+        }
+    })();
+    return changed;
+}
+
+/**
+ * Record what Proton's own categories were doing at this moment.
+ *
+ * Proton files inbox mail into categories by itself, and — the part the user actually wants to see
+ * — it keeps doing it for a sender once a message has been filed there by hand. That behaviour has
+ * no interface, no filter and no list. It is not fetchable: Proton's own client has no request that
+ * reads or sets it (`useRecategorizeElement.ts` in WebClients sends nothing but the move itself).
+ * The only instrument available is a sequence of observations.
+ *
+ * **Called after `mirrorMessages` for the same batch**, and the reason is worth stating because the
+ * obvious guess is the opposite one. It looks like this has to run first, to read the previous
+ * category before `mirrorMessages` overwrites `message_labels` — but it never reads that table. The
+ * previous state it compares against is its own, in `message_categories`, and the new state comes
+ * from the batch it is handed. So the ordering is free, and the foreign key decides it: a row here
+ * references a message, and on a first sync that message does not exist until the mirror inserts it.
+ *
+ * That foreign key is worth the constraint. It means a message dropped from the mirror takes its
+ * history with it, instead of leaving rows that accumulate forever and describe nothing.
+ *
+ * `observedAt` is one value for the whole sync run, passed in rather than read from the clock here,
+ * so that "one sync = one observation" holds across every page.
+ */
+export function recordCategoryObservations(
+    db: Db,
+    messages: readonly MessageMetadata[],
+    observedAt: number
+): number {
+    if (messages.length === 0) {
+        return 0;
+    }
+
+    // A folder of the account's own could share the shape of a category id, and must not be counted
+    // as one. Labels are mirrored before messages in every sync, so this is the current set.
+    const knownFolderIds = new Set(
+        (db.prepare('SELECT id FROM labels').all() as Array<{ id: string }>).map((row) => row.id)
+    );
+
+    const openRow = db.prepare(`
+        INSERT INTO message_categories (message_id, category_id, first_seen, last_seen, gone_at)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT (message_id, category_id) DO UPDATE SET
+            last_seen = excluded.last_seen,
+            -- A category that comes back re-opens its row rather than starting a second one: the
+            -- pair is the primary key, and "it left and returned" is what first_seen/gone_at say.
+            gone_at   = NULL
+    `);
+    const closeRows = db.prepare(`
+        UPDATE message_categories SET gone_at = ?
+        WHERE message_id = ? AND gone_at IS NULL AND category_id NOT IN (SELECT value FROM json_each(?))
+    `);
+    const observe = db.prepare(`
+        INSERT INTO category_observations
+            (sender_address, sender_domain, category_id, observed_at, message_count)
+        VALUES (?, ?, ?, ?, 1)
+        ON CONFLICT (sender_address, category_id, observed_at) DO UPDATE SET
+            message_count = message_count + 1
+    `);
+
+    let seen = 0;
+
+    db.transaction(() => {
+        for (const message of messages) {
+            const categories = categoryIdsOf(message.LabelIDs, knownFolderIds);
+
+            // Runs for every message, including one with no category at all — that is how a
+            // message *losing* its category is recorded, and losing one is a change like any other.
+            closeRows.run(observedAt, message.ID, JSON.stringify(categories));
+
+            for (const categoryId of categories) {
+                openRow.run(message.ID, categoryId, observedAt, observedAt);
+                observe.run(
+                    message.Sender.Address,
+                    emailDomain(message.Sender.Address),
+                    categoryId,
+                    observedAt
+                );
+                seen++;
+            }
+        }
+    })();
+
+    return seen;
 }

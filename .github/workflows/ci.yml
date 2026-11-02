@@ -1,0 +1,38 @@
+name: CI
+
+# Types and tests on every push and pull request.
+#
+# Linux only, and only the unit suite. The end-to-end suite drives a real browser and takes minutes;
+# it is worth running before a release rather than on every commit, and Actions minutes on a private
+# repository are a real budget.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.0'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Types
+        run: pnpm check-types
+
+      - name: Tests
+        run: pnpm test

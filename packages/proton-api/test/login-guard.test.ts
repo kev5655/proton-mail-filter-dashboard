@@ -124,7 +124,7 @@ describe('login guard', () => {
         await g.assertMayAttempt().then(
             () => expect.unreachable('should be blocked'),
             (error: AppError) => {
-                expect(error.hint).toMatch(/--sperre-geklaert/);
+                expect(error.hint).toMatch(/--lockout-cleared/);
                 expect(error.hint).toMatch(/Warten löst das nicht/);
             }
         );

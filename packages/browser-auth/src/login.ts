@@ -1,6 +1,6 @@
 import { AppError } from '@pms/core/errors';
 import { getLogger } from '@pms/core/logger';
-import type { Browser, BrowserContext, Page, Response } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page, Response } from 'playwright';
 
 import {
     AUTH_PATH,
@@ -40,6 +40,14 @@ export interface BrowserSession {
     refreshToken: string;
     /** What the browser would send, as a `Cookie` header value. */
     cookies: string;
+    /**
+     * What Proton says this session may do, where that is known.
+     *
+     * Absent after a login with a second factor: the only place the scope is stated is the answer to
+     * `core/v4/auth`, and at that point the factor has not happened yet. Absent is honest; the
+     * pre-factor value would be a lie with a field name attached.
+     */
+    scope?: string;
 }
 
 export interface BrowserLoginResult {
@@ -101,6 +109,15 @@ interface AuthPayload {
     UID: string;
     UserID: string;
     TwoFactor: number;
+    /**
+     * What the session is allowed to do, as Proton states it.
+     *
+     * Optional because it is only trustworthy at one moment: on an account with no second factor,
+     * the scope in this answer is the final one. With a factor still pending it says what the
+     * session may do *so far*, which is very little — and storing that as though it were the
+     * outcome is worse than storing nothing.
+     */
+    Scope?: string;
 }
 
 function isAuthPayload(value: unknown): value is AuthPayload {
@@ -165,15 +182,34 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
             console.log('\n  Bitte den Passkey im Browser-Fenster bestätigen. Danach geht es von selbst weiter.\n');
         }
 
-        // Waiting for the session cookie rather than for a particular request.
-        //
-        // The first version watched `core/v4/auth/2fa` and hung on a passkey, because Proton
-        // confirms one some other way. Which call completes a second factor is Proton's business
-        // and changes; that the session cookie exists is the thing actually being waited for, and
-        // it is true however the login finished.
-        const session = await collectSession(context, payload.UID, pending ? timeout : Math.min(timeout, 20_000));
+        /*
+         * Waiting for the login to be *finished*, which is not the same as a cookie existing.
+         *
+         * The first version watched `core/v4/auth/2fa` and hung on a passkey, because Proton
+         * confirms one some other way. Switching to „the session cookie is there" fixed the hang and
+         * introduced a worse bug: Proton sets `AUTH-<UID>` on the answer to `core/v4/auth`, which
+         * is *before* the second factor. So with a factor pending this returned at once, carrying a
+         * session whose scope was still partial — and the next read failed with HTTP 403, „access
+         * token does not have sufficient scope", several minutes and one screen later.
+         *
+         * With nothing pending the cookie really is the whole story. With a factor pending, two
+         * independent signals say the ceremony finished, and neither names an endpoint: the access
+         * cookie is **re-issued** with the upgraded scope, so its value changes; and the web app
+         * leaves the login page for the mailbox. Either will do.
+         */
+        const session = await collectSession(
+            context,
+            page,
+            payload.UID,
+            pending ? timeout : Math.min(timeout, 20_000),
+            pending
+        );
         log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in through a browser');
-        return { session, userId: payload.UserID };
+        return {
+            // Only where it is the final word — see `AuthPayload.Scope`.
+            session: pending || payload.Scope === undefined ? session : { ...session, scope: payload.Scope },
+            userId: payload.UserID,
+        };
     } finally {
         await context.close().catch(() => undefined);
         await browser?.close().catch(() => undefined);
@@ -181,17 +217,34 @@ export async function loginWithBrowser(options: BrowserLoginOptions): Promise<Br
 }
 
 /**
- * Take the session out of the browser's cookie jar once the login has settled.
+ * Take the session out of the browser's cookie jar once the login has actually finished.
  *
- * Proton names them `AUTH-<UID>` and `REFRESH-<UID>`. The whole jar is kept as well: it is exactly
- * what the browser would send, and it does not depend on those names being right forever.
+ * Proton names the cookies `AUTH-<UID>` and `REFRESH-<UID>`. The whole jar is kept as well: it is
+ * exactly what the browser would send, and it does not depend on those names being right forever.
  *
  * The cookies are set on the response to `core/v4/auth`, but a `Set-Cookie` is applied slightly
  * after the response arrives, so this waits rather than reading once and giving up.
+ *
+ * **`pending` is the important argument.** With a second factor still to come, the access cookie is
+ * already there and is *not yet the session we want* — it carries a partial scope, and taking it
+ * produces a login that looks successful and then fails on the first read. So in that case the
+ * cookie's presence proves nothing and two other things are watched instead: its value changing,
+ * because the upgraded scope arrives as a new token, and the page leaving the login screen, because
+ * that is what the web app does once it is really in. They are watched together rather than one
+ * being chosen, so neither has to be the one Proton keeps doing forever.
  */
-async function collectSession(context: BrowserContext, uid: string, timeoutMs: number): Promise<BrowserSession> {
+async function collectSession(
+    context: BrowserContext,
+    page: Page,
+    uid: string,
+    timeoutMs: number,
+    pending: boolean
+): Promise<BrowserSession> {
     const deadline = Date.now() + timeoutMs;
     let names: string[] = [];
+    /** The partial-scope token, so an upgrade can be told apart from it. */
+    let before: string | undefined;
+    let first = true;
 
     for (;;) {
         const jar = (await context.cookies()).filter((cookie) => cookie.domain.endsWith('proton.me'));
@@ -200,7 +253,12 @@ async function collectSession(context: BrowserContext, uid: string, timeoutMs: n
         const access = jar.find((cookie) => cookie.name === `AUTH-${uid}`);
         const refresh = jar.find((cookie) => cookie.name === `REFRESH-${uid}`);
 
-        if (access !== undefined) {
+        if (first && pending) {
+            before = access?.value;
+            first = false;
+        }
+
+        if (access !== undefined && (!pending || access.value !== before || leftLoginPage(page))) {
             return {
                 uid,
                 accessToken: access.value,
@@ -214,6 +272,20 @@ async function collectSession(context: BrowserContext, uid: string, timeoutMs: n
         await new Promise((done) => setTimeout(done, 200));
     }
 
+    if (pending && names.includes(`AUTH-${uid}`)) {
+        // The password was accepted and the factor was not answered. Saying „cookie missing" here
+        // would send somebody looking at Proton's cookie names for a login they simply did not
+        // finish — and it is the one case where the tokens on hand are real but too weak to use.
+        throw new AppError('BROWSER_LOGIN_UNFINISHED', {
+            message: 'Der zweite Faktor wurde im Fenster nicht bestätigt.',
+            hint:
+                'Die Anmeldung war bis zum Passwort erfolgreich; danach fehlt die Bestätigung — ' +
+                'Passkey antippen oder den Code eingeben. Die Sitzung, die dabei entsteht, darf ' +
+                'noch nichts lesen, deshalb wird sie nicht übernommen.',
+            context: { uid },
+        });
+    }
+
     throw new AppError('BROWSER_LOGIN_UI_CHANGED', {
         message: `Das Sitzungs-Cookie "AUTH-${uid}" ist nicht aufgetaucht.`,
         hint:
@@ -222,6 +294,23 @@ async function collectSession(context: BrowserContext, uid: string, timeoutMs: n
             'oder Proton hat die Cookies umbenannt; das Letztere ist in collectSession anzupassen.',
         context: { uid, cookieNames: names },
     });
+}
+
+/**
+ * Whether the browser has left the login screen.
+ *
+ * Deliberately a path test and not a host or URL test: the only Proton address this package is
+ * allowed to name is the login page itself, which `write-isolation.test.ts` checks by scanning for
+ * URL literals. „No longer on a /login path" needs no second address and stays true if Proton moves
+ * the mailbox somewhere else.
+ */
+function leftLoginPage(page: Page): boolean {
+    try {
+        return !new URL(page.url()).pathname.includes('/login');
+    } catch {
+        // `about:blank` or a page that has gone away. Not a signal either way.
+        return false;
+    }
 }
 
 interface Launched {
@@ -363,27 +452,34 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
     }
 
     for (const pattern of TOTP_SWITCH_PATTERNS) {
-        try {
-            const control = page.getByRole('button', { name: pattern }).first();
-            if ((await control.count()) > 0) {
-                await control.click({ timeout: 2_000 });
+        for (const candidate of switchCandidates(page, pattern)) {
+            try {
+                if ((await candidate.count()) === 0) {
+                    continue;
+                }
+                await candidate.first().click({ timeout: 2_000 });
                 const revealed = await findTotpField(page, 2_000);
                 if (revealed !== undefined) {
                     return revealed;
                 }
+            } catch {
+                // A guess that did not land. The wait below is the part that is meant to work.
             }
-        } catch {
-            // A guess that did not land. The wait below is the part that is meant to work.
         }
     }
 
     if (headless) {
+        // The same diagnosis the visible path gets. Without it this error said only which selectors
+        // were tried — which we already knew — and the attempt it cost taught us nothing.
         throw new AppError('BROWSER_LOGIN_2FA_UNSUPPORTED', {
             message: 'Protons 2FA-Seite zeigt den Passkey, und das Code-Feld liess sich nicht öffnen.',
             hint:
                 'Unsichtbar kann das niemand umschalten. Mit PMS_BROWSER_HEADLESS=false starten — ' +
-                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen.',
-            context: { tried: [...TOTP_SELECTORS] },
+                'dann genügt ein Klick im Fenster und der Code wird selbst eingetragen. Was die Seite ' +
+                'tatsächlich anbietet, steht im Kontext unter `inputs` und `buttons`; daraus lässt ' +
+                'sich packages/browser-auth/src/selectors.ts anpassen, ohne noch einen Versuch zu ' +
+                'verbrauchen.',
+            context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
         });
     }
 
@@ -405,6 +501,22 @@ async function revealTotpField(page: Page, headless: boolean, timeoutMs: number)
             'anpassen, ohne noch einen Anmeldeversuch zu verbrauchen.',
         context: { tried: [...TOTP_SELECTORS], ...(await describeForm(page)) },
     });
+}
+
+/**
+ * The things on the page that might be the switch to the code method, likeliest first.
+ *
+ * A button by its accessible name is the shape Proton uses today. The other two exist because that
+ * assumption has already been wrong once and cost a login attempt to find out: the control may be a
+ * link, and Proton's own components sometimes render one as neither — a styled `div` with a click
+ * handler, which has no role at all and is reachable only by its text.
+ */
+function switchCandidates(page: Page, pattern: RegExp): Locator[] {
+    return [
+        page.getByRole('button', { name: pattern }),
+        page.getByRole('link', { name: pattern }),
+        page.getByText(pattern),
+    ];
 }
 
 /** The first candidate that is actually on screen, or undefined. */
@@ -532,5 +644,81 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string, 
         if (timer !== undefined) {
             clearTimeout(timer);
         }
+    }
+}
+
+/**
+ * Sign in by opening the page and getting out of the way.
+ *
+ * The difference from `loginWithBrowser` is what this function does *not* do: it never sees a
+ * password. It opens Proton's login page and waits. The person types, or their password manager's
+ * browser extension fills the form the way it would on any other site, or they touch a passkey —
+ * and none of that passes through this process.
+ *
+ * That is the whole argument for it. `loginWithBrowser` has to be handed the credentials, which
+ * means fetching them out of 1Password and holding them in memory here. This version cannot leak
+ * what it never receives, and it is the only shape in which a browser extension can participate at
+ * all: the extension fills Proton's own form, in a real profile, exactly as if the page had been
+ * opened by hand.
+ *
+ * It follows that this needs a visible window and a profile the extension is installed in. Headless
+ * has nobody to type; a throwaway profile has no extension. Both are refused rather than left to
+ * fail obscurely several minutes later.
+ *
+ * The wait is long on purpose — somebody may have to find their phone — and it is bounded, because
+ * a browser window left open forever is a browser window nobody closes.
+ */
+export async function loginByHandInBrowser(options: {
+    /** Where the profile lives. Required: an extension cannot exist in a throwaway one. */
+    profileDir: string;
+    channel?: 'chrome' | 'msedge' | 'chromium' | undefined;
+    /** How long the person has. Generous; a second factor can involve looking for a phone. */
+    timeoutMs?: number;
+    /** Called once the window is up, so a dashboard can say what is waiting for whom. */
+    onOpen?: () => void;
+}): Promise<BrowserLoginResult> {
+    const timeout = options.timeoutMs ?? 5 * 60_000;
+
+    const launched = await launchBrowser(
+        { username: '', password: '', promptTotp: async () => '', ...options },
+        // Never headless. There is nobody to type in a window that does not exist, and failing
+        // here is much cheaper than failing after a five-minute wait for input that cannot come.
+        false
+    );
+    const { browser, context } = launched;
+    try {
+        const page = context.pages()[0] ?? (await context.newPage());
+        page.setDefaultTimeout(timeout);
+
+        const seen = traceAuthRequests(page);
+        const auth = watchForAuthResponse(page, seen);
+
+        await page.goto(PROTON_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+        options.onOpen?.();
+
+        const payload = await withTimeout(
+            auth,
+            timeout,
+            'Im Browser-Fenster wurde die Anmeldung nicht abgeschlossen.',
+            seen
+        );
+
+        /*
+         * Same reasoning as above, and this is the path the dashboard uses.
+         *
+         * It was the worse of the two: it did not look at `TwoFactor` at all, so every login with a
+         * second factor — which is every login on an account that has one — returned the moment
+         * `core/v4/auth` had set its cookie, with a scope that could not read a single label.
+         */
+        const pending = payload.TwoFactor !== 0;
+        const session = await collectSession(context, page, payload.UID, timeout, pending);
+        log.info({ userId: payload.UserID, twoFactor: payload.TwoFactor }, 'signed in by hand in a browser');
+        return {
+            session: pending || payload.Scope === undefined ? session : { ...session, scope: payload.Scope },
+            userId: payload.UserID,
+        };
+    } finally {
+        await context.close().catch(() => undefined);
+        await browser?.close().catch(() => undefined);
     }
 }

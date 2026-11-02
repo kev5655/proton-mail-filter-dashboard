@@ -3,7 +3,16 @@ import type { MatchableMessage, OrderedRule } from '@pms/rules';
 import { describe, expect, it } from 'vitest';
 
 import { Journal, inverseOf } from '../src/journal.js';
-import { applyChangeToRules, describePlan, planChange, type PendingChange } from '../src/plan.js';
+import {
+    applyChangeToRules,
+    describePlan,
+    planCategoryMove,
+    planChange,
+    planRewind,
+    planUndo,
+    type PendingChange,
+    type UndoableEntry,
+} from '../src/plan.js';
 import { findRulesNotFiring, partialMoveError, verifyMoves } from '../src/verify.js';
 
 /**
@@ -155,7 +164,7 @@ describe('undo', () => {
         const journal = new Journal();
         journal.record({
             id: 'e1',
-            at: 1000,
+            atSeconds: 1000,
             change,
             moved: [
                 { messageId: 'm1', previousLabelIds: ['0'], movedTo: 'Newsletter' },
@@ -174,7 +183,7 @@ describe('undo', () => {
 
     it('refuses to undo the same entry twice', () => {
         const journal = new Journal();
-        journal.record({ id: 'e1', at: 1000, change, moved: [] });
+        journal.record({ id: 'e1', atSeconds: 1000, change, moved: [] });
         journal.undo('e1', [created], 2000);
 
         expect(() => journal.undo('e1', [created], 3000)).toThrow(/bereits rückgängig/);
@@ -182,8 +191,8 @@ describe('undo', () => {
 
     it('lists the newest entry first', () => {
         const journal = new Journal();
-        journal.record({ id: 'old', at: 1000, change, moved: [] });
-        journal.record({ id: 'new', at: 2000, change, moved: [] });
+        journal.record({ id: 'old', atSeconds: 1000, change, moved: [] });
+        journal.record({ id: 'new', atSeconds: 2000, change, moved: [] });
 
         expect(journal.entries.map((entry) => entry.id)).toEqual(['new', 'old']);
     });
@@ -204,7 +213,7 @@ describe('verifying that Proton did it', () => {
                 { ID: 'm2', LabelIDs: ['lbl-news'] },
             ],
             folderIds,
-            now: 1,
+            nowSeconds: 1,
         });
 
         expect(result.confirmed).toBe(2);
@@ -221,7 +230,7 @@ describe('verifying that Proton did it', () => {
                 { ID: 'm2', LabelIDs: ['0'] },
             ],
             folderIds,
-            now: 1,
+            nowSeconds: 1,
         });
 
         const error = partialMoveError(result, 'Newsletter');
@@ -230,14 +239,14 @@ describe('verifying that Proton did it', () => {
     });
 
     it('treats a message missing from the read-back as unconfirmed', () => {
-        const result = verifyMoves({ expected, actual: [{ ID: 'm1', LabelIDs: ['lbl-news'] }], folderIds, now: 1 });
+        const result = verifyMoves({ expected, actual: [{ ID: 'm1', LabelIDs: ['lbl-news'] }], folderIds, nowSeconds: 1 });
 
         expect(result.confirmed).toBe(1);
         expect(result.stragglers).toEqual(['m2']);
     });
 
     it('puts no subject line in the error, only ids', () => {
-        const result = verifyMoves({ expected, actual: [], folderIds, now: 1 });
+        const result = verifyMoves({ expected, actual: [], folderIds, nowSeconds: 1 });
         const serialised = JSON.stringify(partialMoveError(result, 'Newsletter')?.toJSON());
 
         expect(serialised).not.toContain('Betreff');
@@ -260,5 +269,201 @@ describe('the health check', () => {
         expect(
             findRulesNotFiring([{ id: 'r1', name: 'x', catches: () => false }], [{ ID: 'm9', LabelIDs: ['0'] }])
         ).toEqual([]);
+    });
+});
+
+/**
+ * Planning a category move, which is planned backwards from everything else here.
+ *
+ * `planChange` simulates the rule set and reads the moves out of what changed. A category move has
+ * no rule to simulate: the moves *are* the input, because a person selected them. The failure mode
+ * that matters is therefore the opposite one — not a missed consequence, but a widened one.
+ */
+describe('planning a move into one of Protons categories', () => {
+    const noCategories = (): string | undefined => undefined;
+
+    it('plans a move for each named message and for no other', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm3'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.moves.map((move) => move.messageId)).toEqual(['m1', 'm3']);
+        expect(plan.moves.every((move) => move.to === 'Transaktionen')).toBe(true);
+        // The whole authorisation, carried on the change and not recomputed downstream.
+        expect(plan.change.category).toEqual({ id: '26', messageIds: ['m1', 'm3'] });
+    });
+
+    it('ignores an id that is not in the mailbox rather than inventing a row for it', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'gibt-es-nicht'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.moves.map((move) => move.messageId)).toEqual(['m1']);
+    });
+
+    it('names the category a message is in today', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1'],
+            categoryId: '26',
+            currentCategoryOf: () => '24',
+        });
+
+        // Named, not numbered: „24 → 26" is not a sentence anyone can check against their mailbox.
+        expect(plan.moves[0]?.from).toBe('Standard');
+    });
+
+    it('claims nothing about the inbox, because nothing is known about it', () => {
+        // Proton's client sends one label request and no unlabel, which says something about the
+        // previous category and nothing at all about the inbox. A number here would be a guess with
+        // a count next to it.
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm2'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.clearedFromInbox).toBe(0);
+        expect(plan.returnedToInbox).toBe(0);
+    });
+
+    it('says which of your own rules is already handling this mail', () => {
+        // The duplicate warning, in the last place before a write. Proton is about to sort this
+        // mail and a rule of the user's own already does — that is the thing worth seeing.
+        const plan = planCategoryMove({
+            rules: [rule('r-1', 'Shop', 1, 'news@shop.example', 'Werbung')],
+            messages,
+            messageIds: ['m1', 'm2'],
+            categoryId: '21',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(plan.takenFrom).toEqual([{ ruleName: 'Shop', count: 2 }]);
+    });
+
+    it('leaves the rules untouched', () => {
+        const rules = [rule('r-1', 'Shop', 1, 'news@shop.example', 'Werbung')];
+        const plan = planCategoryMove({
+            rules,
+            messages,
+            messageIds: ['m1'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        expect(applyChangeToRules(rules, plan.change)).toEqual(rules);
+    });
+
+    it('has an inverse that names no destination, because the messages do not share one', () => {
+        const plan = planCategoryMove({
+            rules: [],
+            messages,
+            messageIds: ['m1', 'm3'],
+            categoryId: '26',
+            currentCategoryOf: noCategories,
+        });
+
+        const inverse = inverseOf(plan.change);
+        expect(inverse.kind).toBe('move-to-category');
+        // Undo works from the journal's per-message snapshot instead. Naming one category here
+        // would send every message back to the same place, which is only right by accident.
+        expect(inverse.category).toBeUndefined();
+    });
+});
+
+
+/**
+ * Planning an undo, and planning a rewind.
+ *
+ * Both are planned from the journal's own snapshot rather than by simulating anything, and that is
+ * the property worth pinning. A simulation would show what a change was *expected* to do; the
+ * record shows what it actually did, as observed after the write. An undo acting on expectations
+ * would move a message back to somewhere it had never left.
+ */
+describe('planning the taking-back of one change', () => {
+    const names = (labelId: string): string | undefined =>
+        ({ 'l-archiv': 'Archiv', '24': 'Standard' })[labelId];
+
+    const entry: UndoableEntry = {
+        id: 'j-1',
+        summary: 'Regel „Shop" anlegen',
+        moved: [
+            { messageId: 'm-1', previousLabelIds: ['l-archiv'], movedTo: 'Werbung' },
+            { messageId: 'm-2', previousLabelIds: ['0'], movedTo: 'Werbung' },
+        ],
+    };
+
+    it('sends each message back where it individually was', () => {
+        // The whole reason the record keeps a per-message snapshot: these two came from different
+        // places, and a description of the change could not express that.
+        const plan = planUndo(entry, names);
+
+        expect(plan.moves).toEqual([
+            { messageId: 'm-1', subject: 'm-1', sender: '', from: 'Werbung', to: 'Archiv' },
+            { messageId: 'm-2', subject: 'm-2', sender: '', from: 'Werbung', to: undefined },
+        ]);
+    });
+
+    it('names the entry it will take back and nothing else', () => {
+        // What will happen is read from the record at apply time. Copying it into the change would
+        // be a second version of the truth, free to disagree with the first.
+        expect(planUndo(entry, names).change).toEqual({
+            id: 'undo-j-1',
+            kind: 'undo-entry',
+            undo: { entryId: 'j-1' },
+        });
+    });
+
+    it('shows an id it cannot place rather than hiding it', () => {
+        const plan = planUndo(
+            { ...entry, moved: [{ messageId: 'm-3', previousLabelIds: ['l-weg'], movedTo: 'Werbung' }] },
+            names
+        );
+
+        // An unrecognised destination is a thing to see before confirming, not after.
+        expect(plan.moves[0]?.to).toBeUndefined();
+    });
+});
+
+describe('planning a rewind', () => {
+    const names = (labelId: string): string | undefined =>
+        ({ 'l-archiv': 'Archiv', 'l-alt': 'Alt' })[labelId];
+
+    // Newest first, which is also the order they will be reversed in.
+    const chain: UndoableEntry[] = [
+        {
+            id: 'j-2',
+            summary: 'zweite',
+            moved: [{ messageId: 'm-1', previousLabelIds: ['l-archiv'], movedTo: 'Werbung' }],
+        },
+        {
+            id: 'j-1',
+            summary: 'erste',
+            moved: [{ messageId: 'm-1', previousLabelIds: ['l-alt'], movedTo: 'Archiv' }],
+        },
+    ];
+
+    it('anchors on the oldest entry, because that is where it stops', () => {
+        expect(planRewind(chain, names).change.undo).toEqual({ entryId: 'j-1' });
+    });
+
+    it('shows a twice-touched message landing where the oldest change found it', () => {
+        // Walking backwards through both entries ends at „Alt". Showing „Archiv" — the intermediate
+        // state — would be a diff the run itself then contradicts.
+        const plan = planRewind(chain, names);
+
+        expect(plan.moves).toHaveLength(1);
+        expect(plan.moves[0]?.to).toBe('Alt');
     });
 });

@@ -55,7 +55,35 @@ const USER_CONTENT_KEYS = new Set([
     'Path',
     'Sieve',
     'Email',
+    // Identifiers of a person's own mail and conversations. They are opaque, so they leak nothing
+    // by being read — but they name a specific message in a specific mailbox, and a fixture is a
+    // file meant to be shared. Listed rather than left to the fallback below: they already fail
+    // that check by not being in Proton's vocabulary, and a guarantee that rests on a value
+    // happening to be unfamiliar is not a guarantee.
+    'ID',
+    'IDs',
+    'MessageID',
+    'MessageIDs',
+    'ConversationID',
+    'ConversationIDs',
 ]);
+
+/**
+ * Keys whose value is a label id, and the ids that are Proton's rather than this account's.
+ *
+ * The scrubber used to hash `"26"` under `LabelID` along with everything else, which is why no
+ * recorded fixture could ever answer the question the categories work turned on — what Proton's
+ * category ids are. The value was there and we replaced it.
+ *
+ * The exception is narrow enough to be safe by construction: a folder or label this account owns
+ * has a 24-character base64 id, never one or two digits. Nothing personal can match, and only these
+ * three keys are consulted, so a digit appearing anywhere else is still pseudonymised.
+ *
+ * The range covers Proton's fixed system labels (0-26) plus 40, soft-deleted. See `CATEGORY_LABELS`
+ * and `SYSTEM_LOCATIONS` in `@pms/grouping` for where those come from.
+ */
+const LABEL_ID_KEYS = new Set(['LabelID', 'LabelIDs', 'label_id']);
+const PROTON_LABEL_ID = /^(?:[0-9]|1[0-9]|2[0-6]|40)$/;
 
 /** A structural string is short, wordlike, and never an address. */
 function looksStructural(value: string): boolean {
@@ -210,6 +238,10 @@ export function scrub(value: unknown, parentKey?: string): unknown {
         // Necessary because Proton's generated rule comment encodes the rule's own operator and
         // comparators and therefore differs per filter — no fixed list could ever contain it.
         if (looksLikeProtonInternal(value)) {
+            return value;
+        }
+        // Proton's own label ids, and only under a key that holds one.
+        if (parentKey !== undefined && LABEL_ID_KEYS.has(parentKey) && PROTON_LABEL_ID.test(value)) {
             return value;
         }
         if (parentKey !== undefined && USER_CONTENT_KEYS.has(parentKey)) {

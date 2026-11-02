@@ -1,4 +1,5 @@
 export {
+    loginByHandInBrowser,
     loginWithBrowser,
     type BrowserLoginOptions,
     type BrowserLoginResult,

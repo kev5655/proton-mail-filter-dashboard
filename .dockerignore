@@ -1,0 +1,23 @@
+# What must never reach the build context.
+#
+# `data/` first and for its own reason: it is the encrypted mailbox and the stored Proton session.
+# A build context is copied wholesale to the daemon and can end up in an image layer, and an image
+# is a thing that gets pushed to a registry.
+data/
+**/data/
+
+node_modules/
+**/node_modules/
+.git/
+release/
+apps/web/dist/
+vendor/proton/sieve/dist/
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+test-results/
+fixtures/
+*.log
+*.db
+*.db-*

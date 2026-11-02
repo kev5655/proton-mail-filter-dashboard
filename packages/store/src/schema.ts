@@ -93,4 +93,159 @@ export const MIGRATIONS: readonly Migration[] = [
             ) STRICT;
         `,
     },
+    {
+        summary: 'category history, so Proton\'s own sorting can be observed over time',
+        sql: `
+            -- Which of Proton's categories a message carried, and when that stopped being true.
+            --
+            -- Proton sorts inbox mail into categories by itself and keeps doing it once a message
+            -- has been filed. That behaviour has no interface, no filter and no list: it is only
+            -- visible in its effect. And its effect is unrecoverable from the rest of this
+            -- database, because \`mirrorMessages\` clears and rewrites \`message_labels\` on every
+            -- sync — after which what a message carried yesterday is simply gone.
+            --
+            -- So this table remembers. It is the only thing in the mirror that is not a copy of a
+            -- current Proton state, and it is deliberately append-mostly: rows are opened and
+            -- closed, never rewritten, because a history that is edited is not a history.
+            CREATE TABLE message_categories (
+                message_id  TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+                category_id TEXT NOT NULL,
+                -- Sync timestamps, not message timestamps. The question is when *we looked*.
+                first_seen  INTEGER NOT NULL,
+                last_seen   INTEGER NOT NULL,
+                -- Set by the first sync that saw the message without this category.
+                gone_at     INTEGER,
+                PRIMARY KEY (message_id, category_id)
+            ) STRICT;
+
+            CREATE INDEX message_categories_seen ON message_categories (first_seen);
+
+            -- The same observation aggregated per sender and per sync.
+            --
+            -- Derivable from the table above by joining against messages, and stored anyway: the
+            -- screen that shows "what does Proton do with this sender" would otherwise scan the
+            -- whole message table on every render, and the aggregate is what every question on
+            -- that screen is actually about.
+            CREATE TABLE category_observations (
+                sender_address TEXT NOT NULL,
+                -- Kept alongside the address rather than derived on read, so "what does Proton do
+                -- with this whole domain" is a query rather than a scan plus string surgery.
+                sender_domain  TEXT NOT NULL,
+                category_id    TEXT NOT NULL,
+                observed_at    INTEGER NOT NULL,
+                message_count  INTEGER NOT NULL,
+                PRIMARY KEY (sender_address, category_id, observed_at)
+            ) STRICT;
+
+            CREATE INDEX category_observations_at ON category_observations (observed_at);
+            CREATE INDEX category_observations_domain
+                ON category_observations (sender_domain, observed_at);
+        `,
+    },
+    {
+        summary: 'the record of what was changed at Proton, and how to take it back',
+        sql: `
+            -- What this tool did to the account, and the means to undo it.
+            --
+            -- It existed before this table, and only in a browser tab. \`applyChange\` built a
+            -- correct entry — from what verification *observed*, not from what the plan intended —
+            -- and the process that called it dropped the value on the floor. So „Verlauf" was
+            -- permanently empty against a real account, and \`undoChange\` had no caller anywhere in
+            -- the project.
+            --
+            -- Two things are kept per entry and both are needed. The **inverse change** puts the
+            -- rules back; the **per-message snapshot** puts the mail back. Neither alone is enough:
+            -- deleting a rule does not return the mail it filed, and moving mail back while the
+            -- rule still runs means it is filed again within the hour.
+            --
+            -- \`moved_json\` holds message ids and label ids and nothing else — no subjects, no
+            -- senders. The diff had those and did not need to keep them; what is not stored cannot
+            -- leak out of a backup or an error report.
+            CREATE TABLE journal_entries (
+                id            TEXT PRIMARY KEY,
+                -- Unix seconds, when the change was applied.
+                at            INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                summary       TEXT NOT NULL,
+                change_json   TEXT NOT NULL,
+                inverse_json  TEXT NOT NULL,
+                -- MovedMessage[]: id, the labels it carried before, where it went.
+                moved_json    TEXT NOT NULL,
+                -- What the check afterwards actually saw. Absent when nothing was expected to move.
+                verification_json TEXT,
+                -- The full backup taken before the write. The one file that can rebuild the rest.
+                backup_path   TEXT NOT NULL,
+                -- Set when this entry has been taken back, so it is not offered twice.
+                undone_at     INTEGER,
+                -- Set when this entry *is* an undo, naming what it took back. A rewind is a chain
+                -- of these, and reading the chain is how a half-finished rewind stays explicable.
+                undoes_id     TEXT
+            ) STRICT;
+
+            CREATE INDEX journal_entries_at ON journal_entries (at);
+        `,
+    },
+    {
+        summary: 'the journal timestamps, which were milliseconds in columns that meant seconds',
+        sql: `
+            -- The column always said Unix seconds. The writer sent Date.now(), which is
+            -- milliseconds, so every applied change was recorded a thousand times too far in the
+            -- future: the history rendered them in the year 58647, and readJournalSince compared a
+            -- rewind chain against a number no row could ever reach. Nothing caught it because the
+            -- only disagreement was between a name and its value -- so the names now carry the
+            -- unit (atSeconds, undoneAtSeconds, checkedAtSeconds), and this step repairs what is
+            -- already on disk.
+            --
+            -- The threshold is the whole trick: 100000000000 is the year 5138 read as seconds and
+            -- the year 1973 read as milliseconds. No plausible instant is ambiguous between the
+            -- two, so this is safe on a database that was never affected, and safe run twice.
+
+            UPDATE journal_entries
+               SET at = at / 1000
+             WHERE at > 100000000000;
+
+            UPDATE journal_entries
+               SET undone_at = undone_at / 1000
+             WHERE undone_at IS NOT NULL AND undone_at > 100000000000;
+
+            -- The verification blob carried the same instant under the old name.
+            UPDATE journal_entries
+               SET verification_json = json_remove(
+                       json_set(
+                           verification_json,
+                           '$.checkedAtSeconds',
+                           CASE
+                               WHEN json_extract(verification_json, '$.checkedAt') > 100000000000
+                                   THEN json_extract(verification_json, '$.checkedAt') / 1000
+                               ELSE json_extract(verification_json, '$.checkedAt')
+                           END
+                       ),
+                       '$.checkedAt'
+                   )
+             WHERE verification_json IS NOT NULL
+               AND json_extract(verification_json, '$.checkedAt') IS NOT NULL;
+        `,
+    },
+    {
+        summary: 'the suggestions the user has put away, so they survive a reload',
+        sql: `
+            -- „Nicht vorschlagen" was a React state and nothing else: it lasted until the page was
+            -- reloaded or another screen was opened, and then every dismissed suggestion came
+            -- back. The identity to store it under already existed — group.key is documented as
+            -- stable precisely so a group „can be dismissed persistently" — only the storing did
+            -- not.
+            --
+            -- Here rather than in the browser, because the same account is read from more than one
+            -- device and three browsers with three lists would disagree about what is still open.
+            --
+            -- Nothing here is mail. A group key is a description of a pattern — a sender, a
+            -- subject shape, a domain — and this table holds only that and when it was put away.
+            CREATE TABLE hidden_suggestions (
+                group_key   TEXT PRIMARY KEY,
+                -- Unix seconds, when it was hidden. Shown in the list, so putting something away
+                -- for good can be told from putting it away last Tuesday.
+                at_seconds  INTEGER NOT NULL
+            ) STRICT;
+        `,
+    },
 ];

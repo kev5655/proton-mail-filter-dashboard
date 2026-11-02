@@ -26,11 +26,26 @@ const MAX_ENTRIES = 500;
 const entries: LogEntry[] = [];
 const listeners = new Set<() => void>();
 
+/**
+ * The newest-first view, held rather than rebuilt on demand.
+ *
+ * `useSyncExternalStore` compares consecutive snapshots with `Object.is` and re-renders until two
+ * of them agree. A function returning a fresh array each call therefore never converges: React
+ * loops, warns that the snapshot should be cached, and throws — which took the whole application
+ * down with it, because a thrown render unmounts the root. That was the blank "Protokoll" screen
+ * with no way back.
+ *
+ * So the array is built once per event and handed out by reference. Reversing 500 entries when
+ * something happens is nothing; doing it on every render is a hang.
+ */
+let newestFirst: LogEntry[] = [];
+
 export function log(level: LogLevel, event: string, context: LogEntry['context'] = {}): void {
     entries.push({ at: Date.now(), level, event, context });
     if (entries.length > MAX_ENTRIES) {
         entries.shift();
     }
+    newestFirst = [...entries].reverse();
     for (const listener of listeners) {
         listener();
     }
@@ -38,11 +53,13 @@ export function log(level: LogLevel, event: string, context: LogEntry['context']
 
 export function subscribe(listener: () => void): () => void {
     listeners.add(listener);
-    return () => listeners.delete(listener);
+    return () => {
+        listeners.delete(listener);
+    };
 }
 
 export function snapshot(): LogEntry[] {
-    return [...entries].reverse();
+    return newestFirst;
 }
 
 /** The text to paste into a bug report. */

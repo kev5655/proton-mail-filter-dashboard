@@ -1,4 +1,11 @@
-import type { GroupSummary, LlmProvider, SieveExplanation, Suggestion } from './provider.js';
+import type {
+    GroupSummary,
+    LabelProposal,
+    LabelRequest,
+    LlmProvider,
+    SieveExplanation,
+    Suggestion,
+} from './provider.js';
 import { validateProposal, type RuleProposal, type SelectionSummary } from './propose.js';
 
 /**
@@ -61,6 +68,27 @@ export function createDemoProvider(): LlmProvider & {
          * share that nothing else does. The instruction is acknowledged rather than acted on — a
          * stand-in that pretended to understand free text would be the most misleading thing here.
          */
+        /**
+         * A stand-in that behaves the way the real one is supposed to: it picks from what exists.
+         *
+         * Deliberately never invents anything, even when new labels are allowed. The demo's job is
+         * to exercise the screen, and a stand-in that produced inventions would make the
+         * „neu — wird angelegt" path look like the normal one instead of the exception it is.
+         */
+        async proposeLabels(input: LabelRequest): Promise<LabelProposal> {
+            const haystack = `${input.subjects.join(' ')} ${input.senders.join(' ')}`.toLowerCase();
+            const chosen = input.existingLabels.filter((label) => mentions(haystack, label));
+
+            return {
+                chosen,
+                proposedNew: [],
+                rationale:
+                    chosen.length === 0
+                        ? 'Kein vorhandenes Label passt zu diesen Betreffzeilen.'
+                        : `Diese Betreffzeilen nennen ${chosen.join(', ')}.`,
+            };
+        },
+
         async proposeRule(selection: SelectionSummary): Promise<RuleProposal> {
             const senders = [...new Set(selection.senders)];
             const domains = [...new Set(senders.map((address) => address.split('@')[1] ?? ''))].filter(

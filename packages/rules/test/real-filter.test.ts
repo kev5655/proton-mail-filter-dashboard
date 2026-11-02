@@ -37,13 +37,45 @@ import { REPO_FIXTURE } from './fixture-path.js';
 const FIXTURE = REPO_FIXTURE('filters.json');
 const available = existsSync(FIXTURE);
 
-interface FilterResponse {
-    data: { Filters: Array<{ Tree: unknown; Version: 1 | 2; Simple?: unknown; Sieve?: string }> };
+interface RecordedFilter {
+    Tree: unknown;
+    Version: 1 | 2;
+    Simple?: unknown;
+    Sieve?: string;
 }
 
-const filter = available
-    ? (JSON.parse(readFileSync(FIXTURE, 'utf8')) as FilterResponse).data.Filters[0]
-    : undefined;
+/**
+ * `data` is what the endpoint's own function returned, which for `getFilters` is the array itself.
+ *
+ * This read used to expect `data.Filters`, the shape of Proton's raw envelope. Nobody noticed,
+ * because the fixture is not in the repository and the suite had never once had one to open — the
+ * skip that keeps the test honest for other clones also kept it from ever being run. Reading the
+ * shape defensively means the next mismatch names itself instead of arriving as a TypeError while
+ * the file is still being imported, where `skipIf` cannot help.
+ */
+function readFilter(): RecordedFilter | undefined {
+    if (!available) {
+        return undefined;
+    }
+    const parsed = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { data?: unknown };
+    if (!Array.isArray(parsed.data)) {
+        throw new Error(
+            `${FIXTURE} hat nicht die erwartete Form: "data" muss das Array sein, das getFilters ` +
+                'zurückgibt. Fixture mit `pnpm spike` neu aufnehmen.'
+        );
+    }
+    return parsed.data[0] as RecordedFilter | undefined;
+}
+
+const filter = readFilter();
+
+/**
+ * The recorded file as it sits on disk.
+ *
+ * The two checks below are about the fixture as a whole, not about the one filter inside it: what
+ * gets committed is the file, so the file is what has to be free of addresses.
+ */
+const raw = available ? readFileSync(FIXTURE, 'utf8') : '';
 
 describe.skipIf(!available)('a real Proton filter', () => {
     it('arrives without a Simple field, but with a Tree', () => {
@@ -73,14 +105,12 @@ describe.skipIf(!available)('a real Proton filter', () => {
     it('carries no address, anywhere', () => {
         // The fixture is committed to a repository headed for GitHub. This is the check that keeps
         // it honest as the scrubber changes.
-        const serialised = JSON.stringify(response);
-        expect(serialised).not.toMatch(/[A-Za-z0-9._%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+        expect(raw).not.toMatch(/[A-Za-z0-9._%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
     });
 
     it("keeps Proton's own generated strings readable, which is what makes it a useful fixture", () => {
-        const serialised = JSON.stringify(response);
-        expect(serialised).toContain('vnd.proton.spam-threshold');
-        expect(serialised).toContain('# Generated:');
-        expect(serialised).toContain('@comparator');
+        expect(raw).toContain('vnd.proton.spam-threshold');
+        expect(raw).toContain('# Generated:');
+        expect(raw).toContain('@comparator');
     });
 });

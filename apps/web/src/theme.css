@@ -29,6 +29,9 @@
 
     --danger: #d9534f;
     --danger-soft: #fdeaea;
+    /* What reads on a filled danger button. Light on the dark red here, dark on the pale red
+       in the dark theme — the hue is one value, the text on it is not. */
+    --danger-text: #ffffff;
     --warning: #b8860b;
     --warning-soft: #fdf5e2;
     --success: #1ea885;
@@ -62,6 +65,7 @@
 
         --danger: #f08c8a;
         --danger-soft: #3a2225;
+        --danger-text: #2a1416;
         --warning: #e0b44a;
         --warning-soft: #3a3020;
         --success: #4fd1ab;

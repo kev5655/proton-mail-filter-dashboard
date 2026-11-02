@@ -5,12 +5,435 @@ A local dashboard for managing Proton Mail's server-side filters and folders.
 ## The one rule
 
 **This tool never moves mail.** Proton's own filters do the sorting; we only manage the rules that
-tell Proton what to do. The single exception is **undo**, which may move back exactly the message
-IDs a rule moved, recorded in the undo journal — never a message the journal does not name.
+tell Proton what to do. There are exactly **two** exceptions, and each is narrow in the same way —
+it moves only message IDs somebody named, never a folder, a sender or a query:
+
+1. **Undo**, which moves back exactly the message IDs a rule moved, from the undo journal's
+   per-message snapshot — never a message the journal does not name. Reachable from the dashboard as
+   `undo-entry` (one change) and `rewind-to` (a chain, newest first, stopping at the first failure);
+   both go the ordinary route and both demand a second answer unconditionally.
+2. **Moving into one of Proton's categories** (`move-to-category`), which moves exactly the IDs the
+   user selected and then saw listed in the diff. It exists because a category cannot be a filter's
+   destination: Proton files mail into „Werbung" or „Transaktionen" itself and offers no endpoint
+   that reads or sets what it has learned, so moving the mail *is* the interface. `weigh()` demands
+   a second answer for it unconditionally — including for one message — because this is the
+   exception, and it should cost a deliberate act every time.
 
 The rule is enforced structurally, not by discipline: only `packages/proton-api/src/write/` may
-issue non-GET requests, and the message-moving calls inside it are reachable only from the undo
-service. If you are about to add a write path anywhere else, that is the signal to stop.
+issue non-GET requests, and `write/messages.ts` has exactly two importers, asserted as an exact set
+in `write-isolation.test.ts` rather than as a filter anyone can extend. Every function in that file
+takes `messageIds: string[]` — "only explicit ids" as a signature, not as a promise — and the test
+checks that too. `category-service.ts` has no way to obtain an id: it reads through an injected
+`readCurrent`, and the test checks for the absence. If you are about to add a write path anywhere
+else, that is the signal to stop.
+
+**Proton moving mail on our behalf is not a third exception, and the distinction is load-bearing.**
+`applyFiltersToExisting` (`POST mail/v4/messages/apply-filters`) hands Proton the message ids the
+diff listed and asks it to apply *its own* filters to them. We do not select mail and put it
+somewhere; the service runs the rules it already has. That is what lets a new rule tidy up the
+backlog with the core rule intact — and it is offered as a visible checkbox rather than inferred,
+because for months the terminal announced it and nothing did it.
+
+**There are seven non-GET routes, not two, and every addition is named here because each was made
+on purpose.** `POST /api/login` opens a browser window at Proton's own login page and waits; it
+writes nothing to Proton's data, but it is the most consequential thing the tool does. `POST
+/api/logout` is the only route on the list that *only ever takes away* — it ends the session, forgets
+it, and deletes the local copy of the mailbox — and a tool that makes connecting easy and
+disconnecting hard has the wrong shape. Both have their own line in `handler.ts` and share one
+`SessionChannel`, because being connected is one piece of state and not two.
+
+`POST /api/account` is the fifth and the odd one out: it is the only route that **cannot reach
+Proton at all**, and the only one a locked tool answers. It creates the account and unlocks the key
+that everything else on this machine is encrypted with — so it *acts* where the others only offer,
+and what keeps that defensible is what it cannot do. It has no Proton client, cannot open a
+database, and can only hand a key to the process that does. It is one route with a named action
+rather than eleven paths, because the route count is a promise about what reaches Proton, and
+spending eleven lines of it on a local password form would make the promise harder to read without
+making it stronger; `AccountChannel` still names each action in a branch of its own.
+
+`POST /api/history/clear` is the sixth and the smallest: it deletes rows from the local record and
+touches nothing else — no Proton client, no channel, no confirmation from another window. What it
+costs is stated where it is offered, because undo works from that table and a change with no entry
+can no longer be reversed. The backups are untouched: they are files, this is a table, and clearing
+a history must not quietly throw away the copy of every filter as it was before each change. The
+record also caps itself at `JOURNAL_LIMIT` entries on write, not on read — a record that grew for
+ever on disk and was merely *displayed* short would still be a growing pile of mail metadata.
+
+`POST /api/suggestions/hidden` is the seventh and the cheapest to justify, which is exactly why it
+is written down: it stores one row saying that a suggestion has been put away — a group key, which
+describes a pattern rather than a message, and the moment somebody decided. No Proton client, no
+channel, no second confirmation, because the act is undone by the same screen that performed it with
+the same button. It exists because „Nicht vorschlagen" was a React state and nothing else, so every
+hidden suggestion came back on the next reload and the button really meant „until you look away".
+It is in the database rather than in the browser because the same account is read from more than
+one device, and three browsers would keep three lists that disagree about what is still open.
+Unlike the journal it has **no cap**: that one holds message ids and exists to be undone from, this
+one holds a decision per pattern, and dropping the oldest would make a suggestion reappear months
+later with nothing to explain it.
+
+What makes it defensible is not the route count. **No password passes through this process:**
+`loginByHandInBrowser` opens the page and gets out of the way, so a password manager's browser
+extension fills Proton's own form exactly as it would on any other site, and a passkey works because
+the credential lives in that profile's own store. `connect()`'s older path — fetch the credentials
+from 1Password and type them with Playwright — still exists for the CLI, and the two are tested
+apart: `write-isolation.test.ts` asserts that the browser-driven login never reads a password.
+
+**Disconnecting removes the local copy, and the order is the feature.** `signOut`
+(`apps/spike/src/session.ts`) stops the auto-sync timer, revokes at Proton *while the tokens still
+exist*, clears the client, and only then deletes the file — because `reuse()` re-persists after a
+refresh, so removing the file while a live token exists can bring it back. Then the database is
+closed and its four files go (`-wal` and `-shm` too: a `-wal` beside a fresh database is a
+corruption path), along with the filter backups. `login-attempts.json` and `data/logs/` stay — a
+lockout must not be clearable by disconnecting, and the log carries no mail content by construction.
+The server shuts down afterwards, because it has just deleted everything it was serving.
+
+`ProtonHttp` refuses every non-anonymous request without a session. That had to be added for the
+above to mean anything: clearing the session used to leave the client sending unauthenticated
+requests that Proton answered 401 — a pointless request to a service this project is deliberately
+polite to, and a weaker guarantee than "signed out" reads as.
+
+`LoginGuard` is not weakened by any of it. It is consulted before the window opens, a failure is
+recorded, and there is no retry loop — the rule that got this account back. A button in a web
+interface makes a login easy to hammer, which is exactly how the lockout happened, so a refusal is
+shown as a refusal with no button beside it.
+
+**The second exception created no new HTTP route.** It travels over the existing `POST /api/apply`
+like every other change. The capability itself is handed to `applyChange` as
+`ApplyContext.moveToCategory`, assembled in `apps/spike/src/serve-command.ts` — the process that
+holds the session and owns the terminal — so neither `@pms/apply` nor `packages/server/` can reach
+the module that performs it.
+
+`packages/server/` is the same idea one layer out, and the guarantee there has a precise shape:
+
+> **HTTP is an offer, not a trigger. No change worth asking about reaches Proton without a second
+> answer from a person: the app password, re-entered in the dashboard beside the diff that says
+> what will happen — or, on an installation that has no account, a `ja` typed at the terminal where
+> `pnpm serve` runs.**
+
+The server holds a Proton session — it must, so the dashboard can start a sync — but the file that
+parses a request cannot reach the code that performs one. They meet through a channel object handed
+in from outside, and `write-isolation.test.ts` checks that the routing files import neither
+`@pms/apply` nor the write surface. Seven non-GET routes exist and each is named in an `if` rather
+than entered in a table: `POST /api/sync`, which only reads at Proton, and `POST /api/apply`, which
+records an offer and answers `202` while nothing has happened yet.
+
+`packages/apply/src/steps.ts` is the only file in the project that imports `@pms/proton-api/write`.
+One file to read when someone asks what this tool can change.
+
+**Who the server takes instructions from is now a decision rather than an accident.** There was no
+CSRF token, no `Origin` check and no look at `Host`: anything that could reach the port could drive
+every one of those routes. On loopback that was tolerable — a process on this machine having the
+mailbox is the premise — but it was tolerable by luck, and it stops being tolerable the moment the
+dashboard is reachable under a name. `origins.ts` refuses every non-`GET` whose `Origin` is missing,
+is not loopback, and is not exactly `PMS_PUBLIC_ORIGIN`; `Host` is checked the same way, which
+closes DNS rebinding by comparison rather than by argument. Reads pass, because a `GET` changes
+nothing and the two streams are `GET`s. Loopback is allowed in general rather than on one exact
+port, because `pnpm dev` serves the page from vite with `changeOrigin: false` — a rule pinned to one
+port would lock the author out of his own dashboard and look like a broken server.
+
+The same change took WebAuthn's origin out of the request body. `rpIdFor` derives the relying-party
+id from it, so a body field let the caller choose the scope their own credential is bound to — the
+one thing a relying party must never delegate. It comes from the header now, which the guard above
+has already checked.
+
+### Where the second question is asked, and what giving up the terminal cost
+
+`weigh()` decides which changes are asked about twice — anything that moves mail (a category move,
+an undo, a rewind), anything that resorts a large share of the mailbox, and anything that deletes —
+and **all of them are now asked in the dashboard, against the app password.**
+
+The terminal is gone from `weigh()`, and that is a real loss which belongs in writing rather than in
+a commit nobody reads. A keystroke in the window where `pnpm serve` runs **cannot be produced by
+anything speaking HTTP**; that was the strongest property this project had. A password **can** be
+produced by anything that knows it.
+
+Two things are bought with it, and the second is why it was not optional.
+
+The first was already the better argument for deletions and is no less true for a category move:
+the person confirming sees, at that moment, exactly what is affected and where it goes. A
+confirmation performed in another window, away from the thing being confirmed, is one people learn
+to perform without reading — the failure `apply.ts` is built against, and the terminal was starting
+to cause it.
+
+The second is that **the terminal had quietly stopped existing.** This tool is meant to be reachable
+from a phone and from a machine that is not the one it runs on. On a server there is nobody at that
+keyboard — and `confirmAtTerminal` did not refuse in that case, it waited out its two-minute timeout
+and reported `expired`, which reads as „you were too slow" to somebody who never had a keyboard to
+be slow at. A guarantee that turns into a timeout is not a guarantee. It refuses immediately now,
+which is the honest behaviour and also the one that makes the loss visible instead of silent.
+
+It keeps its teeth by being a secret rather than a gesture: the password is checked by the same
+`Vault` that holds the key to the mailbox, through the same Argon2id derivation an unlock uses, so a
+wrong one is refused and guessing is slow by construction. The grant is keyed to one request id and
+expires, and a refusal is now its own button — waiting five minutes used to be the only way to say
+no, which left a change armed for exactly as long as somebody might step away from the screen.
+
+**Where there is no account, the terminal keeps everything.** An installation with no password has
+nothing to check an answer against, and then the gesture is all there is. `serve-command.ts` decides
+that in one place, `placeFor`, which both the routing and the dashboard read — those two disagreeing
+would put a password field on screen for an answer nothing will ever read.
+
+Two placement rules follow, and both are checked:
+
+- **The password never travels on `/api/apply`.** A `ChangeRequest` is digested, journalled and
+  reported; nothing carrying a password may end up in a record. It goes to `/api/account` as
+  `confirm-change`, which is where the account's secrets already live.
+- **The grant is keyed by request id and expires.** „The user typed their password recently" would
+  confirm whatever arrived next; five minutes of silence answers `expired`, and the change is
+  refused rather than left armed for as long as the server runs.
+
+### Shipping it: one server, one browser, no Electron
+
+`scripts/package-app.mjs` turns the workspace into `release/` — the launcher, the bundled server, the
+built dashboard, and the two dependencies that cannot be bundled. `.github/workflows/release.yml`
+runs it once per platform when a release is published.
+
+**No Electron, and the reason is the login.** It has to happen in the user's own browser, with their
+password manager's extension and their passkeys; a bundled Chromium would add 150 MB and still not
+be the browser that matters. So the packaged shape is the shape the app already has — a local server
+plus the browser you have — and the archive ships no browser at all.
+
+Four things about it are load-bearing:
+
+- **Bundling is what removes vite-node.** `@protontech/crypto` and the vendored Proton packages ship
+  raw TypeScript, which is why `pnpm serve` needs vite in a checkout. esbuild transpiles them once,
+  at packaging time, and the result is plain JavaScript Node runs by itself. The `openpgp/lightweight`
+  redirect from `vite.config.ts` has to be repeated there, or there is no SRP login.
+- **Two dependencies stay external, for different reasons.** `better-sqlite3-multiple-ciphers` is a
+  native module whose `.node` binary is per platform and per Node version — which is why the workflow
+  is a matrix and not a cross-compile. `playwright` resolves its driver through paths relative to its
+  own package directory, and bundling breaks that.
+- **The server serves the dashboard.** `ServeOptions.webRoot` turns on `static.ts`, so the packaged
+  app is same-origin and the browser is never asked which origins may read one account's mailbox.
+  `static.ts` is where a request path meets the filesystem, and `data/` sits a short way above the
+  web root — `static.test.ts` is the guard, and it asserts one thing: nothing resolves outside the
+  root, ever. The `/ollama` proxy moves across for the same reason vite has one.
+- **`paths.ts` has a third answer now.** It used to walk up for `pnpm-workspace.yaml` and *throw*
+  when there was none, so the first packaged build died on its first line while every test stayed
+  green. A downloaded copy keeps its files beside the launcher, where somebody can see and delete
+  them — not in a hidden directory under the home, which would bury the one thing this tool promises
+  you can remove.
+
+`scripts/smoke/archive.mjs` is what catches that class of failure: it copies `release/` somewhere
+else, starts it with the Node that ships in it, and checks that the page is served, that a fresh
+directory has no account, and that the mailbox answers `423` rather than empty. It never reaches
+Proton — a fresh directory has no session to reach it with.
+
+### The container image, and the one rule it breaks
+
+`Dockerfile` builds an arm64 image for the Raspberry Pi; `.github/workflows/image.yml` pushes it to
+a private registry, where Watchtower picks it up. The **machine** — Docker, Tailscale, routing,
+backups — lives in a separate repository (`homelab`); this one produces an image and nothing else.
+Two deployment paths that both claim to set up a host is exactly the divergence this project argues
+against elsewhere, so there is one.
+
+The build is split across two architectures, and almost nothing needs the target's.
+`package-app.mjs --bundle-only` does everything expensive — installing, compiling, bundling,
+building the dashboard — **natively via `$BUILDPLATFORM`**, producing plain JavaScript. Only the
+install of the two external packages is emulated, and it is a *download*: SQLCipher publishes a
+prebuilt `linux-arm64` binary for this ABI, confirmed on the actual Pi. `--bundle-only` exists
+because running that install on the build machine would put an x64 `.node` beside an arm64 Node,
+and the failure would appear at the first database open rather than at build time. **Node 24 is
+pinned and the major version is load-bearing** for the same reason.
+
+**The image carries a Chromium, and the archives deliberately do not.** That is not a change of
+mind; it is a different machine. An archive ships none because the login belongs in the user's own
+browser, where their password manager's extension is and where a passkey's credential lives. A
+headless server has no such browser and nobody sitting at it, so the choice there is a browser in
+the image or no way to sign in at all. Headless Chromium still runs Proton's anti-abuse script and
+produces a genuine `Payload`; the passkey is what is lost, and it was already lost on a machine with
+no screen.
+
+**Watchtower means whoever can push to that registry runs code on the machine holding the mailbox.**
+Ordinary practice, and still worth writing down here. Two things narrow it and both are cheap: the
+workflow **pushes on a tag and on nothing else**, so an accidental commit to `main` does not roll
+out; and the token is scoped to that one repository behind a protected environment. `workflow_dispatch`
+builds and smoke-tests without publishing — the smoke test asks the image the same four questions
+`scripts/smoke/archive.mjs` asks an archive — literally the same code, from
+`scripts/smoke/checks.mjs`. An image and an archive are two shapes of one promise, and the moment
+that promise is written down twice the two answer differently and nobody notices which.
+
+### Stopping the server, and why starting is somebody else's job
+
+The dashboard can stop its own server (`PowerPanel`), and offer to start it again (`WakeScreen`).
+The second half cannot live here: nothing inside a stopped process can restart it, and **the
+container must never hold the Docker socket** — that socket is root on the host, and giving it to a
+process that parses HTTP and holds a mailbox trades the whole machine for a convenience. So the
+starting is a small program on the host, published under the same name at `/starter` by the
+Tailscale sidecar, which makes it same-origin. **That is why there is no eighth non-GET route.**
+
+`power.tsx` **asks** rather than remembers. A flag in local storage would also distinguish „my
+machine is off" from „there was never a machine here" — the second being somebody with no server
+at all, who must not be offered a button that starts something which does not exist — but asking the host is the
+better answer: it survives cleared site data and it tells a stopped service apart from an absent
+host. The probe checks the *shape* of the reply, because vite serves the application shell for
+unknown paths and a `200` full of HTML read as „not running" would show the button to everyone.
+
+`PMS_STOP_WHEN_LOCKED` lets the process end once the vault is locked and its grace has expired —
+the moment it demonstrably holds nothing. Off by default, and an **environment variable rather than
+a setting in the dashboard**, because it is only safe where a starter exists to bring it back;
+offering it on a laptop would be offering somebody a way to make their dashboard vanish.
+
+### More than one Proton account, and where the wall is
+
+An installation may hold several accounts. It does **not** hold them in one database with a column
+telling them apart, and the reason is that a column is a wall made of correctness: one wrong `WHERE`
+and two mailboxes are one. Each account is a directory with its own `account.json`, its own
+`mailbox.db`, its own Proton session and its own login-attempt record — and each of those is
+encrypted with a key that only that account's password unwraps. Account B is a directory of noise to
+anything that has not been given B's password, this server included.
+
+**The process holds exactly one key at a time**, and that is the whole guarantee. Getting from A to
+B means locking A — dropping the key, closing the database, and dropping the Proton session with it
+— and only then unlocking B. There is no moment at which both are open, so there is no route that
+could read across, and none had to be written to prevent it.
+
+Three details carry it:
+
+- **The session file and the login-attempt record moved under the account.** They were module
+  constants pointing at the data directory, which after a switch would have meant account B reaching
+  Proton with account A's tokens and sharing its lockout. `accountDir()` in `paths.ts` is what one
+  account means, and everything hangs off it.
+- **Nothing is ever moved on disk.** An installation that predates the index keeps its mailbox
+  exactly where it is and is written in as `.`; new accounts go under `accounts/`. A migration that
+  relocates an encrypted database is a migration that can lose one.
+- **The lock screen does not list them.** It asks for a name, because enumerating the accounts tells
+  whoever opened the page which mailboxes live on this machine before they have proven they can open
+  any. Nothing account-shaped is reported either — not the username, not whether it needs a code,
+  not whether it has a passkey — until the name has been given and the password accepted.
+
+A separate process per account would be *stronger*: a bug in this one could in principle open two.
+That was weighed and declined — it would mean a second server, a second port and a second Tailscale
+entry for a wall that the encryption already provides — and it is written down here rather than
+implied, because the difference is real.
+
+There is deliberately **no switch button**. Locking and unlocking as somebody else is the whole
+operation, and it already exists.
+
+### The password is the key, not a door
+
+`@pms/account` is not a login that guards a screen. The mailbox database and the stored Proton
+session are encrypted with a master secret, and the app password is what unwraps it — so somebody
+who copies `data/` and does not have the password has a directory of noise. That is why `pnpm serve`
+opens **nothing** at start-up: it comes up serving `/api/account` and a lock screen, and the
+database is opened when the key arrives.
+
+Four consequences worth knowing before touching any of it:
+
+- **There is no password recovery, and there cannot be one.** A way back would have to keep the key
+  somewhere a password does not protect. The registration screen says so before the password is
+  chosen, which is the only honest place to say it.
+- **A passkey is the key wherever its authenticator can produce one.** WebAuthn returns a signature,
+  not a secret, so a passkey on its own could never unwrap anything — which is why the password was
+  always required as well. The **PRF extension** is the exception: it returns 32 bytes that only that
+  authenticator can produce, and `vault-key.ts` was always shaped to take a second wrapping. Two
+  rules are enforced rather than described: **releasing a passkey for unlocking requires the vault to
+  already be open**, so a passkey cannot enrol itself, and **unlocking with one requires user
+  verification** rather than merely preferring it, because possession alone must not open a mailbox.
+  See `docs/security.md` §6.
+
+  **A passkey is set up where the account is, and registering one releases it in the same act.** Both
+  halves were missing and the consequence was not cosmetic: a passkey was something to find later, in
+  a settings tab, on an account that already worked — and releasing it for unlocking was a second,
+  separate step after that. So nobody performed either, every passkey stayed a second factor, the
+  lock screen offered no passkey button and gave no reason, and a working passkey was
+  indistinguishable from a broken one. The registration form now carries the offer, checked by
+  default, and `enrolPasskey` (`apps/web/src/passkey.ts`) is the one place the ceremony is written —
+  the settings call the same function, because two copies would be two chances for one of them to
+  stop at „registered".
+
+  Neither breaks the rule that a passkey cannot enrol itself: both callers hold an open vault, one
+  because it has just created it. The authenticator is touched twice, once to create and once for
+  the key material, because WebAuthn cannot be asked for both in one gesture — so it is a checkbox
+  rather than a silent act. An authenticator with no PRF stays a second factor, reported as an
+  outcome rather than as an error.
+
+  **The password is not replaced and is not going to be.** It is the way back when the authenticator
+  is not at hand, and it is what `weigh()`'s second confirmation is checked against before a deletion
+  or a change that moves mail — `verifyPassword` is the only other thing in the codebase that depends
+  on it. What changed is that the passkey works from the first minute rather than the second day.
+
+  Registering *opens* the account, so the gate would swap the form for the dashboard the moment the
+  answer lands — mid-ceremony, taking the only place the outcome could be reported with it. Hence
+  `perform(action, { silent: true })`: the answer is kept out of the context until „Weiter" is
+  pressed. A result that differs run to run — it unlocks, or this authenticator cannot be a key — is
+  not something to show for the length of one render.
+
+- **The lock screen leads with the passkey, and assumes nothing about who is looking at it.** Where a
+  passkey can open the account it is the first and widest button and the password sits one quiet
+  click below — never gone, because an authenticator left at home must not be a lock-out. What it
+  must not do is treat whoever loaded the page as the account holder: anybody who can reach the port
+  can reach this screen, so it greets nobody by name until this browser has actually opened the
+  account before (`device.ts`, a flag that holds no secret and grants nothing — forging it buys a
+  friendlier sentence and not one byte of access). Recognition otherwise happens in the
+  authenticator, where it belongs. The API still reports the username for a single-account
+  installation, as it always has; it is the *screen* that stops presuming.
+- **The KDF is slow on purpose.** Argon2id at 64 MiB costs about 1.5 s per derivation, which is what
+  makes a stolen file useless. The KDF is never made cheap for tests; `store/test/encryption.test.ts`
+  pays two real derivations and fits inside vitest's default five seconds, which also makes it the
+  first test to go flaky on a loaded machine. Give it room if it needs room — never the other way
+  round. `docs/security.md` is the full account of the key hierarchy and its parameters.
+- **`register()` adopts an existing passphrase.** An installation that already has a database was
+  encrypted with whatever came from 1Password or a prompt; minting a fresh key at registration would
+  orphan it. `serve-command.ts` asks for the old one once, at the terminal, and only in that case.
+
+**Unlocking can never spend a Proton login.** `resume()` picks up a stored session and refreshes it;
+if there is none it returns a client with none, which refuses every request. `connect()` — the path
+that will log in as a last resort — is not reachable from the dashboard. A password field that could
+cause a login attempt would put `LoginGuard`'s whole reason for existing behind a text box.
+
+The grace period is a deliberate weakening and is described as one: locking keeps the key for a
+configurable while, so closing a tab does not mean reconnecting to Proton a minute later. `0` turns
+it off, and the way back in during it is its own button — „weiter ohne Passwort" — rather than an
+empty password quietly being accepted.
+
+**„Abmelden" in the sidebar does not take it.** It used to, which put the weakening on the button
+people press most and the strong version behind a settings tab — the wrong way round for a word
+that means „I am done here". The grace period is now reached by choosing it: „Sperren" in the
+settings, beside „Sofort sperren", where the two intentions are named next to each other.
+
+### Where the category ids and the category endpoint come from
+
+The ids in `CATEGORY_LABELS` (`packages/grouping/src/group.ts`) are Proton's own `MAILBOX_LABEL_IDS`,
+read out of `@proton/shared` as it ships minified in the desktop client — proton-mail 1.13.3, Debian
+package, binary dated 2026-06-11, read on 2026-09-04:
+
+```sh
+strings /usr/lib/proton-mail/resources/app.asar | grep -o 'CATEGORY_[A-Z]*="[0-9]*"'
+```
+
+Two things there look like mistakes and are not. **There is no 23** — the sequence has a hole, and
+"completing" it would invent a category Proton does not have. And **a category is not a label type**:
+`LABEL_TYPE` runs 1–4 and none of them means category. These are fixed system label ids riding along
+in every message's `LabelIDs`, exactly like the inbox, so reading them costs no endpoint at all.
+
+The endpoint was captured from Proton's own client moving a mail into „Transaktionen" —
+`PUT mail/v4/conversations/label`, body `{LabelID, IDs}`, answered 200 — and then matched against
+`packages/shared/lib/api/messages.ts` in ProtonMail/WebClients, which defines the message-shaped
+sibling `labelMessages` = `PUT mail/v4/messages/label`. **We send the message variant, not the
+conversation variant**, even though the capture shows the conversation one: labelling a conversation
+moves the whole thread, which is more than the user selected. `SpamAction` is omitted — it steers
+Proton's spam handling and has nothing to do with categories.
+
+Two things remain unverified and are stated as unverified on screen: whether the previous category
+falls away by itself (Proton's client sends no `unlabel`, which suggests it does — suggests), and
+whether a category move takes mail out of the inbox. `clearedFromInbox` stays 0 for this change kind
+until the first real run says otherwise.
+
+### The negative finding that explains the „Auto-Regeln" tab
+
+`applications/mail/src/app/components/categoryView/useRecategorizeElement.ts` in WebClients calls
+`applyLocation({type: MOVE, elements, destinationLabelID: categoryId})` and **nothing else**. There
+is no second request, no "apply to future" flag, no field. `mail/v4/settings/mail-category-view` is
+only a global on/off. **Proton's per-sender learning happens server-side and is invisible from
+outside** — no endpoint reads it and none sets it.
+
+That is why „Auto-Regeln" observes instead of managing. It records which category each message
+carried at each sync (`message_categories`, `category_observations`) and infers from repetition, and
+every verdict on that screen is phrased as an observation — *"every time we looked"* — never as a
+rule. The screen names its own blind spots: an incremental sync only fetches new mail, so
+"unchanged" there means **not looked at**; a change may be the user's own, made in Proton's app, and
+the two cannot be told apart.
 
 Related: no write reaches Proton without explicit user confirmation, and every write is preceded by
 a full JSON backup of all filters and folders.
@@ -64,13 +487,38 @@ it stays because the browser is a cost, not a preference.
 Two of our own bugs made it worse before that was understood: the spike re-authenticated on every
 run, and one run sent an empty password because of a prompt bug.
 
+**A session is not finished when its cookie appears.** Proton sets `AUTH-<UID>` on the answer to
+`core/v4/auth` — *before* a second factor. `collectSession` waited for that cookie to exist, so every
+login on an account with a factor returned at once with a session Proton had scoped to almost
+nothing, and the failure surfaced minutes later as `PROTON_API_ERROR`, „HTTP 403 … access token does
+not have sufficient scope", on a mailbox read, on a screen that said nothing about logging in.
+`loginByHandInBrowser` — the path the dashboard uses — did not look at `TwoFactor` at all.
+
+Two signals now say the ceremony finished, watched together so neither has to be the one Proton
+keeps doing: the access cookie is **re-issued** with the upgraded scope, so its value changes, and
+the browser **leaves the login page**. Neither names an endpoint, which is the point — the previous
+attempt watched `core/v4/auth/2fa` and hung on a passkey, because Proton confirms one some other way.
+Watching for a URL is also not an option here: `write-isolation.test.ts` allows exactly one Proton
+address in `browser-auth/src`, so the page test is on the *path*.
+
+Where nothing is pending the cookie really is the whole story, and that path is unchanged — making
+it wait for a change too would hang every login on an account without a second factor.
+
+**The scope is recorded, but only where it is the final word.** After a login with a factor the only
+place a scope is stated is the pre-factor answer, and storing that would be a stale claim behind a
+field name. Where it *is* final, `scopeIsPartial` refuses a session that says it can do nothing —
+which is the case the waiting cannot see: an account with a second **password** reports
+`TwoFactor: 0`, so nothing is pending, and the scope is all that says the session is still shut.
+Unknown is deliberately allowed through: refusing on a scope string nobody promised would cost a
+login, and logins are what this project rations.
+
 Consequences that are now load-bearing:
 
 - **Never log in when a stored session would do.** `apps/spike/src/session.ts` is the order to
   follow: stored session, then refresh, then login. Proton rotates the refresh token on each use, so
   a refreshed session must be written back.
 - **`LoginGuard` refuses attempts during an escalating cooldown**, and after a 2028 it refuses
-  indefinitely — released only by `pnpm spike --sperre-geklaert`, which the owner runs once they
+  indefinitely — released only by `pnpm spike --lockout-cleared`, which the owner runs once they
   have signed in at mail.proton.me and seen the account is reachable. No timer, deliberately: a
   clock would schedule the next blind attempt. Do not weaken it or wrap it in a retry loop.
 - **Diagnose a rejected login offline.** The last one was a missing request, findable in
@@ -88,12 +536,16 @@ packages/browser-auth/  Signing in through a real browser, because the login car
 packages/proton-api/    SRP login, HTTP client, response validation, read endpoints, session store
 packages/rules/         Rule model, the vendored compiler, the local matcher, suggestions, conflicts
 packages/grouping/      Subject templates, grouping, and the triage ranking
-packages/demo/          A synthetic mailbox, so the interface can be built without an account
 packages/llm/           Provider interface, an Ollama adapter, and a deterministic stand-in
 packages/mail-view/     Sanitising a mail body so it is safe to display
-packages/changes/       Diff, undo journal and post-write verification
-apps/spike/             M0 read-only probe against a real account
-apps/web/               The dashboard. Currently runs on demo data only.
+packages/changes/       Diff, the change record, category moves and post-write verification
+packages/store/         The encrypted local database
+packages/sync/          Mirroring Proton into it, and reading it back
+packages/account/       The app's own account: the password that is the key to the local data
+packages/server/        Serving that mirror to the dashboard, and taking offers — loopback only
+packages/apply/         The one path that writes to Proton, behind a second confirmation
+apps/spike/             M0 read-only probe, plus `--sync` and `--serve`; the packaged entry point
+apps/web/               The dashboard. Reads the real mirror, and nothing else.
 ```
 
 The rule engine has three parts that must agree: the **compiler** (vendored, produces what Proton
@@ -108,15 +560,52 @@ pnpm install
 pnpm check-types        # builds vendor declarations, then tsc over everything
 pnpm test               # vitest
 pnpm spike              # the M0 probe — asks for credentials, reads only
-pnpm dev                # the dashboard on demo data, http://localhost:5173
+pnpm sync               # mirror the account into the local encrypted database
+pnpm serve              # serve the mirror on 127.0.0.1:5174, and hold the session for syncs
+                        # and for holding the session; changes are confirmed in the dashboard
+pnpm dev                # the dashboard, http://localhost:5173 (needs `pnpm serve` for a mailbox)
+pnpm package            # build a downloadable copy into release/
+pnpm smoke              # start that copy somewhere else and check it works
+docker build .          # the arm64 image for the Pi — see the container section above
 ```
 
+### The dashboard has one mailbox, and it is yours
+
+**There is no demo mode, and removing it was a bug fix rather than a simplification.** The dashboard
+used to fall back to a synthetic mailbox whenever `/api/mailbox` did not answer `200` — and that
+covered **`423`, the locked vault**. So a running server whose account was merely shut produced a
+complete, plausible dashboard full of invented folders and rules, with no lock screen, no sign-in
+button and nothing on screen that led anywhere. The two states that most needed saying out loud were
+the two the fallback hid.
+
+Every reason the mirror cannot be shown is now a state with a sentence and a way onward:
+`NoServerScreen` („kein Server"), `WakeScreen` (a host answered, the service is stopped), the lock
+screen, and `MailboxProblem` for a vault that locks while the tab is open or a reply that cannot be
+used. None of them renders the dashboard, so nothing below `MailboxProvider` has to ask which
+mailbox it has — there is no `source` field to branch on, and `no-demo.test.ts` checks that no file
+under `apps/web/src` reintroduces one or reaches into the fixtures.
+
+The synthetic mailbox still exists, at `apps/web/test/fixtures/`, and it is deliberately awkward — a
+sender whose mail splits in two, a rule that never fires, one that is always overridden, folders
+shadowing Proton's own — because a tidy fixture makes every screen look good and proves nothing. Its
+location *is* the guarantee: `src/` cannot reach it. Tests hand it to `MailboxScope`, the seam that
+takes a mailbox rather than fetching one, so a screen under test goes through the same `buildMailbox`
+and the same context the account goes through. What that seam cannot exercise — the request, the
+`423`, the refused connection — is `mailbox-source.test.tsx`.
+
 The web app is wired to the real engine, not to mock screens: what it shows is genuinely what the
-matcher, the grouping and the conflict analysis produce from `@pms/demo`. A preview that looks wrong
-on screen is a bug in the logic, not in a fixture someone typed to look convincing. Its demo
-mailbox is deliberately awkward — a sender whose mail splits in two, a rule that never fires, one
-that is always overridden, folders shadowing Proton's own — because a tidy demo makes every screen
-look good and teaches nothing.
+matcher, the grouping and the conflict analysis produce from its input. A preview that looks wrong
+on screen is a bug in the logic, not in a fixture someone typed to look convincing.
+
+**One thing was lost with it, and it is worth knowing.** The demo was the only source of mail
+*bodies*, so `MailViewer` no longer renders one — Proton encrypts bodies end to end and the endpoint
+this dashboard reads carries none, which was already true for every real message. The sanitiser, the
+sandboxed frame and the image notices went with it rather than staying as scaffolding around
+nothing, and `apps/web/e2e/mail-view.e2e.ts` — the only browser-level proof that no tracking pixel
+loaded — went with them. `@pms/mail-view` is untouched and still tested on its own
+(`packages/mail-view/test/sanitize.test.ts`); it is what this screen mounts again on the day a body
+can actually be fetched and decrypted, and that day starts from the sanitiser rather than from an
+innerHTML.
 
 `pnpm spike` must be run by the account owner. **Never ask for credentials and never accept a
 token** — not to test something, not to save a round trip.
@@ -178,6 +667,24 @@ queues them so a burst becomes a sequence. Proton runs this service for its user
 from us for it, and nothing this tool asks is urgent by the second. Only tests may set it to 0. The
 jitter is not decoration: a request exactly every 900 ms is a machine signature.
 
+**The write path, in order.** `apply.ts` does freshness → refuse → confirm → read the before-picture
+→ back up → write (folder before filter) → journal → verify → report, and every position was chosen
+against a specific failure. The journal records what verification *observed*, never what the plan
+intended: undo works from that record, so a journal built from intentions would move back mail that
+never moved. Nothing is rolled back automatically — deleting a folder moves the mail inside it, and
+an error path is the worst place to do that unwatched.
+
+**The record of what was changed.** `journal_entries` in the encrypted local database, written by
+`pnpm serve` after each apply and read back into the snapshot the dashboard already fetches. It
+holds message ids and label ids and nothing else — the diff had subjects and senders and did not
+need to keep them, and what is not stored cannot leak out of a bug report. `moved` is filled from
+what verification *observed*, never from what the plan intended: undo works from that record, so a
+record built from intentions would move back mail that never moved.
+
+A change is named by `describeChange` and by nothing else. There is no `summary` field: there was,
+written by hand at ten call sites, which produced two wordings for one act depending on which screen
+staged it. The diff, the confirmation and the history have to agree, so the name is derived.
+
 **Errors.** Everything user-visible is an `AppError` from `@pms/core/errors` with a code from
 `ERROR_CODES`, a German message, a hint, and structured context. Codes are stable and appear in the
 UI so a report can be grepped back to the throw site. Never put mail content or secrets in context —
@@ -192,12 +699,14 @@ for the vendoring, so do not weaken them to make a refresh pass. If upstream cha
 is a finding to surface, not a test to adjust. `packages/rules/test/sieve-compiler.test.ts` also
 documents a real lossiness: version 1 filters cannot be read back as `starts`/`ends`.
 
-**Displaying mail.** Bodies are hostile input. `@pms/mail-view` sanitises, the viewer renders into
-an `iframe sandbox=""`, and that frame carries a CSP forbidding every outbound request — three
-layers, each written assuming the other two failed. Remote images stay off until the user turns them
-on for one message: a tracking pixel hands the sender the reader's IP and the time they opened it,
-which is exactly what a Proton account exists to withhold. Do not add a global "always load images"
-setting.
+**Displaying mail.** Bodies are hostile input, and **nothing displays one today** — Proton encrypts
+them end to end and the endpoint this dashboard reads carries none, so `MailViewer` shows headers
+and says why. The machinery for the day that changes is `@pms/mail-view`: it sanitises, the viewer
+renders into an `iframe sandbox=""`, and that frame carries a CSP forbidding every outbound request
+— three layers, each written assuming the other two failed. Remote images stay off until the user
+turns them on for one message: a tracking pixel hands the sender the reader's IP and the time they
+opened it, which is exactly what a Proton account exists to withhold. Do not add a global "always
+load images" setting, and do not put a body on screen by any route that skips the sanitiser.
 
 **What the model may decide.** It names and explains. It does not decide what a rule matches. A
 proposal comes back as *criteria*, is validated against the fields Proton can actually filter on,

@@ -1,24 +1,23 @@
-import { useMemo, useState } from 'react';
-
-import { bodyFor } from '@pms/demo';
-import { buildFrameDocument, sanitizeMailHtml } from '@pms/mail-view';
-
+import { useSettings } from '../llm.js';
+import { protonMailUrl } from '../proton-link.js';
 import type { ListableMessage } from './MailList.js';
 
 /**
- * Reading a message.
+ * Reading a message — which today means reading everything *about* it.
  *
- * The body is sanitised, then rendered inside an iframe with `sandbox=""` and a Content-Security-
- * Policy that forbids every outbound request. Three independent layers, because a viewer that gets
- * this wrong does so silently — nothing looks broken when a tracking pixel loads.
+ * **There is no body, and this says so rather than filling the space.** Proton encrypts bodies end
+ * to end; the metadata endpoint this dashboard reads carries none, and nothing is stored locally.
  *
- * Remote images are off. That is not a preference: a one-pixel image tells the sender that the mail
- * was opened, when, and from which IP address, which is precisely the metadata a Proton account
- * exists to withhold. What was blocked and from which hosts is shown before anything is fetched, so
- * turning it on is a decision rather than a shrug.
+ * It used to render one anyway. `bodyFor(subject)` from the demo package was called for *every*
+ * message, so a real advertising mail matched nothing, fell through to a placeholder, and appeared
+ * to have no content and no images — and the check that remote images stay blocked passed against a
+ * body that never existed. A test that passes for the wrong reason is worse than one that fails.
+ * With the demo gone there is no source of bodies at all, so the sanitiser, the sandboxed frame and
+ * the image notices went with it rather than staying as scaffolding around nothing.
  *
- * Links are listed with their real targets, because the sandbox stops them navigating and because a
- * link whose text disagrees with its destination should be visible, not discovered.
+ * `@pms/mail-view` is untouched and still tested on its own. It is what this screen mounts again on
+ * the day a body can actually be fetched and decrypted — and bodies are hostile input, so that day
+ * starts from the sanitiser rather than from an innerHTML.
  */
 export function MailViewer({
     message,
@@ -27,18 +26,7 @@ export function MailViewer({
     message: ListableMessage & { Sender?: { Name?: string }; NumAttachments?: number };
     onClose: () => void;
 }): React.JSX.Element {
-    const [allowImages, setAllowImages] = useState(false);
-    const body = bodyFor(message.Subject);
-
-    const sanitized = useMemo(
-        () => sanitizeMailHtml(body.html, { allowRemoteImages: allowImages }),
-        [body.html, allowImages]
-    );
-
-    const frame = useMemo(
-        () => buildFrameDocument(sanitized.html, allowImages),
-        [sanitized.html, allowImages]
-    );
+    const settings = useSettings();
 
     return (
         <div
@@ -69,97 +57,24 @@ export function MailViewer({
                 </header>
 
                 <div className="viewer-notices">
-                    {sanitized.blockedImageCount > 0 && !allowImages && (
-                        <div className="notice notice-warning">
-                            <strong>
-                                {sanitized.blockedImageCount} externe{' '}
-                                {sanitized.blockedImageCount === 1 ? 'Grafik' : 'Grafiken'} blockiert.
-                            </strong>{' '}
-                            Von {sanitized.blockedImageHosts.join(', ')}. Nachladen verrät dem
-                            Absender, dass und wann du die Mail geöffnet hast — samt deiner
-                            IP-Adresse.
-                            <div style={{ marginTop: 8 }}>
-                                <button
-                                    type="button"
-                                    className="button button-secondary"
-                                    onClick={() => setAllowImages(true)}
-                                >
-                                    Grafiken für diese Mail laden
-                                </button>
-                            </div>
+                    <div className="notice notice-info">
+                        <strong>Kein Inhalt vorhanden.</strong> Proton verschlüsselt den Text einer
+                        Mail Ende zu Ende; über die Schnittstelle, aus der dieses Dashboard liest,
+                        kommt er nicht mit. Angezeigt werden hier deshalb nur Absender, Betreff und
+                        Datum.
+                        <div style={{ marginTop: 8 }}>
+                            <a
+                                className="button button-secondary"
+                                href={protonMailUrl(message, settings.proton)}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                            >
+                                Bei Proton öffnen
+                            </a>
                         </div>
-                    )}
+                    </div>
 
-                    {allowImages && (
-                        <div className="notice notice-danger">
-                            Grafiken werden geladen — von {sanitized.blockedImageHosts.join(', ')}.
-                            Gilt nur für diese Mail und nur jetzt.
-                            <div style={{ marginTop: 8 }}>
-                                <button
-                                    type="button"
-                                    className="button button-secondary"
-                                    onClick={() => setAllowImages(false)}
-                                >
-                                    Wieder blockieren
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {sanitized.removed.elements.length + sanitized.removed.eventHandlers > 0 && (
-                        <div className="notice notice-info">
-                            Aktive Inhalte entfernt:{' '}
-                            {[
-                                ...sanitized.removed.elements.map((tag) => `<${tag}>`),
-                                sanitized.removed.eventHandlers > 0
-                                    ? `${sanitized.removed.eventHandlers} Event-Handler`
-                                    : undefined,
-                                sanitized.removed.unsafeUrls > 0
-                                    ? `${sanitized.removed.unsafeUrls} unsichere Links`
-                                    : undefined,
-                            ]
-                                .filter((entry): entry is string => entry !== undefined)
-                                .join(', ')}
-                            . Die Mail wird dadurch verändert dargestellt — absichtlich.
-                        </div>
-                    )}
                 </div>
-
-                {/*
-                 * sandbox="" grants nothing: no scripts, no forms, no navigation, no same-origin
-                 * access. Combined with the CSP inside the document, a reference the sanitiser
-                 * missed still cannot fetch or execute anything.
-                 */}
-                <iframe
-                    className="viewer-frame"
-                    title={`Inhalt: ${message.Subject}`}
-                    sandbox=""
-                    srcDoc={frame}
-                    referrerPolicy="no-referrer"
-                />
-
-                {sanitized.links.length > 0 && (
-                    <section className="viewer-links">
-                        <h3>Links in dieser Mail</h3>
-                        <p className="faint">
-                            Anklicken ist im Betrachter deaktiviert. Hier steht, wohin sie
-                            tatsächlich führen.
-                        </p>
-                        <ul className="link-list">
-                            {sanitized.links.map((link, index) => (
-                                <li key={`${link.href}-${index}`}>
-                                    <span className="link-text">{link.text}</span>
-                                    <code className={link.misleading ? 'link-target misleading' : 'link-target'}>
-                                        {link.href}
-                                    </code>
-                                    {link.misleading && (
-                                        <span className="badge badge-danger">Ziel weicht ab</span>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-                )}
             </div>
         </div>
     );

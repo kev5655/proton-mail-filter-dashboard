@@ -1,3 +1,4 @@
+import type { CategoryChange, CategoryObservation } from '@pms/grouping';
 import type { Db } from '@pms/store';
 
 /**
@@ -35,6 +36,10 @@ export interface StoredMessage {
     unread: boolean;
     numAttachments: number;
     labelIds: string[];
+    /** Who it was addressed to. Mirrored since the first sync, but read back only now. */
+    recipients: string[];
+    /** Proton's mailbox shows conversations, so this is what a link to the message needs. */
+    conversationId: string | undefined;
 }
 
 export interface StoredFilter {
@@ -160,13 +165,15 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         query.labelId === undefined
             ? db
                   .prepare(
-                      `SELECT id, subject, sender_address, sender_name, time, unread, num_attachments
+                      `SELECT id, subject, sender_address, sender_name, time, unread, num_attachments,
+                              conversation_id
                        FROM messages ORDER BY time DESC LIMIT ? OFFSET ?`
                   )
                   .all(limit, offset)
             : db
                   .prepare(
-                      `SELECT m.id, m.subject, m.sender_address, m.sender_name, m.time, m.unread, m.num_attachments
+                      `SELECT m.id, m.subject, m.sender_address, m.sender_name, m.time, m.unread,
+                              m.num_attachments, m.conversation_id
                        FROM messages m
                        JOIN message_labels ml ON ml.message_id = m.id
                        WHERE ml.label_id = ?
@@ -181,6 +188,7 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         time: number;
         unread: number;
         num_attachments: number;
+        conversation_id: string | null;
     }>;
 
     if (rows.length === 0) {
@@ -204,6 +212,23 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         }
     }
 
+    // Recipients, in the same one-query-for-the-page shape as the labels above. `mirrorMessages`
+    // has been writing this table since the first sync and nothing ever read it back, which is why
+    // a rule filtering on the recipient matched nothing here while working perfectly at Proton.
+    const recipientRows = db
+        .prepare(`SELECT message_id, address FROM recipients WHERE message_id IN (${placeholders})`)
+        .all(...rows.map((row) => row.id)) as Array<{ message_id: string; address: string }>;
+
+    const recipientsByMessage = new Map<string, string[]>();
+    for (const row of recipientRows) {
+        const existing = recipientsByMessage.get(row.message_id);
+        if (existing === undefined) {
+            recipientsByMessage.set(row.message_id, [row.address]);
+        } else {
+            existing.push(row.address);
+        }
+    }
+
     return rows.map((row) => ({
         id: row.id,
         subject: row.subject,
@@ -212,5 +237,91 @@ export function readMessages(db: Db, query: MessageQuery = {}): StoredMessage[] 
         unread: row.unread === 1,
         numAttachments: row.num_attachments,
         labelIds: labelsByMessage.get(row.id) ?? [],
+        recipients: recipientsByMessage.get(row.id) ?? [],
+        conversationId: row.conversation_id ?? undefined,
+    }));
+}
+
+/**
+ * The category history, for the screen that makes Proton's sorting visible.
+ *
+ * Bounded by number of *syncs* rather than by rows or by date: "the last twenty times we looked" is
+ * the unit every verdict on that screen is expressed in, and a row limit would silently truncate a
+ * busy sync into a partial observation — which is worse than not having it, because a partial
+ * observation still looks like a whole one.
+ */
+export function readCategoryObservations(db: Db, sinceSyncs = 20): CategoryObservation[] {
+    const rows = db
+        .prepare(
+            `SELECT sender_address, sender_domain, category_id, observed_at, message_count
+             FROM category_observations
+             WHERE observed_at >= COALESCE(
+                 (SELECT MIN(observed_at) FROM (
+                     SELECT DISTINCT observed_at FROM category_observations
+                     ORDER BY observed_at DESC LIMIT ?
+                 )), 0)
+             ORDER BY observed_at`
+        )
+        .all(sinceSyncs) as Array<{
+        sender_address: string;
+        sender_domain: string;
+        category_id: string;
+        observed_at: number;
+        message_count: number;
+    }>;
+
+    return rows.map((row) => ({
+        senderAddress: row.sender_address,
+        senderDomain: row.sender_domain,
+        categoryId: row.category_id,
+        observedAt: row.observed_at,
+        messageCount: row.message_count,
+    }));
+}
+
+/**
+ * Every time a message changed category, with what it changed from.
+ *
+ * A change is a closed row and an open row on the same message: the old category has a `gone_at`,
+ * and the new one has a `first_seen` at that same moment. Pairing them here rather than storing the
+ * transition means the history stays two plain facts — "it had this, then it did not" — instead of
+ * an interpretation baked in at write time that could not be revised.
+ *
+ * A message that gained its first category has no `from`. That is not a change of Proton's mind, so
+ * it is reported with `fromCategory: undefined` and the screen words it differently.
+ */
+export function readCategoryChanges(db: Db, limit = 200): CategoryChange[] {
+    const rows = db
+        .prepare(
+            `SELECT
+                 fresh.message_id   AS message_id,
+                 m.sender_address   AS sender_address,
+                 old.category_id    AS from_category,
+                 fresh.category_id  AS to_category,
+                 fresh.first_seen   AS observed_at
+             FROM message_categories AS fresh
+             JOIN messages AS m ON m.id = fresh.message_id
+             LEFT JOIN message_categories AS old
+                 ON old.message_id = fresh.message_id
+                AND old.gone_at = fresh.first_seen
+             -- The first observation of a message is not a change; it is the start of the record.
+             WHERE fresh.first_seen > (SELECT MIN(observed_at) FROM category_observations)
+             ORDER BY fresh.first_seen DESC
+             LIMIT ?`
+        )
+        .all(limit) as Array<{
+        message_id: string;
+        sender_address: string;
+        from_category: string | null;
+        to_category: string;
+        observed_at: number;
+    }>;
+
+    return rows.map((row) => ({
+        messageId: row.message_id,
+        senderAddress: row.sender_address,
+        fromCategory: row.from_category ?? undefined,
+        toCategory: row.to_category,
+        observedAt: row.observed_at,
     }));
 }

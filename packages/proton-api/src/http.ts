@@ -23,6 +23,15 @@ export interface ProtonSession {
      * effectively does and costs nothing.
      */
     cookies?: string | undefined;
+    /**
+     * What Proton says this session may do, where the login could establish it.
+     *
+     * Carried so that a session which cannot read anything can be refused before a request is spent
+     * on finding that out. Undefined means „not known" and is never treated as a refusal: a stored
+     * session from before this field existed has none, and neither has one whose login involved a
+     * second factor.
+     */
+    scope?: string | undefined;
 }
 
 export interface ProtonHttpOptions {
@@ -58,7 +67,7 @@ export interface ProtonHttpOptions {
 
 /** Roughly the pace of someone working through their own mailbox. */
 export const DEFAULT_MIN_INTERVAL_MS = 900;
-export const DEFAULT_JITTER_MS = 600;
+const DEFAULT_JITTER_MS = 600;
 
 interface RequestOptions {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -69,6 +78,14 @@ interface RequestOptions {
     anonymous?: boolean;
     /** Extra headers for this one request. Merged last, so it can override the defaults. */
     headers?: Record<string, string>;
+    /**
+     * Look at the successful response before its body is read.
+     *
+     * Only `auth/refresh` needs this, and only for `Set-Cookie`: in cookie mode Proton rotates the
+     * session in the headers, and a caller that reads the body alone keeps sending the cookies it
+     * was given at login until they stop working.
+     */
+    observe?: (response: Response) => void;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -168,6 +185,24 @@ export class ProtonHttp {
     }
 
     async #send(options: RequestOptions): Promise<unknown> {
+        /*
+         * No session, no request — unless the caller said the request is anonymous.
+         *
+         * Clearing the session used to be quieter than it looked: the request still went out, just
+         * without the auth headers, and Proton answered 401. That is a pointless request to a
+         * service this project is deliberately polite to, and it made "signed out" a weaker
+         * statement than it reads as — the client was still talking, just badly.
+         *
+         * Only the first call of the login handshake is genuinely anonymous, and it says so.
+         */
+        if (options.anonymous !== true && this.#session === undefined) {
+            throw new AppError('SESSION_DISCONNECTED', {
+                message: 'Es besteht keine Sitzung zu Proton.',
+                hint: 'Im Dashboard neu verbinden. Es wurde nichts gesendet.',
+                context: { endpoint: `${options.method} ${options.path}` },
+            });
+        }
+
         const url = new URL(`${this.#baseUrl}/${options.path}`);
         for (const [key, value] of Object.entries(options.query ?? {})) {
             if (value !== undefined) {
@@ -224,6 +259,7 @@ export class ProtonHttp {
             }
 
             log.debug({ endpoint, status: response.status, attempt }, 'proton request ok');
+            options.observe?.(response);
             return (await response.json()) as unknown;
         }
 

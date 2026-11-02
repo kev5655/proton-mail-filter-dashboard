@@ -1,9 +1,12 @@
 import { useState } from 'react';
 
-import type { DemoFolder } from '@pms/demo';
+import type { MailboxFolder } from '@pms/server/types';
 
-import { messageCountIn, rulesTargeting } from '../data.js';
+import { FolderRenameDialog } from '../components/FolderRenameDialog.js';
+import { PencilIcon, TrashIcon } from '../components/icons.js';
+import { SwipeToDelete } from '../components/SwipeToDelete.js';
 import { log } from '../log.js';
+import { useMailbox } from '../mailbox.js';
 import { useAppState } from '../state.js';
 import { useStore } from '../store.js';
 
@@ -20,7 +23,7 @@ export function FoldersPage(): React.JSX.Element {
 
     const shadowFolders = folders.filter((folder) => folder.shadowsSystemFolder !== undefined);
     const roots = folders.filter((folder) => folder.ParentID === null);
-    const childrenOf = (id: string): DemoFolder[] => folders.filter((folder) => folder.ParentID === id);
+    const childrenOf = (id: string): MailboxFolder[] => folders.filter((folder) => folder.ParentID === id);
 
     return (
         <>
@@ -70,7 +73,6 @@ export function FoldersPage(): React.JSX.Element {
                             stage({
                                 id: `create-folder-${newName}`,
                                 kind: 'create-folder',
-                                summary: `Ordner „${newName.trim()}" anlegen`,
                                 folder: {
                                     name: newName.trim(),
                                     parent: newParent === '' ? undefined : newParent,
@@ -103,35 +105,85 @@ function FolderNode({
     childrenOf,
     highlight,
 }: {
-    folder: DemoFolder;
-    childrenOf: (id: string) => DemoFolder[];
+    folder: MailboxFolder;
+    childrenOf: (id: string) => MailboxFolder[];
     highlight: string | undefined;
 }): React.JSX.Element {
+    const { messageCountIn, rulesTargeting } = useMailbox();
     const { goTo } = useAppState();
     const { stage } = useStore();
     const children = childrenOf(folder.ID);
     const count = messageCountIn(folder.Name);
     const referencing = rulesTargeting(folder.Name);
     const isHighlighted = highlight === folder.Name || highlight?.endsWith(`/${folder.Name}`) === true;
+    const [renaming, setRenaming] = useState(false);
+
+    /*
+     * Staging a deletion, from the button and from the gesture alike.
+     *
+     * One function rather than two call sites, so there is no way for the swipe to acquire a
+     * shorter route than the button has. It stages: the diff and the confirmation follow.
+     */
+    const stageDelete = (): void => {
+        log('warn', 'folder.stage-delete', {
+            rules: referencing.length,
+            mails: count,
+        });
+        stage({
+            id: `delete-${folder.ID}`,
+            kind: 'delete-folder',
+            folder: { name: folder.Name },
+        });
+    };
 
     return (
         <li>
-            <div className={isHighlighted ? 'folder-row highlighted' : 'folder-row'}>
-                <span className="folder-name">{folder.Name}</span>
+            <SwipeToDelete label="Löschen" onTrigger={stageDelete}>
+                <div className={isHighlighted ? 'folder-row highlighted' : 'folder-row'}>
+                    <span className="folder-name">{folder.Name}</span>
 
-                {folder.shadowsSystemFolder !== undefined && (
-                    <span className="badge badge-warning">doppelt „{folder.shadowsSystemFolder}"</span>
-                )}
-                {count > 0 && <span className="nav-count">{count} Mails</span>}
+                    {folder.shadowsSystemFolder !== undefined && (
+                        <span className="badge badge-warning">doppelt „{folder.shadowsSystemFolder}"</span>
+                    )}
+                    {count > 0 && <span className="nav-count">{count} Mails</span>}
 
-                <button
-                    type="button"
-                    className="button button-quiet"
-                    onClick={() => {
-                        const next = window.prompt(`„${folder.Name}" umbenennen in:`, folder.Name);
-                        if (next === null || next.trim() === '' || next === folder.Name) {
-                            return;
-                        }
+                    {/*
+                     * Icon and label both. The label is hidden below the phone breakpoint, where
+                     * two words per button took more width than the folder name they sat beside —
+                     * and the name is what the screen is for. `aria-label` carries it either way,
+                     * so nothing is lost to anybody reading by ear.
+                     */}
+                    <button
+                        type="button"
+                        className="button button-quiet icon-button"
+                        aria-label={`„${folder.Name}" umbenennen`}
+                        onClick={() => {
+                            setRenaming(true);
+                        }}
+                    >
+                        <PencilIcon />
+                        <span className="button-label">Umbenennen</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="button button-danger-quiet icon-button"
+                        aria-label={`„${folder.Name}" löschen`}
+                        onClick={stageDelete}
+                    >
+                        <TrashIcon />
+                        <span className="button-label">Löschen</span>
+                    </button>
+                </div>
+            </SwipeToDelete>
+
+            {renaming && (
+                <FolderRenameDialog
+                    folder={folder}
+                    onClose={() => {
+                        setRenaming(false);
+                    }}
+                    onRename={(nextName) => {
+                        setRenaming(false);
                         log('info', 'folder.stage-rename', { rules: referencing.length });
                         // Renaming rewrites every rule that points at the folder. Leaving them
                         // behind would be silent breakage: the rule keeps running and files into a
@@ -139,35 +191,11 @@ function FolderNode({
                         stage({
                             id: `rename-${folder.ID}`,
                             kind: 'rename-folder',
-                            summary: `Ordner „${folder.Name}" in „${next.trim()}" umbenennen`,
-                            folder: { name: folder.Name, newName: next.trim() },
+                            folder: { name: folder.Name, newName: nextName },
                         });
                     }}
-                >
-                    Umbenennen
-                </button>
-                <button
-                    type="button"
-                    className="button button-quiet"
-                    onClick={() => {
-                        log('warn', 'folder.stage-delete', {
-                            rules: referencing.length,
-                            mails: count,
-                        });
-                        stage({
-                            id: `delete-${folder.ID}`,
-                            kind: 'delete-folder',
-                            summary:
-                                referencing.length > 0
-                                    ? `Ordner „${folder.Name}" löschen — ${referencing.length} Regel(n) zeigen darauf`
-                                    : `Ordner „${folder.Name}" löschen`,
-                            folder: { name: folder.Name },
-                        });
-                    }}
-                >
-                    Löschen
-                </button>
-            </div>
+                />
+            )}
 
             {/*
              * The rules pointing here, named and clickable. A folder is only safe to delete or

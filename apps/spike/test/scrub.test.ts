@@ -209,3 +209,55 @@ describe('a Sieve script is a document, not a value', () => {
         expect(new Set(names).size).toBe(4);
     });
 });
+
+/**
+ * Label ids, which are Proton's, and message ids, which are not.
+ *
+ * These two live next to each other in every move request, look nothing alike, and had opposite
+ * bugs. `"26"` — Proton's Transaktionen category — was being hashed along with everything else, so
+ * no recorded fixture could ever answer what the category ids are; that question ended up being
+ * settled by reading strings out of Proton's desktop bundle instead. Message ids, meanwhile, were
+ * pseudonymised only because they happen not to appear in Proton's vocabulary, which is not a
+ * guarantee, it is a coincidence that held.
+ */
+describe('a move request, which carries both kinds of id', () => {
+    const CONVERSATION = 'AbCdEfGhIjKlMnOpQrStUvWx';
+
+    it('keeps the label id, because it is Protons and it is the answer', () => {
+        const result = scrub({ LabelID: '26', IDs: [CONVERSATION] }, undefined) as {
+            LabelID: string;
+            IDs: string[];
+        };
+
+        expect(result.LabelID).toBe('26');
+    });
+
+    it('replaces the message id, which names one mail in one mailbox', () => {
+        const result = scrub({ LabelID: '26', IDs: [CONVERSATION] }, undefined) as {
+            LabelID: string;
+            IDs: string[];
+        };
+
+        expect(result.IDs[0]).not.toBe(CONVERSATION);
+        expect(result.IDs[0]).toMatch(/^s:[0-9a-f]{8}$/);
+    });
+
+    it('does not let an account’s own folder id through the same door', () => {
+        // The exception is safe by construction: a folder this account owns has a 24-character
+        // base64 id, never one or two digits. This is that claim, checked rather than asserted.
+        const result = scrub({ LabelID: CONVERSATION }, undefined) as { LabelID: string };
+
+        expect(result.LabelID).toMatch(/^s:[0-9a-f]{8}$/);
+    });
+
+    it('keeps digits only where a label id belongs', () => {
+        // The same string under a key that holds user content is still user content.
+        const result = scrub({ Subject: '26', LabelIDs: ['0', '26'] }, undefined) as {
+            Subject: string;
+            LabelIDs: string[];
+        };
+
+        expect(result.LabelIDs).toEqual(['0', '26']);
+        expect(result.Subject).not.toBe('26');
+    });
+});

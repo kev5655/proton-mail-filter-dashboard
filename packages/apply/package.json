@@ -1,0 +1,18 @@
+{
+  "name": "@pms/apply",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./request": "./src/request.ts"
+  },
+  "dependencies": {
+    "@pms/changes": "workspace:*",
+    "@pms/core": "workspace:*",
+    "@pms/grouping": "workspace:*",
+    "@pms/proton-api": "workspace:*",
+    "@proton/sieve": "workspace:*"
+  }
+}

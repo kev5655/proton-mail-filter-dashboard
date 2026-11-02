@@ -1,0 +1,101 @@
+name: Image
+
+# The container image the Raspberry Pi runs, pushed to a private Docker Hub repository where
+# Watchtower picks it up.
+#
+# **It pushes on a tag and on nothing else, and that is a security decision rather than a taste in
+# release process.** Watchtower pulls and restarts unattended, so whatever lands in that repository
+# runs on the machine that holds the mailbox. Building on every commit to `main` would mean an
+# accidental push rolls out there without anybody deciding it should. Building is free; publishing
+# is the part that needs a person.
+#
+# `workflow_dispatch` therefore builds and verifies without publishing — the way to try a change
+# without shipping it.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'kev5655/proton-mail-sorter' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # A protected environment on the publishing job, so the token that can write to that repository
+    # is not simply available to any workflow run.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'dockerhub' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 is emulated here, and it is cheap because almost nothing runs under it: the Dockerfile
+      # does its compiling and bundling natively via $BUILDPLATFORM, leaving the emulated stage with
+      # a dependency install that downloads a prebuilt binary rather than building one.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Built first and loaded locally, so the smoke test below runs against the exact image that
+      # is about to be published rather than against a second build of the same source.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/image.tar
+
+      # The same four questions `scripts/smoke/archive.mjs` asks a downloaded archive — asked by
+      # the same code, not by a second copy of it in YAML. A contract that exists twice drifts, and
+      # the copy in a workflow is the one nobody runs before pushing.
+      - name: Smoke test the image
+        run: |
+          set -eu
+          docker load -i /tmp/image.tar
+          PMS_IMAGE="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -1)" \
+          PMS_IMAGE_PLATFORM=linux/arm64 \
+            node scripts/smoke/image.mjs --no-build
+        # It asks from inside the container, not through a published port: the server binds
+        # loopback, and `docker run -p` forwards to the container's interface rather than to that.
+        # Verified natively on the Pi before this workflow ever ran.
+
+      - name: Push
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

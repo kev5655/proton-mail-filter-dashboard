@@ -67,12 +67,21 @@ function fakeBrowser(
         revealedBy?: RegExp;
         /** The submit button disappears once this many clicks have landed. */
         submitVanishesAfter?: number;
+        /**
+         * The access cookie is re-issued after this many reads of the jar, as Proton does once a
+         * second factor has been answered. Absent means it never changes — the window was left
+         * sitting on the login screen.
+         */
+        upgradeAfter?: number;
+        /** The path the browser is on. `/login` until something says otherwise. */
+        url?: string;
     } = {}
 ): {
     launch: () => Promise<never>;
     page: FakePage;
 } {
     const page: FakePage = { handlers: [], filled: {}, clicked: [] };
+    let jarReads = 0;
     const body =
         options.body ?? { ...SESSION_BODY, ...(options.twoFactor === undefined ? {} : { TwoFactor: options.twoFactor }) };
 
@@ -86,6 +95,28 @@ function fakeBrowser(
     };
 
     const hidden = new Set(options.hidden ?? []);
+
+    /**
+     * The control that switches the second-factor screen to the code field.
+     *
+     * Only `revealedBy` exists; everything else counts zero. `role` is ignored on purpose — the
+     * test says *what* is on the page, and which of button/link/text finds it is exactly the part
+     * the code is allowed to change without the test being rewritten.
+     */
+    const switchLocator = (
+        role: string,
+        pattern: RegExp
+    ): { count: () => Promise<number>; first: () => { click: () => Promise<void> } } => {
+        const present = options.revealedBy?.source === pattern.source;
+        const click = async (): Promise<void> => {
+            page.clicked.push(`${role}:${pattern.source}`);
+            hidden.clear();
+        };
+        return {
+            count: async () => (present ? 1 : 0),
+            first: () => ({ click }),
+        };
+    };
 
     const fakePage = {
         setDefaultTimeout: () => {},
@@ -111,16 +142,13 @@ function fakeBrowser(
                 },
             }),
         }),
-        getByRole: (_role: string, query: { name: RegExp }) => ({
-            first: () => ({
-                count: async () => (options.revealedBy?.source === query.name.source ? 1 : 0),
-                click: async () => {
-                    page.clicked.push(query.name.source);
-                    hidden.clear();
-                },
-            }),
-        }),
+        // Shaped like a Playwright locator: `count()` and `click()` both hang off it, and `first()`
+        // returns another locator rather than a different kind of thing. The code under test calls
+        // them in that order, and a fake that only offered `first()` let a wrong call sequence pass.
+        getByRole: (role: string, query: { name: RegExp }) => switchLocator(role, query.name),
+        getByText: (pattern: RegExp) => switchLocator('text', pattern),
         on: (_event: string, handler: (response: unknown) => void) => page.handlers.push(handler),
+        url: () => `https://account.proton.me${options.url ?? '/login'}`,
         goto: async () => {},
         fill: async (selector: string, value: string) => {
             if (selector === options.missing) {
@@ -134,7 +162,17 @@ function fakeBrowser(
         newContext: async () => ({
             pages: () => [],
             newPage: async () => fakePage,
-            cookies: async () => options.cookies ?? COOKIE_JAR,
+            cookies: async () => {
+                jarReads++;
+                const jar = options.cookies ?? COOKIE_JAR;
+                if (options.upgradeAfter === undefined || jarReads <= options.upgradeAfter) {
+                    return jar;
+                }
+                // What Proton does once the factor is answered: a new access token, same session.
+                return jar.map((cookie) =>
+                    cookie.name === 'AUTH-uid-1' ? { ...cookie, value: 'access-full' } : cookie
+                );
+            },
             close: async () => {},
         }),
         close: async () => {},
@@ -216,7 +254,7 @@ describe('signing in through a browser', () => {
         await loginWithBrowser({
             ...baseOptions,
             promptTotp,
-            launch: fakeBrowser({ twoFactor: 1 }).launch,
+            launch: fakeBrowser({ twoFactor: 1, upgradeAfter: 1 }).launch,
         });
         expect(promptTotp).toHaveBeenCalledTimes(1);
     });
@@ -229,11 +267,17 @@ describe('signing in through a browser', () => {
             twoFactor: 1,
             hidden: [...TOTP_SELECTORS],
             revealedBy: switcher,
+            // The factor is answered here, so the session is upgraded — otherwise this test would
+            // be asserting the switch on a login that never finished.
+            upgradeAfter: 1,
         });
 
         await loginWithBrowser({ ...baseOptions, headless: false, launch });
 
-        expect(page.clicked).toContain(switcher.source);
+        // By its wording, not by the role it was found under: the control is a button today and
+        // has already been something else once, and pinning the role here would turn a working
+        // fallback into a failing test.
+        expect(page.clicked.some((entry) => entry.endsWith(switcher.source))).toBe(true);
         // Whichever candidate matched first — the point is that a code reached a code field.
         expect(Object.values(page.filled)).toContain('123456');
     });
@@ -241,7 +285,7 @@ describe('signing in through a browser', () => {
     it('waits for a person to switch it when no control matches', async () => {
         // Every guess about Proton's markup so far has been wrong. With a visible window the
         // fallback is a person, and that is allowed to be the plan rather than an error.
-        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [] });
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [], upgradeAfter: 1 });
 
         await expect(
             loginWithBrowser({ ...baseOptions, headless: false, launch })
@@ -249,7 +293,7 @@ describe('signing in through a browser', () => {
     });
 
     it('says so when the code field cannot be reached without a window', async () => {
-        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS] });
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS], upgradeAfter: 1 });
 
         const error = await captureError(
             loginWithBrowser({ ...baseOptions, headless: true, launch })
@@ -262,7 +306,7 @@ describe('signing in through a browser', () => {
     it('reports what the page offers when no candidate matches', async () => {
         // Each round of this has cost a login attempt to learn one fact about Proton's markup.
         // The failure has to carry the answer, or the next round costs another.
-        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS] });
+        const { launch } = fakeBrowser({ twoFactor: 1, hidden: [...TOTP_SELECTORS], upgradeAfter: 1 });
 
         const error = await captureError(
             loginWithBrowser({ ...baseOptions, headless: false, timeoutMs: 50, launch })
@@ -277,7 +321,7 @@ describe('signing in through a browser', () => {
     it('does not fail when the code field submitted itself', async () => {
         // A six-digit field usually submits on the sixth digit, so by the time the button is
         // pressed there is no button. That is the form having worked, not a broken page.
-        const { launch } = fakeBrowser({ twoFactor: 1, submitVanishesAfter: 1 });
+        const { launch } = fakeBrowser({ twoFactor: 1, submitVanishesAfter: 1, upgradeAfter: 1 });
 
         await expect(
             loginWithBrowser({ ...baseOptions, headless: false, launch })
@@ -336,5 +380,80 @@ describe('signing in through a browser', () => {
         );
 
         expect(JSON.stringify(error.toJSON())).not.toContain(PASSWORD);
+    });
+});
+
+/**
+ * The bug that cost Kevin a sync, and the two signals that replace the one that was wrong.
+ *
+ * Proton sets `AUTH-<UID>` on the answer to `core/v4/auth` — *before* a second factor. Waiting for
+ * that cookie to exist therefore returned immediately with a session whose scope was still partial,
+ * and the failure surfaced minutes later as „HTTP 403, access token does not have sufficient scope"
+ * on a mailbox read, on a screen that said nothing about logging in.
+ *
+ * So with a factor pending the cookie's presence proves nothing, and the login is over when the
+ * access cookie is re-issued or the browser leaves the login page. Both are checked here, and so is
+ * the case where neither happens: that must fail, and it must fail saying which.
+ */
+describe('a login with a second factor', () => {
+    it('waits for the upgraded session rather than the first cookie', async () => {
+        const fake = fakeBrowser({ twoFactor: 1, upgradeAfter: 1 });
+
+        const result = await loginWithBrowser({ ...baseOptions, launch: fake.launch });
+
+        // `access-1` is the token from before the factor — the one that cannot read a label.
+        expect(result.session.accessToken).toBe('access-full');
+    });
+
+    it('accepts the session once the browser has left the login page', async () => {
+        // The other signal, for the day Proton stops re-issuing the cookie. Without it, a login
+        // that really did finish would sit here until the timeout and cost an attempt.
+        const fake = fakeBrowser({ twoFactor: 1, url: '/u/0/inbox' });
+
+        const result = await loginWithBrowser({ ...baseOptions, launch: fake.launch });
+
+        expect(result.session.accessToken).toBe('access-1');
+    });
+
+    it('refuses the partial session, and says the factor was not confirmed', async () => {
+        // Neither signal: the window was left on the login screen. Taking the cookie here is what
+        // produced the 403 — so it has to be a refusal, and one that names the real cause.
+        const fake = fakeBrowser({ twoFactor: 1 });
+
+        const error = await captureError(loginWithBrowser({ ...baseOptions, launch: fake.launch }));
+
+        expect(error.code).toBe('BROWSER_LOGIN_UNFINISHED');
+        expect(error.message).toContain('zweite Faktor');
+        expect(JSON.stringify(error)).not.toContain(PASSWORD);
+    });
+});
+
+describe('a login with nothing pending', () => {
+    it('takes the cookie as soon as it is there', async () => {
+        // Unchanged, and deliberately so: with no factor to come, that cookie *is* the session.
+        // Making this wait for a change too would hang every login on an account without 2FA.
+        const fake = fakeBrowser();
+
+        const result = await loginWithBrowser({ ...baseOptions, launch: fake.launch });
+
+        expect(result.session.accessToken).toBe('access-1');
+    });
+
+    it('records the scope, because there it is the final word', async () => {
+        const fake = fakeBrowser();
+
+        const result = await loginWithBrowser({ ...baseOptions, launch: fake.launch });
+
+        expect(result.session.scope).toBe('full');
+    });
+
+    it('records no scope where a factor was pending, rather than the pre-factor one', async () => {
+        // „locked" was true before the factor and false after it. Storing it would put a stale
+        // claim behind a field name, and the guard that reads it would refuse a working session.
+        const fake = fakeBrowser({ twoFactor: 1, upgradeAfter: 1, body: { ...SESSION_BODY, Scope: 'locked', TwoFactor: 1 } });
+
+        const result = await loginWithBrowser({ ...baseOptions, launch: fake.launch });
+
+        expect(result.session.scope).toBeUndefined();
     });
 });

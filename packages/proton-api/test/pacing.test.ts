@@ -55,6 +55,9 @@ function client(overrides: Partial<ConstructorParameters<typeof ProtonHttp>[0]> 
         }) as typeof fetch,
         ...overrides,
     });
+    // A client with no session refuses anything that is not the login handshake, so a test
+    // about pacing has to have one.
+    http.setSession({ uid: 'u', accessToken: 'a', refreshToken: 'r' });
 
     return { http, startedAt, clock };
 }
@@ -93,6 +96,9 @@ describe('going easy on Protons API', () => {
                 });
             }) as typeof fetch,
         });
+        // A client with no session refuses anything that is not the login handshake, so a test
+        // about pacing has to have one.
+        http.setSession({ uid: 'u', accessToken: 'a', refreshToken: 'r' });
 
         const began = Date.now();
         await Promise.all(Array.from({ length: 5 }, async () => http.request(get, schema)));
@@ -131,6 +137,9 @@ describe('going easy on Protons API', () => {
                 return new Response('{}', { status: 500 });
             }) as typeof fetch,
         });
+        // A client with no session refuses anything that is not the login handshake, so a test
+        // about pacing has to have one.
+        http.setSession({ uid: 'u', accessToken: 'a', refreshToken: 'r' });
 
         await http.request(get, schema).catch(() => undefined);
 

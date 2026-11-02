@@ -8,7 +8,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@pms/changes": "workspace:*",
     "@pms/core": "workspace:*",
+    "@pms/grouping": "workspace:*",
     "@pms/proton-api": "workspace:*",
     "@pms/store": "workspace:*"
   }

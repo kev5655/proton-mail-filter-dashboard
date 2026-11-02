@@ -3,7 +3,6 @@ export {
     applyFiltersToExisting,
     createFilter,
     deleteFilter,
-    reorderFilters,
     setFilterEnabled,
     updateFilter,
     type FilterPayload,
